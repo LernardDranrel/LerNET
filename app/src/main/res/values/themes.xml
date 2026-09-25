@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.LerNet" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@color/lernet_black</item>
+        <item name="android:navigationBarColor">@color/lernet_black</item>
+        <item name="android:windowBackground">@color/lernet_black</item>
+    </style>
+</resources>

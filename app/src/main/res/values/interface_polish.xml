@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="home_mode_selected">Выбрано</string>
+    <string name="home_mode_whole_device">Всё устройство</string>
+    <string name="home_mode_app_only">По настройке приложения</string>
+    <string name="home_hop_server">Сервер</string>
+    <string name="home_hop_scroll_hint">Проведите по схеме, чтобы увидеть остальные узлы →</string>
+    <string name="settings_defaults_scope">Используются, если профиль не задаёт своё значение. Изменения MTU, XMUX и адреса DNS вступят в силу при следующем подключении.</string>
+    <string name="settings_dns_section">DNS · адреса сайтов</string>
+    <string name="settings_dns_explained">DNS переводит имя сайта в IP-адрес. «DNS исходной сети» отправляет запросы напрямую выбранному DNS-серверу; «DNS из профиля» использует серверы и правила профиля.</string>
+    <string name="settings_dns_multiple_help">В этом поле поддерживается один IPv4-адрес. Несколько DNS можно задать в JSON профиля вместе с правилами выбора и включить «DNS из профиля». Список адресов через запятую здесь не применяется.</string>
+    <string name="settings_xmux_explained">XMUX позволяет нескольким потокам использовать одно XHTTP-соединение. Два числа — нижняя и верхняя границы лимита одновременных потоков. При 16–16 лимит всегда равен 16.</string>
+    <string name="settings_xmux_lower">Нижняя граница</string>
+    <string name="settings_xmux_upper">Верхняя граница</string>
+    <string name="settings_xmux_choose">Выбрать диапазон</string>
+    <string name="settings_xmux_tuning">Начните с 16–16. Меньший лимит создаёт больше отдельных соединений; больший позволяет делить соединение большему числу потоков. При зависаниях сравните 8–8 и 16–16 на одной сети. Универсального лучшего значения нет.</string>
+    <string name="settings_mtu_title">MTU · размер пакета</string>
+    <string name="settings_mtu_range">1280–9000 байт · по умолчанию 1500</string>
+    <string name="settings_mtu_tuning">Если соединение есть, но страницы или загрузки зависают, сравните 1500 и 1400; при необходимости попробуйте 1280. После изменения переподключитесь и повторите ту же загрузку. Выберите наибольшее значение, при котором ваша сеть работает стабильно.</string>
+    <string name="settings_bytes">байт</string>
+    <string name="settings_megabytes">МБ</string>
+    <string name="settings_journal_limit">Лимит журнала</string>
+    <string name="settings_attempts_help">Сколько раз пробовать восстановить связь после сбоя.</string>
+    <string name="settings_watchdog_help">Сколько ждать ответа при проверке соединения, прежде чем считать его неработающим.</string>
+    <string name="settings_backoff_help">Максимальная пауза между повторными попытками подключения.</string>
+</resources>

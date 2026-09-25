@@ -1,0 +1,902 @@
+package app.lernet.desktop
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogWindow
+import androidx.compose.ui.window.rememberDialogState
+import java.util.UUID
+import app.lernet.routing.RouteLayoutNode
+import app.lernet.routing.RouteTreeLayout
+import app.lernet.routing.ConditionBlock
+import app.lernet.routing.ConditionCodec
+import app.lernet.routing.ConditionKind
+import app.lernet.routing.MatchJoin
+import app.lernet.routing.PatternSign
+import app.lernet.routing.RuleConditions
+import app.lernet.routing.RuleMatch
+import app.lernet.ui.routes.CountryCatalog
+import app.lernet.ui.routes.CountryNames
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
+
+private val routeBackground = Color(0xFF101724)
+private val routeBorder = Color(0xFF3B4961)
+private val routeText = Color(0xFFF5F7FB)
+private val routeMuted = Color(0xFFA1AEC4)
+private val routeBlue = Color(0xFF91ABFF)
+private val routeGreen = Color(0xFF80DEBE)
+private val routeRed = Color(0xFFFFB4AB)
+private val routeCard = Color(0xFF151D2B)
+
+private enum class RouteView { SCHEME, LIST }
+
+@Composable
+fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOwnerId: String? = null) {
+    val profile = saved.profiles.firstOrNull { it.id == saved.selectedProfileId }
+    val owners = saved.groups.map { "grp_${it.id}" to "Папка: ${it.name}" } +
+        saved.profiles.map { it.id to "Профиль: ${it.name}" }
+    var ownerId by remember(preferredOwnerId, saved.selectedProfileId) {
+        mutableStateOf(preferredOwnerId?.takeIf { id -> owners.any { it.first == id } }
+            ?: profile?.groupId?.let { "grp_$it" } ?: profile?.id ?: owners.firstOrNull()?.first)
+    }
+    if (ownerId == null) {
+        RouteEmpty("Сначала выберите профиль", "Правила принадлежат конкретному профилю и применяются при следующем подключении.")
+        return
+    }
+    val activeOwner = ownerId!!
+    val ownerProfile = saved.profiles.firstOrNull { it.id == activeOwner }
+    val ownerGroup = ownerProfile?.groupId?.let { id -> saved.groups.firstOrNull { it.id == id } }
+    val rules = saved.rules.filter { it.profileId == activeOwner }
+    var view by remember(activeOwner) { mutableStateOf(RouteView.SCHEME) }
+    var selectedId by remember(activeOwner) { mutableStateOf<String?>(null) }
+    var editing by remember(activeOwner) { mutableStateOf<StoredRule?>(null) }
+    var deleting by remember(activeOwner) { mutableStateOf<StoredRule?>(null) }
+    var ownerMenu by remember { mutableStateOf(false) }
+    val selected = rules.firstOrNull { it.id == selectedId }
+    val previewProfileId = if (activeOwner.startsWith("grp_"))
+        saved.profiles.firstOrNull { it.groupId == activeOwner.removePrefix("grp_") }?.id else activeOwner
+    val preview = remember(rules, previewProfileId, saved.mode, saved.defaultDnsPolicy, saved.tunMtu, saved.xmuxConcurrency, saved.directDnsServer) {
+        previewProfileId?.let { runCatching { controller.preview(it) }.getOrNull() }
+    }
+
+    val pageFocus = remember(activeOwner) { FocusRequester() }
+    LaunchedEffect(activeOwner, view) { pageFocus.requestFocus() }
+    Column(Modifier.fillMaxSize().focusRequester(pageFocus).focusable().onPreviewKeyEvent { event ->
+        if (event.type == KeyEventType.KeyDown && event.key in setOf(Key.Delete, Key.Backspace) &&
+            editing == null && deleting == null && selected != null) {
+            deleting = selected
+            true
+        } else false
+    }) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.weight(1f)) {
+                Text("ЧЬИ МАРШРУТЫ РЕДАКТИРУЕМ", color = routeMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Box {
+                    OutlinedButton(onClick = { ownerMenu = true }) {
+                        Text((owners.firstOrNull { it.first == activeOwner }?.second ?: activeOwner) + "  ▾", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    DropdownMenu(ownerMenu, onDismissRequest = { ownerMenu = false }) {
+                        saved.groups.forEach { group ->
+                            DropdownMenuItem(text = { Text("▣  ${group.name}", fontWeight = FontWeight.SemiBold) },
+                                onClick = { ownerId = "grp_${group.id}"; ownerMenu = false })
+                            saved.profiles.filter { it.groupId == group.id }.forEach { child ->
+                                DropdownMenuItem(text = {
+                                    Column(Modifier.padding(start = 22.dp)) {
+                                        Text("└  ${child.name}")
+                                        Text("Действует маршрут папки", color = routeMuted, fontSize = 11.sp)
+                                    }
+                                }, onClick = { ownerId = child.id; ownerMenu = false })
+                            }
+                        }
+                        if (saved.groups.isNotEmpty() && saved.profiles.any { it.groupId == null })
+                            HorizontalDivider(color = routeBorder)
+                        saved.profiles.filter { it.groupId == null }.forEach { ungrouped ->
+                            DropdownMenuItem(text = { Text("▢  ${ungrouped.name}") },
+                                onClick = { ownerId = ungrouped.id; ownerMenu = false })
+                        }
+                    }
+                }
+                Text("Маршруты · ${rules.size} правил · изменения применятся при следующем подключении", color = routeMuted, fontSize = 12.sp)
+            }
+            FilterChip(view == RouteView.SCHEME, onClick = { view = RouteView.SCHEME }, label = { Text("Схема") })
+            FilterChip(view == RouteView.LIST, onClick = { view = RouteView.LIST }, label = { Text("Список") })
+            Spacer(Modifier.width(6.dp))
+            Button(onClick = { editing = newRule(activeOwner, null, rules) }) { Text("+ Правило") }
+        }
+        Spacer(Modifier.height(10.dp))
+        if (ownerGroup != null) {
+            Surface(color = Color(0xFF302B1D), shape = RoundedCornerShape(10.dp)) {
+                Text("Профиль находится в папке «${ownerGroup.name}». Сейчас для него действует маршрут папки. Эти правила профиля сохранятся, но начнут работать только после переноса профиля из папки.",
+                    color = Color(0xFFF5C16C), modifier = Modifier.padding(12.dp), fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+        if (preview != null && !preview.isValid) {
+            val error = preview?.errors?.firstOrNull() ?: "Не удалось проверить правила"
+            Surface(color = Color(0xFF402B30), shape = RoundedCornerShape(10.dp)) {
+                Text(error, color = routeRed, modifier = Modifier.padding(10.dp), fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(16.dp)).border(1.dp, routeBorder, RoundedCornerShape(16.dp))) {
+                if (view == RouteView.SCHEME) {
+                    RouteScheme(activeOwner, rules, selectedId, onSelect = { selectedId = it },
+                        onAddChild = { editing = newRule(activeOwner, it.id, rules) }, onReorder = controller::reorderRule)
+                } else {
+                    RouteList(activeOwner, rules, selectedId, onSelect = { selectedId = it },
+                        onAddChild = { editing = newRule(activeOwner, it.id, rules) }, onReorder = controller::reorderRule)
+                }
+            }
+            RouteInspector(
+                selected = selected,
+                rules = rules,
+                modifier = Modifier.width(302.dp).fillMaxHeight(),
+                onEdit = { editing = it },
+                onAddChild = { editing = newRule(activeOwner, it.id, rules) },
+                onToggle = { controller.saveRule(it.copy(enabled = !it.enabled)) },
+                onDelete = { deleting = it },
+            )
+        }
+    }
+    editing?.let { draft ->
+        RouteRuleEditor(
+            draft = draft,
+            rules = rules,
+            onClose = { editing = null },
+            onSave = { if (controller.saveRule(it)) { selectedId = it.id; editing = null } },
+        )
+    }
+    deleting?.let { rule ->
+        val descendants = descendants(rules, rule.id)
+        AlertDialog(
+            modifier = Modifier.onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) false else when (event.key) {
+                    Key.Enter, Key.NumPadEnter -> {
+                        if (controller.deleteRule(rule.id)) { selectedId = null; deleting = null }
+                        true
+                    }
+                    Key.Escape -> { deleting = null; true }
+                    else -> false
+                }
+            },
+            onDismissRequest = { deleting = null },
+            title = { Text("Удалить правило?") },
+            text = { Text(if (descendants.isEmpty()) "«${displayTitle(rule)}» будет удалено." else "«${displayTitle(rule)}» и ${descendants.size} дочерних правил будут удалены.") },
+            confirmButton = { TextButton(onClick = {
+                if (controller.deleteRule(rule.id)) { selectedId = null; deleting = null }
+            }) { Text("Удалить") } },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("Отмена") } },
+        )
+    }
+}
+
+private fun newRule(profileId: String, parentId: String?, rules: List<StoredRule>): StoredRule = StoredRule(
+    id = UUID.randomUUID().toString(), profileId = profileId, parentId = parentId,
+    sortIndex = (DesktopRouteTree.siblings(rules, profileId, parentId).maxOfOrNull { it.sortIndex } ?: -1) + 1,
+)
+
+private fun descendants(rules: List<StoredRule>, id: String): Set<String> {
+    val found = mutableSetOf<String>()
+    do {
+        val before = found.size
+        rules.filter { it.parentId == id || it.parentId in found }.forEach { found += it.id }
+    } while (found.size != before)
+    return found
+}
+
+private fun orderedTree(rules: List<StoredRule>, profileId: String): List<Pair<StoredRule, Int>> {
+    val out = mutableListOf<Pair<StoredRule, Int>>()
+    val visited = mutableSetOf<String>()
+    fun walk(parentId: String?, depth: Int) {
+        DesktopRouteTree.siblings(rules, profileId, parentId).forEach { rule ->
+            if (visited.add(rule.id)) {
+                out += rule to depth
+                walk(rule.id, depth + 1)
+            }
+        }
+    }
+    walk(null, 0)
+    return out
+}
+
+@Composable
+private fun RouteScheme(
+    profileId: String,
+    rules: List<StoredRule>,
+    selectedId: String?,
+    onSelect: (String?) -> Unit,
+    onAddChild: (StoredRule) -> Unit,
+    onReorder: (String, String, Boolean) -> Unit,
+) {
+    var pan by remember(profileId) { mutableStateOf(Offset(16f, 16f)) }
+    var canvasSize by remember(profileId) { mutableStateOf(IntSize.Zero) }
+    var zoom by remember(profileId) { mutableFloatStateOf(1f) }
+    val focusRequester = remember(profileId) { FocusRequester() }
+    val nodeBounds = remember(profileId) { mutableStateMapOf<String, Rect>() }
+    var draggingId by remember(profileId) { mutableStateOf<String?>(null) }
+    var dragStart by remember(profileId) { mutableStateOf(Offset.Zero) }
+    var dragDelta by remember(profileId) { mutableStateOf(Offset.Zero) }
+    val sourceRule = rules.firstOrNull { it.id == draggingId }
+    val dropPoint = if (draggingId != null) dragStart + dragDelta else null
+    val hoverTarget = dropPoint?.let { point -> nodeBounds.entries.firstOrNull { entry ->
+        val candidate = rules.firstOrNull { it.id == entry.key }
+        candidate != null && candidate.id != draggingId && candidate.parentId == sourceRule?.parentId &&
+            !DesktopRouteTree.isElse(candidate) && entry.value.contains(point)
+    }?.key }
+    val layout = remember(rules, profileId) {
+        RouteTreeLayout.vertical(orderedTree(rules, profileId).map { (rule, _) ->
+            RouteLayoutNode(rule.id, rule.parentId)
+        }, column = 246f, row = 146f)
+    }
+    val root = RulePosition(layout.root.x, layout.root.y)
+    val positions = layout.nodes.mapValues { (_, point) -> RulePosition(point.x, point.y) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val centeredPan = {
+        with(density) { Offset(canvasSize.width / 2f - (root.x + 105f).dp.toPx(), 16.dp.toPx()) }
+    }
+    LaunchedEffect(profileId, canvasSize, root) {
+        if (canvasSize.width > 0) pan = centeredPan()
+    }
+    LaunchedEffect(profileId) { focusRequester.requestFocus() }
+    Box(Modifier.fillMaxSize().onSizeChanged { canvasSize = it }.background(routeBackground)
+        .onPreviewKeyEvent { event ->
+            if (event.type != KeyEventType.KeyDown || !event.isCtrlPressed) false
+            else when (event.key) {
+                Key.Plus, Key.Equals, Key.NumPadAdd -> { zoom = (zoom + .15f).coerceAtMost(1.5f); true }
+                Key.Minus, Key.NumPadSubtract -> { zoom = (zoom - .15f).coerceAtLeast(.6f); true }
+                else -> false
+            }
+        }
+        .focusRequester(focusRequester).focusable()
+        .pointerInput(profileId) {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent()
+                    if (event.type == PointerEventType.Scroll) {
+                        val amount = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
+                        zoom = (zoom - amount * .08f).coerceIn(.6f, 1.5f)
+                        event.changes.forEach { it.consume() }
+                    }
+                }
+            }
+        }) {
+        Canvas(Modifier.fillMaxSize().pointerInput(profileId) {
+            detectDragGestures { change, amount -> change.consume(); pan += amount }
+        }) {
+            val grid = 28.dp.toPx() * zoom
+            if (grid > 12f) {
+                var x = pan.x % grid
+                while (x < size.width) {
+                    drawLine(routeBorder.copy(alpha = .22f), Offset(x, 0f), Offset(x, size.height), 1f)
+                    x += grid
+                }
+                var y = pan.y % grid
+                while (y < size.height) {
+                    drawLine(routeBorder.copy(alpha = .22f), Offset(0f, y), Offset(size.width, y), 1f)
+                    y += grid
+                }
+            }
+            fun anchor(p: RulePosition, outgoing: Boolean) = Offset(
+                (p.x + 105f).dp.toPx() * zoom + pan.x,
+                (p.y + if (outgoing) 76f else 0f).dp.toPx() * zoom + pan.y,
+            )
+            rules.forEach { rule ->
+                val from = rule.parentId?.let(positions::get) ?: root
+                val to = positions[rule.id] ?: return@forEach
+                val start = anchor(from, true)
+                val end = anchor(to, false)
+                val bend = (start.y + end.y) / 2f
+                val path = Path().apply { moveTo(start.x, start.y); cubicTo(start.x, bend, end.x, bend, end.x, end.y) }
+                drawPath(path, if (rule.id == selectedId) routeBlue else routeBorder, style = Stroke(width = if (rule.id == selectedId) 2.5.dp.toPx() else 1.5.dp.toPx()))
+                drawCircle(if (rule.id == selectedId) routeBlue else routeBorder, radius = 3.dp.toPx(), center = end)
+            }
+        }
+        @Composable fun positioned(position: RulePosition, z: Float = 0f, content: @Composable () -> Unit) {
+            Box(Modifier.offset {
+                with(density) { IntOffset((position.x.dp.toPx() * zoom + pan.x).roundToInt(), (position.y.dp.toPx() * zoom + pan.y).roundToInt()) }
+            }.zIndex(z).graphicsLayer(scaleX = zoom, scaleY = zoom, transformOrigin = TransformOrigin(0f, 0f))) { content() }
+        }
+        positioned(root) {
+            Surface(shape = RoundedCornerShape(12.dp), color = Color(0xFF243056), modifier = Modifier.width(210.dp).height(76.dp).clickable { onSelect(null) }) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.Center) {
+                    Text("Весь трафик", color = routeText, fontWeight = FontWeight.SemiBold)
+                    Text("Корень маршрутизации", color = routeMuted, fontSize = 11.sp)
+                }
+            }
+        }
+        rules.forEach { rule ->
+            val position = positions[rule.id] ?: return@forEach
+            positioned(position, if (draggingId == rule.id) 10f else 0f) {
+                RouteNodeCard(
+                    rule = rule, selected = rule.id == selectedId,
+                    childCount = rules.count { it.parentId == rule.id },
+                    dragging = draggingId == rule.id, dropTarget = hoverTarget == rule.id, dragOffset = dragDelta,
+                    onBounds = { nodeBounds[rule.id] = it },
+                    onClick = { onSelect(rule.id) },
+                    onAddChild = { onAddChild(rule) },
+                    onDragStart = { local ->
+                        draggingId = rule.id
+                        dragStart = (nodeBounds[rule.id]?.topLeft ?: Offset.Zero) + local
+                        dragDelta = Offset.Zero
+                    },
+                    onDrag = { dragDelta += it },
+                    onDragEnd = {
+                        val targetId = hoverTarget
+                        if (targetId != null) onReorder(rule.id, targetId, dropPoint?.y?.let { y -> y > (nodeBounds[targetId]?.center?.y ?: y) } == true)
+                        draggingId = null; dragDelta = Offset.Zero
+                    },
+                )
+            }
+        }
+        Column(Modifier.align(Alignment.TopEnd).padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilledTonalButton(onClick = { zoom = (zoom + .15f).coerceAtMost(1.5f) }) { Text("+") }
+            FilledTonalButton(onClick = { zoom = (zoom - .15f).coerceAtLeast(.6f) }) { Text("−") }
+            FilledTonalButton(onClick = { zoom = 1f; pan = centeredPan() }) { Text("⌂") }
+        }
+        if (rules.isEmpty()) {
+            Text("Добавьте первое правило. Схема и список используют одни данные.", color = routeMuted,
+                modifier = Modifier.align(Alignment.BottomStart).padding(20.dp))
+        }
+    }
+}
+
+@Composable
+private fun RouteNodeCard(rule: StoredRule, selected: Boolean, childCount: Int,
+    dragging: Boolean, dropTarget: Boolean, dragOffset: Offset, onBounds: (Rect) -> Unit,
+    onClick: () -> Unit, onAddChild: () -> Unit, onDragStart: (Offset) -> Unit, onDrag: (Offset) -> Unit, onDragEnd: () -> Unit) {
+    val currentStart by rememberUpdatedState(onDragStart)
+    val currentDrag by rememberUpdatedState(onDrag)
+    val currentEnd by rememberUpdatedState(onDragEnd)
+    val tone = when {
+        childCount > 0 -> routeBlue
+        rule.action == "DIRECT" -> routeGreen
+        rule.action == "BLOCK" -> routeRed
+        else -> routeBlue
+    }
+    Box(Modifier.width(210.dp).height(if (selected) 124.dp else 76.dp)) {
+        RouteNodeFace(rule, childCount, tone, selected, dropTarget,
+            Modifier.graphicsLayer { alpha = if (dragging) .35f else 1f }
+                .onGloballyPositioned { onBounds(it.boundsInWindow()) }
+                .pointerInput(rule.id) {
+                    detectDragGestures(onDragStart = { currentStart(it) }, onDragEnd = { currentEnd() }, onDragCancel = { currentEnd() }) { change, amount ->
+                        change.consume(); currentDrag(amount)
+                    }
+                }.clickable(onClick = onClick))
+        if (dragging) RouteNodeFace(rule, childCount, tone, selected = true, dropTarget = false,
+            modifier = Modifier.graphicsLayer {
+                translationX = dragOffset.x
+                translationY = dragOffset.y
+                shadowElevation = 22f
+            })
+    if (selected && !dragging) {
+        Surface(shape = RoundedCornerShape(50), color = routeBlue,
+            modifier = Modifier.offset(x = 87.dp, y = 88.dp).size(36.dp).clickable(onClick = onAddChild)) {
+            Box(contentAlignment = Alignment.Center) { Text("+", color = routeBackground, fontSize = 19.sp, fontWeight = FontWeight.Bold) }
+        }
+    }
+    }
+}
+
+@Composable
+private fun RouteNodeFace(rule: StoredRule, childCount: Int, tone: Color, selected: Boolean,
+    dropTarget: Boolean, modifier: Modifier = Modifier) {
+    Surface(
+        color = if (selected) Color(0xFF243056) else routeCard,
+        shape = RoundedCornerShape(12.dp),
+        border = androidx.compose.foundation.BorderStroke(if (selected || dropTarget) 2.dp else 1.dp,
+            if (selected || dropTarget) routeBlue else routeBorder),
+        modifier = modifier.width(210.dp).height(76.dp),
+    ) {
+        Row(Modifier.padding(start = 12.dp, end = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(7.dp).background(if (rule.enabled) tone else routeMuted, RoundedCornerShape(50)))
+            Spacer(Modifier.width(9.dp))
+            Column(Modifier.weight(1f)) {
+                Text(displayTitle(rule), color = if (rule.enabled) routeText else routeMuted, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
+                Text(if (DesktopRouteTree.isElse(rule)) "Любой оставшийся трафик" else ruleSummary(rule),
+                    color = routeMuted, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp)
+                Text(if (childCount > 0) "Развилка · $childCount ветвей" else actionLabelDesktop(rule.action),
+                    color = tone, fontSize = 11.sp)
+            }
+            Text("${rule.sortIndex + 1}", color = routeBlue, fontSize = 11.sp,
+                modifier = Modifier.padding(horizontal = 5.dp))
+        }
+    }
+}
+
+@Composable
+private fun RouteList(profileId: String, rules: List<StoredRule>, selectedId: String?, onSelect: (String) -> Unit,
+    onAddChild: (StoredRule) -> Unit, onReorder: (String, String, Boolean) -> Unit) {
+    val ordered = remember(rules) { orderedTree(rules, profileId) }
+    val bounds = remember(profileId) { mutableStateMapOf<String, Rect>() }
+    var draggingId by remember(profileId) { mutableStateOf<String?>(null) }
+    var dragStart by remember(profileId) { mutableStateOf(Offset.Zero) }
+    var dragDelta by remember(profileId) { mutableStateOf(Offset.Zero) }
+    val dragPoint = if (draggingId != null) dragStart + dragDelta else null
+    val dragged = rules.firstOrNull { it.id == draggingId }
+    val hover = dragPoint?.let { point -> bounds.entries.firstOrNull { entry ->
+        val candidate = rules.firstOrNull { it.id == entry.key }
+        candidate != null && candidate.id != draggingId && candidate.parentId == dragged?.parentId &&
+            !DesktopRouteTree.isElse(candidate) && entry.value.contains(point)
+    }?.key }
+    LazyColumn(Modifier.fillMaxSize().background(routeBackground).padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        item { Text("КОРЕНЬ  /  весь трафик", color = routeMuted, fontSize = 11.sp, modifier = Modifier.padding(8.dp)) }
+        items(ordered, key = { it.first.id }) { (rule, depth) ->
+            val currentHover by rememberUpdatedState(hover)
+            val currentDropPoint by rememberUpdatedState(dragPoint)
+            val rowDrag = if (DesktopRouteTree.isElse(rule)) Modifier else Modifier.pointerInput(rule.id) {
+                detectDragGestures(
+                    onDragStart = { local ->
+                        draggingId = rule.id
+                        dragStart = (bounds[rule.id]?.topLeft ?: Offset.Zero) + local
+                        dragDelta = Offset.Zero
+                    },
+                    onDragEnd = {
+                        val target = currentHover
+                        if (target != null) {
+                            val pointY = currentDropPoint?.y ?: 0f
+                            onReorder(rule.id, target, pointY > (bounds[target]?.center?.y ?: pointY))
+                        }
+                        draggingId = null
+                        dragDelta = Offset.Zero
+                    },
+                    onDragCancel = { draggingId = null; dragDelta = Offset.Zero },
+                ) { change, amount ->
+                    change.consume()
+                    dragDelta += amount
+                }
+            }
+            val dragging = draggingId == rule.id
+            val chosen = selectedId == rule.id
+            val border = androidx.compose.foundation.BorderStroke(if (hover == rule.id || chosen) 2.dp else 1.dp,
+                if (hover == rule.id || chosen) routeBlue else routeBorder)
+            Box(Modifier.fillMaxWidth().padding(start = (depth * 24).coerceAtMost(144).dp)
+                .zIndex(if (dragging) 10f else 0f)) {
+                Surface(
+                    color = if (chosen) Color(0xFF243056) else routeCard,
+                    shape = RoundedCornerShape(11.dp), border = border,
+                    modifier = Modifier.fillMaxWidth()
+                        .onGloballyPositioned { bounds[rule.id] = it.boundsInWindow() }
+                        .graphicsLayer { alpha = if (dragging) .35f else 1f }
+                        .then(rowDrag)
+                        .clickable { onSelect(rule.id) },
+                ) { RouteListRowContent(rule, rules, chosen, onAddChild) }
+                if (dragging) {
+                    Surface(
+                        color = Color(0xFF303B5C), shape = RoundedCornerShape(11.dp),
+                        border = androidx.compose.foundation.BorderStroke(2.dp, routeBlue),
+                        modifier = Modifier.fillMaxWidth().graphicsLayer {
+                            translationX = dragDelta.x
+                            translationY = dragDelta.y
+                            shadowElevation = 18f
+                        },
+                    ) { RouteListRowContent(rule, rules, selected = chosen, onAddChild = onAddChild, addEnabled = false) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RouteListRowContent(rule: StoredRule, rules: List<StoredRule>, selected: Boolean,
+    onAddChild: (StoredRule) -> Unit, addEnabled: Boolean = true) {
+    Row(Modifier.padding(9.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("${rule.sortIndex + 1}", color = routeBlue, fontSize = 12.sp, modifier = Modifier.width(28.dp))
+        Column(Modifier.weight(1f)) {
+            Text(displayTitle(rule), color = routeText, fontWeight = FontWeight.Medium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val childCount = rules.count { it.parentId == rule.id }
+            Text("${ruleSummary(rule)}  ·  ${if (childCount > 0) "Развилка · $childCount ветвей" else actionLabelDesktop(rule.action)}",
+                color = routeMuted, fontSize = 11.sp, maxLines = 1)
+        }
+        if (selected) RouteListAddButton(onClick = { onAddChild(rule) }, enabled = addEnabled)
+    }
+}
+
+@Composable
+private fun RouteListAddButton(onClick: () -> Unit, enabled: Boolean = true) {
+    Box(Modifier.size(40.dp).then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
+        contentAlignment = Alignment.Center) {
+        Canvas(Modifier.size(16.dp)) {
+            val middleX = size.width / 2f
+            val middleY = size.height / 2f
+            val stroke = 2.5.dp.toPx()
+            drawLine(routeBlue, Offset(middleX, 0f), Offset(middleX, size.height), stroke)
+            drawLine(routeBlue, Offset(0f, middleY), Offset(size.width, middleY), stroke)
+        }
+    }
+}
+
+@Composable
+private fun RouteInspector(
+    selected: StoredRule?, rules: List<StoredRule>, modifier: Modifier,
+    onEdit: (StoredRule) -> Unit, onAddChild: (StoredRule) -> Unit,
+    onToggle: (StoredRule) -> Unit, onDelete: (StoredRule) -> Unit,
+) {
+    Surface(modifier, color = routeCard, shape = RoundedCornerShape(16.dp), border = androidx.compose.foundation.BorderStroke(1.dp, routeBorder)) {
+        Column(Modifier.padding(17.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("ПРАВИЛО", color = routeMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            if (selected == null) {
+                Text("Выберите блок на схеме или строку в списке", color = routeText, fontSize = 16.sp)
+                Text("Выделите блок и нажмите + под ним. Порядок одноуровневых правил меняется перетаскиванием.", color = routeMuted, fontSize = 12.sp)
+            } else {
+                Text(displayTitle(selected), color = routeText, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Text("Приоритет ${selected.sortIndex + 1} · ${if (selected.enabled) "Включено" else "Выключено"}", color = routeMuted, fontSize = 12.sp)
+                HorizontalDivider(color = routeBorder)
+                Text(ruleBreadcrumb(selected.parentId, rules), color = routeMuted, fontSize = 11.sp)
+                Text(ruleSummary(selected), color = routeText, fontSize = 13.sp)
+                val childCount = rules.count { it.parentId == selected.id }
+                Text(if (childCount > 0) "Развилка · исход выбирают дочерние правила" else actionLabelDesktop(selected.action),
+                    color = if (childCount > 0) routeBlue else when (selected.action) { "DIRECT" -> routeGreen; "BLOCK" -> routeRed; else -> routeBlue })
+                Button(onClick = { onEdit(selected) }, modifier = Modifier.fillMaxWidth()) { Text("Редактировать") }
+                OutlinedButton(onClick = { onAddChild(selected) }, modifier = Modifier.fillMaxWidth()) { Text("+ Дочернее правило") }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Включено", color = routeText, modifier = Modifier.weight(1f))
+                    Switch(selected.enabled, onCheckedChange = { onToggle(selected) }, enabled = !DesktopRouteTree.isElse(selected))
+                }
+                TextButton(onClick = { onDelete(selected) }) { Text("Удалить правило", color = routeRed) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RouteRuleEditor(draft: StoredRule, rules: List<StoredRule>, onClose: () -> Unit, onSave: (StoredRule) -> Unit) {
+    val wasElse = rules.firstOrNull { it.id == draft.id }?.let(DesktopRouteTree::isElse) == true
+    var title by remember(draft.id) { mutableStateOf(draft.title) }
+    var parentId by remember(draft.id) { mutableStateOf(draft.parentId) }
+    var priority by remember(draft.id) { mutableIntStateOf(draft.sortIndex) }
+    var conditions by remember(draft.id) { mutableStateOf(
+        ConditionCodec.decode(draft.blocksJson, RuleMatch(
+            apps = draft.apps,
+            domains = draft.domains,
+            domainSuffixes = draft.domainSuffixes,
+            ipCidrs = draft.cidrs,
+            geoip = draft.countries,
+            processes = draft.processes,
+        )).let { decoded ->
+            if (draft.blocksJson.isBlank()) decoded.copy(join = MatchJoin.entries.firstOrNull { it.name == draft.join } ?: decoded.join)
+            else decoded
+        }
+    ) }
+    var action by remember(draft.id) { mutableStateOf(draft.action.uppercase()) }
+    var parentMenu by remember { mutableStateOf(false) }
+    var addBlockMenu by remember { mutableStateOf(false) }
+    val candidates = rules.filter { it.id != draft.id && it.id !in descendants(rules, draft.id) }
+    val hasChildren = rules.any { it.parentId == draft.id }
+    val maxPriority = rules.count { it.profileId == draft.profileId && it.parentId == parentId && it.id != draft.id && !DesktopRouteTree.isElse(it) }
+    val valid = wasElse || (conditions.blocks.isNotEmpty() && conditions.blocks.all { block -> block.values.any(String::isNotBlank) })
+    DialogWindow(onCloseRequest = onClose, title = if (wasElse) "Правило «Иначе»" else "Правило маршрута", state = rememberDialogState(size = DpSize(700.dp, 760.dp))) {
+        LaunchedEffect(window) { WindowsTitleBar.dark(window) }
+        MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
+            Surface(color = Color(0xFF10131A), contentColor = routeText) {
+                Column(Modifier.fillMaxSize().padding(22.dp)) {
+                    Text(if (wasElse) "Правило «Иначе»" else "Редактор правила", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Условия внутри поля объединяются через ИЛИ. Между полями выберите И или ИЛИ.", color = routeMuted, fontSize = 12.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedTextField(title, { title = it }, label = { Text("Название") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        Box {
+                            OutlinedButton(onClick = { parentMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                                Text("Родитель: " + (parentId?.let { id -> rules.firstOrNull { it.id == id }?.let(::displayTitle) } ?: "Корень"))
+                            }
+                            DropdownMenu(parentMenu, onDismissRequest = { parentMenu = false }) {
+                                DropdownMenuItem(text = { Text("Корень") }, onClick = { parentId = null; priority = rules.count { it.profileId == draft.profileId && it.parentId == null && it.id != draft.id && !DesktopRouteTree.isElse(it) }; parentMenu = false })
+                                candidates.forEach { candidate -> DropdownMenuItem(text = { Text(displayTitle(candidate)) }, onClick = { parentId = candidate.id; priority = rules.count { it.profileId == draft.profileId && it.parentId == candidate.id && it.id != draft.id && !DesktopRouteTree.isElse(it) }; parentMenu = false }) }
+                            }
+                        }
+                        Text(ruleBreadcrumb(parentId, rules), color = routeMuted, fontSize = 11.sp)
+                        if (!wasElse) {
+                            Text("Приоритет ${priority.coerceIn(0, maxPriority) + 1} · перетащите блок на схеме или в списке, чтобы изменить порядок",
+                                color = routeMuted, fontSize = 12.sp)
+                        }
+                        if (!wasElse) {
+                            Surface(color = routeCard, shape = RoundedCornerShape(12.dp), border = androidx.compose.foundation.BorderStroke(1.dp, routeBorder)) {
+                                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("УСЛОВИЯ", color = routeMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    Text("Внутри блока значения работают как ИЛИ. Между блоками выберите логику ниже.", color = routeMuted, fontSize = 12.sp)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        FilterChip(conditions.join == MatchJoin.OR, onClick = { conditions = conditions.copy(join = MatchJoin.OR) }, label = { Text("ИЛИ") })
+                                        FilterChip(conditions.join == MatchJoin.AND, onClick = { conditions = conditions.copy(join = MatchJoin.AND) }, label = { Text("И") })
+                                    }
+                                }
+                            }
+                            conditions.blocks.forEachIndexed { index, block ->
+                                key(index, block.kind) {
+                                    RouteConditionBlockEditor(
+                                        block = block,
+                                        onChange = { next -> conditions = conditions.copy(blocks = conditions.blocks.toMutableList().also { it[index] = next }) },
+                                        onRemove = { conditions = conditions.copy(blocks = conditions.blocks.filterIndexed { i, _ -> i != index }) },
+                                    )
+                                }
+                            }
+                            Box {
+                                OutlinedButton(onClick = { addBlockMenu = true }) { Text("+ Условие") }
+                                DropdownMenu(addBlockMenu, onDismissRequest = { addBlockMenu = false }) {
+                                    listOf(ConditionKind.DOMAIN, ConditionKind.GEOIP, ConditionKind.PRIVATE, ConditionKind.CIDR, ConditionKind.PROCESS).forEach { kind ->
+                                        DropdownMenuItem(text = { Text(conditionKindTitle(kind)) }, onClick = {
+                                            conditions = conditions.copy(blocks = conditions.blocks + ConditionBlock(kind, if (kind == ConditionKind.PRIVATE) listOf("private") else emptyList()))
+                                            addBlockMenu = false
+                                        })
+                                    }
+                                }
+                            }
+                            if (!valid) Text("Добавьте хотя бы одно значение в каждый блок условия.", color = routeRed, fontSize = 12.sp)
+                        } else Text("Правило срабатывает, когда ни одно предыдущее правило этого уровня не подошло.", color = routeMuted)
+                        if (hasChildren) {
+                            Text("РАЗВИЛКА", color = routeBlue, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Этот блок проверяет условие. Действие задают его дочерние правила, включая обязательное «Иначе».", color = routeMuted, fontSize = 12.sp)
+                        } else {
+                            Text("ДЕЙСТВИЕ", color = routeMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                                listOf("PROXY", "DIRECT", "BLOCK").forEach { value ->
+                                    FilterChip(action == value, onClick = { action = value }, label = { Text(actionLabelDesktop(value)) })
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = onClose) { Text("Отмена") }
+                        Spacer(Modifier.width(8.dp))
+                        Button(onClick = {
+                            val projection = ConditionCodec.project(conditions)
+                            onSave(draft.copy(
+                                title = title.trim(), parentId = parentId, sortIndex = priority.coerceIn(0, maxPriority), action = action, join = conditions.join.name,
+                                domains = if (wasElse) emptyList() else projection.domains,
+                                domainSuffixes = if (wasElse) emptyList() else projection.domainSuffixes,
+                                cidrs = if (wasElse) emptyList() else projection.ipCidrs,
+                                countries = if (wasElse) emptyList() else projection.geoip,
+                                processes = if (wasElse) emptyList() else projection.processes,
+                                apps = if (wasElse) emptyList() else projection.apps,
+                                blocksJson = if (wasElse) "" else ConditionCodec.encode(conditions),
+                            ))
+                        }, enabled = valid) { Text("Сохранить") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun conditionKindTitle(kind: ConditionKind): String = when (kind) {
+    ConditionKind.DOMAIN -> "Домены"
+    ConditionKind.GEOIP -> "Страны"
+    ConditionKind.PRIVATE -> "Частные сети"
+    ConditionKind.CIDR -> "IP / CIDR"
+    ConditionKind.PROCESS -> "Windows-процессы"
+    ConditionKind.APP -> "Android-приложения"
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RouteConditionBlockEditor(block: ConditionBlock, onChange: (ConditionBlock) -> Unit, onRemove: () -> Unit) {
+    var input by remember(block.kind) { mutableStateOf("") }
+    var excludeNew by remember(block.kind) { mutableStateOf(false) }
+    var countryPicker by remember { mutableStateOf(false) }
+    var processPicker by remember { mutableStateOf(false) }
+    Surface(color = routeCard, shape = RoundedCornerShape(12.dp), border = androidx.compose.foundation.BorderStroke(1.dp, routeBorder)) {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(conditionKindTitle(block.kind), color = routeText, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                TextButton(onClick = onRemove) { Text("Удалить блок", color = routeRed) }
+            }
+            if (block.values.isNotEmpty()) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    block.values.forEachIndexed { index, value ->
+                        val negative = PatternSign.negated(value)
+                        Surface(color = if (negative) Color(0xFF42323A) else Color(0xFF253C37), shape = RoundedCornerShape(10.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (negative) routeRed.copy(alpha = .55f) else routeGreen.copy(alpha = .55f))) {
+                            Row(Modifier.heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text((if (negative) "Кроме: " else "✓ ") + PatternSign.body(value), color = routeText, maxLines = 1,
+                                    modifier = Modifier.clickable {
+                                        onChange(block.copy(values = block.values.toMutableList().also { it[index] = PatternSign.signed(value, !negative) }))
+                                    }.padding(start = 10.dp, end = 6.dp, top = 7.dp, bottom = 7.dp))
+                                Text("×", color = routeRed, modifier = Modifier.clickable {
+                                    onChange(block.copy(values = block.values.filterIndexed { i, _ -> i != index }))
+                                }.padding(horizontal = 10.dp, vertical = 7.dp))
+                            }
+                        }
+                    }
+                }
+                Text("Нажмите значение, чтобы переключить его на отрицательное условие. × удаляет значение.", color = routeMuted, fontSize = 11.sp)
+            }
+            when (block.kind) {
+                ConditionKind.PRIVATE -> if (block.values.isEmpty()) TextButton(onClick = { onChange(block.copy(values = listOf("private"))) }) { Text("Добавить частные сети") }
+                ConditionKind.GEOIP -> OutlinedButton(onClick = { countryPicker = true }) { Text("Выбрать страны") }
+                ConditionKind.APP -> Text("Условия Android-приложений сохраняются, но в Windows не выполняются. Удалите блок или замените процессами.", color = routeRed, fontSize = 12.sp)
+                else -> {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(input, { input = it }, singleLine = true, modifier = Modifier.weight(1f),
+                            label = { Text(when (block.kind) {
+                                ConditionKind.DOMAIN -> "Домен или *.example.com"
+                                ConditionKind.CIDR -> "Адрес или подсеть"
+                                else -> "Имя процесса"
+                            }) })
+                        Button(onClick = {
+                            onChange(block.copy(values = (block.values + splitRouteValues(input).map { PatternSign.signed(it, excludeNew || PatternSign.negated(it)) }).distinct()))
+                            input = ""
+                        }, enabled = input.isNotBlank()) { Text("Добавить") }
+                    }
+                    FilterChip(excludeNew, onClick = { excludeNew = !excludeNew }, label = { Text("Кроме указанных") })
+                    if (block.kind == ConditionKind.PROCESS) {
+                        TextButton(onClick = { processPicker = true }) { Text("Выбрать из запущенных программ") }
+                    }
+                }
+            }
+            if (block.kind == ConditionKind.DOMAIN) Text("Точный домен или маска *.example.com.", color = routeMuted, fontSize = 12.sp)
+        }
+    }
+    if (countryPicker) CountryPickerDialog(block.values.toSet(), onClose = { countryPicker = false },
+        onConfirm = { onChange(block.copy(values = it)); countryPicker = false }, showPrivate = false)
+    if (processPicker) ProcessPickerDialog(block.values.toSet(), onClose = { processPicker = false },
+        onConfirm = { onChange(block.copy(values = it)); processPicker = false })
+}
+
+@Composable
+private fun CountryPickerDialog(initial: Set<String>, onClose: () -> Unit, onConfirm: (List<String>) -> Unit, showPrivate: Boolean = true) {
+    var query by remember { mutableStateOf("") }
+    var selected by remember { mutableStateOf(initial) }
+    val labels = remember { CountryNames.all }
+    val labelMap = remember(labels) { labels.associateBy { it.code } }
+    val grouped = remember(query) { CountryCatalog.groups(query, emptyList(), labels) }
+    val codes = remember(grouped) { (grouped.frequent + grouped.rest).distinct() }
+    fun cycle(code: String) {
+        val existing = selected.firstOrNull { PatternSign.body(it) == code }
+        selected = selected.filterNot { PatternSign.body(it) == code }.toSet() + when {
+            existing == null -> setOf(code)
+            !PatternSign.negated(existing) -> setOf("!$code")
+            else -> emptySet()
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Страны и сети") },
+        text = {
+            Column {
+                OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Поиск страны") }, singleLine = true)
+                Spacer(Modifier.height(8.dp))
+                LazyColumn(Modifier.height(350.dp)) {
+                    if (showPrivate) {
+                        item {
+                            Row(Modifier.fillMaxWidth().clickable { cycle("private") }, verticalAlignment = Alignment.CenterVertically) {
+                                val value = selected.firstOrNull { PatternSign.body(it) == "private" }
+                                Text(when { value == null -> "○"; PatternSign.negated(value) -> "✕"; else -> "✓" },
+                                    color = when { value == null -> routeMuted; PatternSign.negated(value) -> routeRed; else -> routeGreen },
+                                    modifier = Modifier.width(40.dp).padding(start = 14.dp), fontSize = 20.sp)
+                                Text("Частные сети", color = routeText)
+                            }
+                        }
+                    }
+                    items(codes) { code ->
+                        val label = labelMap[code]
+                        Row(Modifier.fillMaxWidth().clickable { cycle(code) }, verticalAlignment = Alignment.CenterVertically) {
+                            val value = selected.firstOrNull { PatternSign.body(it) == code }
+                            Text(when { value == null -> "○"; PatternSign.negated(value) -> "✕"; else -> "✓" },
+                                color = when { value == null -> routeMuted; PatternSign.negated(value) -> routeRed; else -> routeGreen },
+                                modifier = Modifier.width(40.dp).padding(start = 14.dp), fontSize = 20.sp)
+                            Text(code.uppercase() + "  " + (label?.nameRu ?: code), color = routeText)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(selected.sorted()) }) { Text("Выбрать") } },
+        dismissButton = { TextButton(onClick = onClose) { Text("Отмена") } },
+    )
+}
+
+@Composable
+private fun ProcessPickerDialog(initial: Set<String>, onClose: () -> Unit, onConfirm: (List<String>) -> Unit) {
+    var search by remember { mutableStateOf("") }
+    var available by remember { mutableStateOf<List<String>>(emptyList()) }
+    var selected by remember { mutableStateOf(initial) }
+    fun toggle(process: String) {
+        val existing = selected.firstOrNull { PatternSign.body(it) == process }
+        selected = selected.filterNot { PatternSign.body(it) == process }.toSet() + if (existing == null) setOf(process) else emptySet()
+    }
+    LaunchedEffect(Unit) {
+        available = withContext(Dispatchers.IO) {
+            ProcessHandle.allProcesses().use { stream ->
+                stream.map { it.info().command().orElse("").substringAfterLast('\\').substringAfterLast('/') }
+                    .filter { it.endsWith(".exe", ignoreCase = true) }
+                    .distinct().sorted(String.CASE_INSENSITIVE_ORDER).toList()
+            }
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Запущенные программы") },
+        text = {
+            Column {
+                OutlinedTextField(search, { search = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Поиск процесса") }, singleLine = true)
+                Spacer(Modifier.height(8.dp))
+                LazyColumn(Modifier.height(330.dp)) {
+                    items(available.filter { it.contains(search, ignoreCase = true) }) { process ->
+                        Row(Modifier.fillMaxWidth().clickable { toggle(process) }, verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(selected.any { PatternSign.body(it) == process }, onCheckedChange = { toggle(process) })
+                            Text(process, color = routeText, maxLines = 1)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(selected.sorted()) }) { Text("Выбрать") } },
+        dismissButton = { TextButton(onClick = onClose) { Text("Отмена") } },
+    )
+}
+
+private fun splitRouteValues(value: String): List<String> = value.split(',', '\n').map(String::trim).filter(String::isNotEmpty)
+private fun ruleBreadcrumb(parentId: String?, rules: List<StoredRule>): String {
+    val path = mutableListOf("Корень")
+    val visited = mutableSetOf<String>()
+    var current = parentId
+    val reversed = mutableListOf<String>()
+    while (current != null && visited.add(current)) {
+        val rule = rules.firstOrNull { it.id == current } ?: break
+        reversed += displayTitle(rule)
+        current = rule.parentId
+    }
+    path += reversed.asReversed()
+    return path.joinToString("  /  ")
+}
+private fun actionLabelDesktop(action: String) = when (action) { "DIRECT" -> "Напрямую"; "BLOCK" -> "Запретить"; else -> "Через VPN" }
+private fun displayTitle(rule: StoredRule): String = rule.title.ifBlank { if (DesktopRouteTree.isElse(rule)) "Иначе" else "Правило ${rule.sortIndex + 1}" }
+private fun ruleSummary(rule: StoredRule): String = (rule.domains + rule.domainSuffixes.map { "*.$it" } + rule.cidrs + rule.countries + rule.processes)
+    .take(3).joinToString(" · ").ifBlank { "Любой трафик" }
+
+@Composable
+private fun RouteEmpty(title: String, description: String) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(title, color = routeText, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            Text(description, color = routeMuted, fontSize = 13.sp)
+        }
+    }
+}

@@ -1,0 +1,52 @@
+{
+  "dns": {
+    "servers": [
+      {
+        "type": "tls",
+        "tag": "remote",
+        "server": "1.1.1.1",
+        "domain_resolver": "local"
+      },
+      {
+        "type": "local",
+        "tag": "local"
+      }
+    ],
+    "final": "remote"
+  },
+  "outbounds": [
+    {
+      "type": "vless",
+      "tag": "proxy",
+      "server": "node.example.com",
+      "server_port": 443,
+      "uuid": "11111111-1111-1111-1111-111111111111",
+      "tls": {
+        "enabled": true,
+        "server_name": "cdn.example.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        },
+        "reality": {
+          "enabled": true,
+          "public_key": "u6uEBw4vjWRCo6H2IreFjrn74AcYartkZcBodzsISsQ",
+          "short_id": "abcd"
+        }
+      },
+      "transport": {
+        "type": "xhttp",
+        "path": "/xhttp",
+        "host": "cdn.example.com",
+        "mode": "auto"
+      }
+    }
+  ],
+  "route": {
+    "rules": [
+      { "action": "sniff" },
+      { "protocol": "dns", "action": "hijack-dns" },
+      { "ip_is_private": true, "outbound": "direct" }
+    ]
+  }
+}

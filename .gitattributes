@@ -1,0 +1,11 @@
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.png binary
+*.ico binary
+*.jar binary
+*.idx binary
+*.srs binary
+core-engine/libs/libbox.aar filter=lfs diff=lfs merge=lfs -text
+desktop-app/src/main/resources/runtime/*.exe filter=lfs diff=lfs merge=lfs -text
+desktop-app/src/main/resources/runtime/*.dll filter=lfs diff=lfs merge=lfs -text

@@ -1,0 +1,13 @@
+{
+  "dns": {
+    "servers": [
+      {
+        "type": "tls",
+        "tag": "dns-remote",
+        "server": "1.1.1.1",
+        "detour": "proxy"
+      }
+    ],
+    "final": "dns-remote"
+  }
+}

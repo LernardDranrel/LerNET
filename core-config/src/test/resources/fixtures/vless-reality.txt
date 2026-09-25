@@ -1,0 +1,1 @@
+vless://22222222-2222-2222-2222-222222222222@1.2.3.4:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.cloudflare.com&fp=chrome&pbk=PUBLICKEY&sid=abcd#Reality

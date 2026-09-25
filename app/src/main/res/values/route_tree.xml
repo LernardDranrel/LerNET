@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="route_branch">Развилка</string>
+    <string name="route_branch_help">Действие выбирают дочерние правила. «Иначе» завершает этот уровень и сохраняет прежнее действие.</string>
+    <string name="route_add_child">Добавить дочернее правило</string>
+    <string name="route_branch_terminal">Превратить в конечное правило</string>
+</resources>

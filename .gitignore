@@ -1,0 +1,44 @@
+# Build output and release packages
+.gradle/
+.gradle-local/
+.kotlin/
+**/build/
+artifacts/
+captures/
+*.apk
+*.ap_
+*.aab
+*.dex
+*.log
+
+# Local toolchains and caches
+.android/
+.android-local/
+.m2/
+.skiko/
+.tmp/
+android-sdk/
+jdk/
+.idea/
+*.iml
+.DS_Store
+local.properties
+
+# Credentials, private configs and investigation notes
+.release/
+notes-private/
+uploads/
+agent-tools/
+keystore.properties
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+state.json*
+*.lernet.json
+
+# Native intermediate files
+.externalNativeBuild/
+.cxx/
