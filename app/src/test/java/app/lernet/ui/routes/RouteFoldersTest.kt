@@ -64,6 +64,22 @@ class RouteFoldersTest {
     }
 
     @Test
+    fun deletingTheOnlyChildElseRestoresItsOutcomeToTheParent() {
+        val parent = rule("parent", domains = listOf("parent.example"), action = "proxy")
+        val fallback = rule("fallback", parentId = "parent", action = "direct")
+        val nodes = listOf(parent, fallback, rule("root-tail"))
+
+        assertThat(RouteFolders.deleteNeedsConfirm(nodes, "fallback")).isFalse()
+        val restored = RouteFolders.restoreTerminalAfterElseDeletion(nodes, "fallback")
+            .filterNot { it.id == "fallback" }
+        val seeded = RouteFolders.seedMissingElse(restored, "p", { "unexpected" })
+
+        assertThat(seeded.first { it.id == "parent" }.action).isEqualTo("direct")
+        assertThat(RouteFolders.children(seeded, "parent")).isEmpty()
+        assertThat(seeded.map { it.id }).containsExactly("parent", "root-tail")
+    }
+
+    @Test
     fun deletingTheElseReseedsThatLevelAndSkipsOrphans() {
         val nodes = listOf(
             rule("keep", domains = listOf("keep.example")),

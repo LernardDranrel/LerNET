@@ -91,7 +91,7 @@ internal fun RouteCanvas(
     val pipes = remember(visible, state.extraPipes) { CanvasGraph.pipeNames(visible, state.extraPipes) }
     val density = LocalDensity.current
     val column = with(density) { 246.dp.toPx() }
-    val row = with(density) { 190.dp.toPx() }
+    val row = with(density) { 300.dp.toPx() }
     val points = remember(visible, pipes, state.layout, column, row) {
         CanvasGraph.layout(visible, pipes, state.layout, column, row)
     }
@@ -208,8 +208,8 @@ private fun ColumnScope.CanvasBoard(
                 Modifier
                     .offset {
                         IntOffset(
-                            (draggedRect.left + dragGhost.delta.x).roundToInt(),
-                            (draggedRect.top + dragGhost.delta.y).roundToInt(),
+                            (draggedRect.left + dragGhost.delta.x * scale).roundToInt(),
+                            (draggedRect.top + dragGhost.delta.y * scale).roundToInt(),
                         )
                     }
                     .graphicsLayer {
@@ -518,7 +518,7 @@ private fun ruleNode(
                 latestGhost(RuleDragGhost(node.id, dragDelta))
             },
             onDragEnd = {
-                val landedX = origin.x + dragDelta.x / scale
+                val landedX = origin.x + dragDelta.x
                 val to = siblingIds.filterNot { it == node.id }.count { id ->
                     (points[CanvasIds.rule(id)]?.x ?: Float.MAX_VALUE) < landedX
                 }

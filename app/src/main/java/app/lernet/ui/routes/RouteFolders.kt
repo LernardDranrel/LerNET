@@ -29,12 +29,30 @@ object RouteFolders {
      */
     fun listed(nodes: List<RuleNodeRecord>, folderId: String?): List<RuleNodeRecord> = children(nodes, folderId)
 
-    /** Children need a confirm. The sole «Иначе» also confirms, then the level is reseeded. */
+    /** Deleting the sole child «Иначе» simply makes its parent a terminal rule. */
     fun deleteNeedsConfirm(nodes: List<RuleNodeRecord>, id: String): Boolean {
         val node = nodes.firstOrNull { it.id == id } ?: return false
         if (nodes.any { it.parentId == id }) return true
-        return node.isElseRule()
+        return node.isElseRule() && !isSoleElseChild(nodes, node)
     }
+
+    fun restoreTerminalAfterElseDeletion(nodes: List<RuleNodeRecord>, id: String): List<RuleNodeRecord> {
+        val fallback = nodes.firstOrNull { it.id == id } ?: return nodes
+        if (!isSoleElseChild(nodes, fallback)) return nodes
+        return nodes.map { node ->
+            if (node.id == fallback.parentId) {
+                node.copy(action = fallback.action, pipeName = fallback.pipeName)
+            } else {
+                node
+            }
+        }
+    }
+
+    private fun isSoleElseChild(nodes: List<RuleNodeRecord>, node: RuleNodeRecord): Boolean =
+        node.isElseRule() && node.parentId != null && node.parentId != ORPHAN &&
+            nodes.any { it.id == node.parentId } &&
+            nodes.none { it.parentId == node.parentId && it.id != node.id } &&
+            nodes.none { it.parentId == node.id }
 
     fun misplaced(nodes: List<RuleNodeRecord>, node: RuleNodeRecord): Boolean {
         val parentId = node.parentId ?: return false

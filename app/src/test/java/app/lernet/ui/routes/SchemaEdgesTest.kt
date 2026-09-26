@@ -37,6 +37,22 @@ class SchemaEdgesTest {
     }
 
     @Test
+    fun shortGapDoesNotBendTheConnectorBackAcrossItsParent() {
+        val parent = NodeRect(0f, 0f, 100f, 80f)
+        val child = NodeRect(500f, 110f, 600f, 190f)
+        val segment = SchemaEdges.segments(
+            listOf(rule("child")),
+            mapOf(CanvasIds.ROOT to parent, CanvasIds.rule("child") to child),
+            vertical = true,
+            scale = 1f,
+        ).single()
+
+        assertThat(segment.c1y).isAtMost(segment.c2y)
+        assertThat(segment.c1y).isAtLeast(parent.bottom)
+        assertThat(segment.c2y).isAtMost(child.top)
+    }
+
+    @Test
     fun aStraightPipeHitsItsMiddleAndMissesTheCard() {
         val rule = NodeRect(0f, 0f, 80f, 40f)
         val pipe = NodeRect(200f, 0f, 280f, 40f)

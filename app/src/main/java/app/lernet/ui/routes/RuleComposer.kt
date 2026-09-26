@@ -1,6 +1,7 @@
 package app.lernet.ui.routes
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.DropdownMenu
@@ -238,8 +240,13 @@ internal fun PatternChipField(
             keyboardActions = KeyboardActions(onDone = { commitDraft() }),
             modifier = Modifier.fillMaxWidth().focusRequester(focus),
             trailingIcon = {
-                IconButton(onClick = commitDraft) {
-                    Icon(LerNetSymbols.check(), contentDescription = stringResource(R.string.done))
+                IconButton(
+                    onClick = commitDraft,
+                    modifier = Modifier.padding(end = 8.dp).size(44.dp)
+                        .background(LerNetOk, RoundedCornerShape(12.dp)),
+                ) {
+                    Icon(LerNetSymbols.check(), contentDescription = stringResource(R.string.done),
+                        tint = MaterialTheme.colorScheme.onPrimary)
                 }
             },
         )

@@ -1,6 +1,7 @@
 package app.lernet.desktop
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -48,6 +49,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogWindow
 import androidx.compose.ui.window.rememberDialogState
 import java.util.UUID
+import java.io.File
+import javax.swing.JFileChooser
+import javax.swing.SwingUtilities
+import javax.swing.filechooser.FileNameExtensionFilter
 import app.lernet.routing.RouteLayoutNode
 import app.lernet.routing.RouteTreeLayout
 import app.lernet.routing.ConditionBlock
@@ -61,6 +66,7 @@ import app.lernet.ui.routes.CountryCatalog
 import app.lernet.ui.routes.CountryNames
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 private val routeBackground = Color(0xFF101724)
@@ -90,17 +96,56 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
     val activeOwner = ownerId!!
     val ownerProfile = saved.profiles.firstOrNull { it.id == activeOwner }
     val ownerGroup = ownerProfile?.groupId?.let { id -> saved.groups.firstOrNull { it.id == id } }
-    val rules = saved.rules.filter { it.profileId == activeOwner }
+    val initialDraft = remember(activeOwner) { controller.routeDraft(activeOwner) }
+    var baseline by remember(activeOwner) { mutableStateOf(initialDraft.baseline) }
+    var rules by remember(activeOwner) { mutableStateOf(initialDraft.rules) }
+    val dirty = rules != baseline
+    LaunchedEffect(activeOwner, saved.rules) {
+        if (rules == baseline) {
+            baseline = saved.rules.filter { it.profileId == activeOwner }
+            rules = baseline
+            controller.clearRuleDraft(activeOwner)
+        }
+    }
     var view by remember(activeOwner) { mutableStateOf(RouteView.SCHEME) }
     var selectedId by remember(activeOwner) { mutableStateOf<String?>(null) }
     var editing by remember(activeOwner) { mutableStateOf<StoredRule?>(null) }
     var deleting by remember(activeOwner) { mutableStateOf<StoredRule?>(null) }
     var ownerMenu by remember { mutableStateOf(false) }
+    var pendingOwner by remember { mutableStateOf<String?>(null) }
+    var draftError by remember(activeOwner) { mutableStateOf<String?>(null) }
+    fun applyEdit(edit: DesktopRouteTree.Edit): Boolean {
+        if (edit.error != null) {
+            draftError = edit.error
+            return false
+        }
+        rules = edit.rules
+        controller.keepRuleDraft(activeOwner, baseline, rules)
+        draftError = null
+        return true
+    }
+    fun saveDraft(): Boolean {
+        if (!dirty) return true
+        if (!controller.commitRuleDraft(activeOwner, baseline, rules)) {
+            draftError = "Не удалось сохранить черновик. Проверьте сообщение о состоянии приложения."
+            return false
+        }
+        baseline = rules
+        controller.clearRuleDraft(activeOwner)
+        draftError = null
+        return true
+    }
+    fun chooseOwner(id: String) {
+        ownerMenu = false
+        if (id != activeOwner) {
+            if (dirty) pendingOwner = id else ownerId = id
+        }
+    }
     val selected = rules.firstOrNull { it.id == selectedId }
     val previewProfileId = if (activeOwner.startsWith("grp_"))
         saved.profiles.firstOrNull { it.groupId == activeOwner.removePrefix("grp_") }?.id else activeOwner
     val preview = remember(rules, previewProfileId, saved.mode, saved.defaultDnsPolicy, saved.tunMtu, saved.xmuxConcurrency, saved.directDnsServer) {
-        previewProfileId?.let { runCatching { controller.preview(it) }.getOrNull() }
+        previewProfileId?.let { runCatching { controller.preview(it, draftRules = rules, draftOwnerId = activeOwner) }.getOrNull() }
     }
 
     val pageFocus = remember(activeOwner) { FocusRequester() }
@@ -122,25 +167,29 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
                     DropdownMenu(ownerMenu, onDismissRequest = { ownerMenu = false }) {
                         saved.groups.forEach { group ->
                             DropdownMenuItem(text = { Text("▣  ${group.name}", fontWeight = FontWeight.SemiBold) },
-                                onClick = { ownerId = "grp_${group.id}"; ownerMenu = false })
+                                onClick = { chooseOwner("grp_${group.id}") })
                             saved.profiles.filter { it.groupId == group.id }.forEach { child ->
                                 DropdownMenuItem(text = {
                                     Column(Modifier.padding(start = 22.dp)) {
                                         Text("└  ${child.name}")
                                         Text("Действует маршрут папки", color = routeMuted, fontSize = 11.sp)
                                     }
-                                }, onClick = { ownerId = child.id; ownerMenu = false })
+                                }, onClick = { chooseOwner(child.id) })
                             }
                         }
                         if (saved.groups.isNotEmpty() && saved.profiles.any { it.groupId == null })
                             HorizontalDivider(color = routeBorder)
                         saved.profiles.filter { it.groupId == null }.forEach { ungrouped ->
                             DropdownMenuItem(text = { Text("▢  ${ungrouped.name}") },
-                                onClick = { ownerId = ungrouped.id; ownerMenu = false })
+                                onClick = { chooseOwner(ungrouped.id) })
                         }
                     }
                 }
-                Text("Маршруты · ${rules.size} правил · изменения применятся при следующем подключении", color = routeMuted, fontSize = 12.sp)
+                Text("Маршруты · ${rules.size} правил · ${if (dirty) "есть несохранённый черновик" else "сохранённая версия"}", color = if (dirty) routeBlue else routeMuted, fontSize = 12.sp)
+            }
+            if (dirty) {
+                OutlinedButton(onClick = { rules = baseline; selectedId = null; draftError = null; controller.clearRuleDraft(activeOwner) }) { Text("Отменить") }
+                Button(onClick = { saveDraft() }) { Text("Сохранить") }
             }
             FilterChip(view == RouteView.SCHEME, onClick = { view = RouteView.SCHEME }, label = { Text("Схема") })
             FilterChip(view == RouteView.LIST, onClick = { view = RouteView.LIST }, label = { Text("Список") })
@@ -148,6 +197,10 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
             Button(onClick = { editing = newRule(activeOwner, null, rules) }) { Text("+ Правило") }
         }
         Spacer(Modifier.height(10.dp))
+        if (draftError != null) {
+            Text(draftError.orEmpty(), color = routeRed, fontSize = 12.sp)
+            Spacer(Modifier.height(8.dp))
+        }
         if (ownerGroup != null) {
             Surface(color = Color(0xFF302B1D), shape = RoundedCornerShape(10.dp)) {
                 Text("Профиль находится в папке «${ownerGroup.name}». Сейчас для него действует маршрут папки. Эти правила профиля сохранятся, но начнут работать только после переноса профиля из папки.",
@@ -166,10 +219,14 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
             Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(16.dp)).border(1.dp, routeBorder, RoundedCornerShape(16.dp))) {
                 if (view == RouteView.SCHEME) {
                     RouteScheme(activeOwner, rules, selectedId, onSelect = { selectedId = it },
-                        onAddChild = { editing = newRule(activeOwner, it.id, rules) }, onReorder = controller::reorderRule)
+                        onAddChild = { editing = newRule(activeOwner, it.id, rules) }, onReorder = { id, target, after ->
+                            applyEdit(DesktopRouteTree.reorder(rules, id, target, after))
+                        })
                 } else {
                     RouteList(activeOwner, rules, selectedId, onSelect = { selectedId = it },
-                        onAddChild = { editing = newRule(activeOwner, it.id, rules) }, onReorder = controller::reorderRule)
+                        onAddChild = { editing = newRule(activeOwner, it.id, rules) }, onReorder = { id, target, after ->
+                            applyEdit(DesktopRouteTree.reorder(rules, id, target, after))
+                        })
                 }
             }
             RouteInspector(
@@ -178,7 +235,7 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
                 modifier = Modifier.width(302.dp).fillMaxHeight(),
                 onEdit = { editing = it },
                 onAddChild = { editing = newRule(activeOwner, it.id, rules) },
-                onToggle = { controller.saveRule(it.copy(enabled = !it.enabled)) },
+                onToggle = { applyEdit(DesktopRouteTree.save(rules, it.copy(enabled = !it.enabled))) },
                 onDelete = { deleting = it },
             )
         }
@@ -188,7 +245,7 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
             draft = draft,
             rules = rules,
             onClose = { editing = null },
-            onSave = { if (controller.saveRule(it)) { selectedId = it.id; editing = null } },
+            onSave = { if (applyEdit(DesktopRouteTree.save(rules, it))) { selectedId = it.id; editing = null } },
         )
     }
     deleting?.let { rule ->
@@ -197,7 +254,7 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
             modifier = Modifier.onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) false else when (event.key) {
                     Key.Enter, Key.NumPadEnter -> {
-                        if (controller.deleteRule(rule.id)) { selectedId = null; deleting = null }
+                        if (applyEdit(DesktopRouteTree.delete(rules, rule.id))) { selectedId = null; deleting = null }
                         true
                     }
                     Key.Escape -> { deleting = null; true }
@@ -208,9 +265,23 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
             title = { Text("Удалить правило?") },
             text = { Text(if (descendants.isEmpty()) "«${displayTitle(rule)}» будет удалено." else "«${displayTitle(rule)}» и ${descendants.size} дочерних правил будут удалены.") },
             confirmButton = { TextButton(onClick = {
-                if (controller.deleteRule(rule.id)) { selectedId = null; deleting = null }
+                if (applyEdit(DesktopRouteTree.delete(rules, rule.id))) { selectedId = null; deleting = null }
             }) { Text("Удалить") } },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("Отмена") } },
+        )
+    }
+    pendingOwner?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingOwner = null },
+            title = { Text("Несохранённый черновик") },
+            text = { Text("Сохранить изменения маршрутов перед переходом?") },
+            confirmButton = { Button(onClick = { if (saveDraft()) { pendingOwner = null; ownerId = target } }) { Text("Сохранить и перейти") } },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { pendingOwner = null }) { Text("Остаться") }
+                    TextButton(onClick = { controller.clearRuleDraft(activeOwner); pendingOwner = null; ownerId = target }) { Text("Отменить изменения") }
+                }
+            },
         )
     }
 }
@@ -696,7 +767,7 @@ private fun RouteRuleEditor(draft: StoredRule, rules: List<StoredRule>, onClose:
                                 apps = if (wasElse) emptyList() else projection.apps,
                                 blocksJson = if (wasElse) "" else ConditionCodec.encode(conditions),
                             ))
-                        }, enabled = valid) { Text("Сохранить") }
+                        }, enabled = valid) { Text("В черновик") }
                     }
                 }
             }
@@ -765,7 +836,7 @@ private fun RouteConditionBlockEditor(block: ConditionBlock, onChange: (Conditio
                     }
                     FilterChip(excludeNew, onClick = { excludeNew = !excludeNew }, label = { Text("Кроме указанных") })
                     if (block.kind == ConditionKind.PROCESS) {
-                        TextButton(onClick = { processPicker = true }) { Text("Выбрать из запущенных программ") }
+                        TextButton(onClick = { processPicker = true }) { Text("Выбрать программу") }
                     }
                 }
             }
@@ -834,33 +905,70 @@ private fun CountryPickerDialog(initial: Set<String>, onClose: () -> Unit, onCon
 @Composable
 private fun ProcessPickerDialog(initial: Set<String>, onClose: () -> Unit, onConfirm: (List<String>) -> Unit) {
     var search by remember { mutableStateOf("") }
-    var available by remember { mutableStateOf<List<String>>(emptyList()) }
+    var available by remember { mutableStateOf<List<WindowsAppEntry>>(emptyList()) }
     var selected by remember { mutableStateOf(initial) }
+    var loading by remember { mutableStateOf(true) }
+    var source by remember { mutableStateOf("Все") }
+    val scope = rememberCoroutineScope()
     fun toggle(process: String) {
-        val existing = selected.firstOrNull { PatternSign.body(it) == process }
-        selected = selected.filterNot { PatternSign.body(it) == process }.toSet() + if (existing == null) setOf(process) else emptySet()
+        val existing = selected.firstOrNull { PatternSign.body(it).equals(process, ignoreCase = true) }
+        selected = selected.filterNot { PatternSign.body(it).equals(process, ignoreCase = true) }.toSet() + if (existing == null) setOf(process) else emptySet()
     }
     LaunchedEffect(Unit) {
-        available = withContext(Dispatchers.IO) {
-            ProcessHandle.allProcesses().use { stream ->
-                stream.map { it.info().command().orElse("").substringAfterLast('\\').substringAfterLast('/') }
-                    .filter { it.endsWith(".exe", ignoreCase = true) }
-                    .distinct().sorted(String.CASE_INSENSITIVE_ORDER).toList()
-            }
-        }
+        available = withContext(Dispatchers.IO) { WindowsAppCatalog.load() }
+        loading = false
+    }
+    val filtered = available.filter { entry ->
+        (source == "Все" || source == "Запущенные" && entry.running || source == "Установленные" && entry.installed) &&
+            (search.isBlank() || entry.label.contains(search, ignoreCase = true) || entry.processName.contains(search, ignoreCase = true))
     }
     AlertDialog(
         onDismissRequest = onClose,
-        title = { Text("Запущенные программы") },
+        title = { Text("Выбрать программу") },
         text = {
             Column {
-                OutlinedTextField(search, { search = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Поиск процесса") }, singleLine = true)
+                OutlinedTextField(search, { search = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Название или имя .exe") }, singleLine = true)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("Все", "Запущенные", "Установленные").forEach { item ->
+                        FilterChip(source == item, onClick = { source = item }, label = { Text(item) })
+                    }
+                }
+                TextButton(onClick = {
+                    scope.launch {
+                        val file = withContext(Dispatchers.IO) { chooseWindowsExecutable() }
+                        if (file != null) {
+                            available = (available + WindowsAppEntry(file.nameWithoutExtension, file, installed = true))
+                                .distinctBy { it.executable.absolutePath.lowercase() }
+                            selected = selected + file.name
+                            source = "Все"
+                            search = file.nameWithoutExtension
+                        }
+                    }
+                }) { Text("+ Указать файл .exe") }
+                Text("Маршрут сопоставляет имя процесса. Выбранный файл помогает определить его и показать значок.",
+                    color = routeMuted, fontSize = 11.sp)
                 Spacer(Modifier.height(8.dp))
                 LazyColumn(Modifier.height(330.dp)) {
-                    items(available.filter { it.contains(search, ignoreCase = true) }) { process ->
-                        Row(Modifier.fillMaxWidth().clickable { toggle(process) }, verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(selected.any { PatternSign.body(it) == process }, onCheckedChange = { toggle(process) })
-                            Text(process, color = routeText, maxLines = 1)
+                    if (loading) item { Text("Ищем программы…", color = routeMuted) }
+                    if (!loading && filtered.isEmpty()) item { Text("Программы не найдены. Укажите файл вручную.", color = routeMuted) }
+                    items(filtered, key = { it.executable.absolutePath }) { entry ->
+                        var icon by remember(entry.executable.absolutePath) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+                        LaunchedEffect(entry.executable.absolutePath) {
+                            icon = withContext(Dispatchers.IO) { WindowsProcessIdentity.resolve(entry.executable.absolutePath).icon }
+                        }
+                        Row(Modifier.fillMaxWidth().clickable { toggle(entry.processName) }.padding(vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(selected.any { PatternSign.body(it).equals(entry.processName, ignoreCase = true) },
+                                onCheckedChange = { toggle(entry.processName) })
+                            if (icon != null) Image(icon!!, null, Modifier.size(28.dp))
+                            else Box(Modifier.size(28.dp).background(routeBorder, RoundedCornerShape(6.dp)))
+                            Spacer(Modifier.width(9.dp))
+                            Column {
+                                Text(entry.label, color = routeText, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("${entry.processName} · ${if (entry.running) "запущена" else "установлена"}",
+                                    color = routeMuted, fontSize = 11.sp, maxLines = 1)
+                            }
                         }
                     }
                 }
@@ -869,6 +977,21 @@ private fun ProcessPickerDialog(initial: Set<String>, onClose: () -> Unit, onCon
         confirmButton = { TextButton(onClick = { onConfirm(selected.sorted()) }) { Text("Выбрать") } },
         dismissButton = { TextButton(onClick = onClose) { Text("Отмена") } },
     )
+}
+
+private fun chooseWindowsExecutable(): File? {
+    var chosen: File? = null
+    SwingUtilities.invokeAndWait {
+        val chooser = JFileChooser().apply {
+            dialogTitle = "Выберите исполняемый файл программы"
+            fileFilter = FileNameExtensionFilter("Программы (*.exe)", "exe")
+            isAcceptAllFileFilterUsed = false
+        }
+        if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
+            chosen = chooser.selectedFile?.takeIf { it.isFile && it.extension.equals("exe", ignoreCase = true) }
+        }
+    }
+    return chosen
 }
 
 private fun splitRouteValues(value: String): List<String> = value.split(',', '\n').map(String::trim).filter(String::isNotEmpty)

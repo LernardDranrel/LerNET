@@ -158,7 +158,9 @@ object SchemaEdges {
         val toSide = if (vertical) AnchorSide.TOP else AnchorSide.LEFT
         val start = anchor(from, fromSide)
         val end = anchor(to, toSide)
+        val gap = if (vertical) end.second - start.second else end.first - start.first
         val pull = bezierPull(start.first, start.second, end.first, end.second, scale)
+            .coerceAtMost((gap / 2f).coerceAtLeast(0f))
         val c1 = control(start.first, start.second, fromSide, pull)
         val c2 = control(end.first, end.second, toSide, pull)
         return SchemaSegment(

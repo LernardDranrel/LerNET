@@ -462,11 +462,11 @@ class RouteEditorViewModel @Inject constructor(
 
     private fun removeNode(id: String) {
         val doomed = (descendants(_state.value.nodes, id) + id).toSet()
-        val reseed = elseParents(_state.value.nodes, doomed)
         _state.update {
-            val kept = it.nodes.filterNot { n -> n.id in doomed }
+            val kept = RouteFolders.restoreTerminalAfterElseDeletion(it.nodes, id)
+                .filterNot { n -> n.id in doomed }
             it.copy(
-                nodes = RouteFolders.seedMissingElse(kept, it.ownerId, ::newId, reseed),
+                nodes = RouteFolders.seedMissingElse(kept, it.ownerId, ::newId),
                 draftNodeIds = it.draftNodeIds - doomed,
                 editingId = it.editingId?.takeUnless { edit -> edit in doomed },
                 listFolderId = it.listFolderId?.takeUnless { folder -> folder in doomed },

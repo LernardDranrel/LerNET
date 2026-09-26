@@ -455,6 +455,35 @@ class DesktopController(
     fun moveRule(ruleId: String, delta: Int): Boolean = editRules { DesktopRouteTree.move(it, ruleId, delta) }
     fun reorderRule(ruleId: String, targetId: String, after: Boolean): Boolean =
         editRules { DesktopRouteTree.reorder(it, ruleId, targetId, after) }
+    data class RuleDraft(val baseline: List<StoredRule>, val rules: List<StoredRule>)
+    private val routeDrafts = mutableMapOf<String, RuleDraft>()
+    fun routeDraft(ownerId: String): RuleDraft = synchronized(routeDrafts) {
+        routeDrafts[ownerId] ?: state.value.saved.rules.filter { it.profileId == ownerId }
+            .let { RuleDraft(it, it) }
+    }
+    fun keepRuleDraft(ownerId: String, baseline: List<StoredRule>, rules: List<StoredRule>) {
+        synchronized(routeDrafts) { routeDrafts[ownerId] = RuleDraft(baseline, rules) }
+    }
+    fun clearRuleDraft(ownerId: String) {
+        synchronized(routeDrafts) { routeDrafts.remove(ownerId) }
+    }
+    fun commitRuleDraft(ownerId: String, baseline: List<StoredRule>, draft: List<StoredRule>): Boolean {
+        synchronized(this) {
+            val current = state.value.saved.rules.filter { it.profileId == ownerId }
+            if (current != baseline) {
+                mutable.update { it.copy(message = "Маршруты изменились в другом окне. Черновик не сохранён.") }
+                return false
+            }
+            if (draft.any { it.profileId != ownerId } || draft.map { it.id }.distinct().size != draft.size) {
+                mutable.update { it.copy(message = "Черновик содержит некорректные правила.") }
+                return false
+            }
+            return change { saved ->
+                val all = saved.rules.filterNot { it.profileId == ownerId } + draft
+                saved.copy(rules = all, rulePositions = saved.rulePositions.filterKeys { id -> all.any { it.id == id } })
+            }
+        }
+    }
     fun setRulePosition(ruleId: String, position: RulePosition) = change { saved ->
         saved.copy(rulePositions = saved.rulePositions + (ruleId to position))
     }
@@ -468,8 +497,12 @@ class DesktopController(
         return change { it.copy(rules = result.rules, rulePositions = it.rulePositions.filterKeys { id -> result.rules.any { rule -> rule.id == id } }) }
     }
 
-    fun preview(profileId: String? = state.value.saved.selectedProfileId, draftProfile: StoredProfile? = null): AssembledConfig {
-        val saved = state.value.saved
+    fun preview(profileId: String? = state.value.saved.selectedProfileId, draftProfile: StoredProfile? = null,
+                draftRules: List<StoredRule>? = null, draftOwnerId: String? = null): AssembledConfig {
+        val source = state.value.saved
+        val saved = if (draftRules != null && draftOwnerId != null) source.copy(
+            rules = source.rules.filterNot { it.profileId == draftOwnerId } + draftRules
+        ) else source
         val profile = draftProfile ?: saved.profiles.firstOrNull { it.id == profileId }
             ?: return AssembledConfig("", "", listOf("Выберите профиль"))
         val outbound = profile.selectedOutbound

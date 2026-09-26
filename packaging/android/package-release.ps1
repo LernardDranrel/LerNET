@@ -9,7 +9,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Could not prepare Android release key' }
 if ($LASTEXITCODE -ne 0) { throw 'Android release build failed' }
 
 $source = Join-Path $root 'app\build\outputs\apk\release\app-release.apk'
-$target = Join-Path $root 'artifacts\LerNET-1.0.0.apk'
+$target = Join-Path $root 'artifacts\LerNET-1.0.1.apk'
 if (-not (Test-Path -LiteralPath $source)) { throw "Signed APK is missing: $source" }
 New-Item -ItemType Directory -Path (Join-Path $root 'artifacts') -Force | Out-Null
 Copy-Item -LiteralPath $source -Destination $target -Force
