@@ -18,9 +18,10 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import app.lernet.config.model.Profile
 import app.lernet.config.model.ProfileSource
+import app.lernet.config.model.Group
+import app.lernet.config.repo.RouteOwners
 import app.lernet.engine.ConnectionSnapshot
 import app.lernet.engine.ConnectionState
-import app.lernet.engine.RunMode
 import app.lernet.ui.theme.LerNetTheme
 import com.google.common.truth.Truth.assertThat
 import java.io.File
@@ -46,10 +47,10 @@ class ConnectionHeroTest {
                 Box(Modifier.width(320.dp)) {
                     ConnectionHero(
                         connection = ConnectionState.CONNECTING,
-                        mode = RunMode.FULL_VPN,
                         status = "Подключение…",
                         enabled = true,
                         onToggle = { toggles++ },
+                        onOpenRoutes = null,
                     ) { Text("Выбранный сервер") }
                 }
             }
@@ -65,10 +66,10 @@ class ConnectionHeroTest {
             LerNetTheme {
                 ConnectionHero(
                     connection = ConnectionState.DISCONNECTED,
-                    mode = RunMode.FULL_VPN,
                     status = "Отключено",
                     enabled = false,
                     onToggle = { toggles++ },
+                    onOpenRoutes = null,
                 ) { Text("Выберите профиль") }
             }
         }
@@ -78,6 +79,7 @@ class ConnectionHeroTest {
 
     @Test
     fun mobileHomeShowsServerAndTunnelLatency() {
+        var openedOwner: String? = null
         val profile = Profile(
             id = "selected",
             name = "Amsterdam · основной",
@@ -107,11 +109,14 @@ class ConnectionHeroTest {
                     onOpenDrawer = {},
                     onOpenSettings = {},
                     onOpenDiag = {},
+                    onOpenRoutes = { openedOwner = it },
                     onRefreshHop = {},
                 )
             }
         }
         rule.onNodeWithContentDescription("Отключить").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Открыть схему маршрутизации").assertIsEnabled().performClick()
+        rule.runOnIdle { assertThat(openedOwner).isEqualTo(profile.id) }
         rule.onNodeWithText(profile.name).assertIsDisplayed()
         rule.onNodeWithText("46 мс").assertIsDisplayed()
         rule.onNodeWithText("147 мс").assertIsDisplayed()
@@ -127,5 +132,34 @@ class ConnectionHeroTest {
             }
             bitmap.recycle()
         }
+    }
+
+    @Test
+    fun routeShortcutOpensRunningProfilesGroupAndStandaloneProfile() {
+        val selected = Profile(
+            id = "selected",
+            name = "Нидерланды",
+            createdAtEpochMs = 0,
+            updatedAtEpochMs = 0,
+            source = ProfileSource.VLESS,
+            selectedOutboundId = "main",
+            outbounds = emptyList(),
+            subscriptionUrl = null,
+            lastRefreshEpochMs = null,
+        )
+        val running = selected.copy(id = "running", name = "Германия")
+        val group = Group(id = "folder", name = "Европа", profileIds = listOf(running.id))
+        val connected = HomeUiState(
+            snapshot = ConnectionSnapshot.idle().copy(
+                state = ConnectionState.CONNECTED,
+                activeProfileId = running.id,
+            ),
+            activeProfile = selected,
+            profiles = listOf(selected, running),
+            groups = listOf(group),
+        )
+        assertThat(homeRouteOwnerId(connected)).isEqualTo(RouteOwners.group(group.id))
+        assertThat(homeRouteOwnerId(connected.copy(groups = emptyList()))).isEqualTo(running.id)
+        assertThat(homeRouteOwnerId(connected.copy(snapshot = ConnectionSnapshot.idle()))).isEqualTo(selected.id)
     }
 }

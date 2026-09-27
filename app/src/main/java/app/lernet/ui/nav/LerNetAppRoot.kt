@@ -398,6 +398,7 @@ private fun AppNavHost(
                 onOpenDrawer = onOpenDrawer,
                 onOpenSettings = { navController.navigate(Dest.Settings.route) },
                 onOpenDiag = { navController.navigate(Dest.Diag.route) },
+                onOpenRoutes = { ownerId -> navController.navigate(Dest.Routes.of(ownerId)) },
                 onRefreshHop = homeViewModel::refreshHop,
                 showCrashBanner = showCrashBanner,
             )

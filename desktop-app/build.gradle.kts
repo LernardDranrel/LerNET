@@ -43,7 +43,7 @@ compose.desktop {
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe,
             )
             packageName = "LerNET"
-            packageVersion = "1.0.2"
+            packageVersion = "1.0.3"
             // Desktop features use JDK services that jdeps can miss through reflection.
             includeAllModules = true
             windows {

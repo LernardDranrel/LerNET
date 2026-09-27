@@ -24,7 +24,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -49,7 +51,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.lernet.R
 import app.lernet.engine.ConnectionState
-import app.lernet.engine.RunMode
 import app.lernet.ui.icons.LerNetSymbols
 import app.lernet.ui.layout.rememberCompactMetrics
 import app.lernet.ui.motion.motionTween
@@ -60,10 +61,10 @@ import app.lernet.ui.theme.LerNetOk
 @Composable
 internal fun ConnectionHero(
     connection: ConnectionState,
-    mode: RunMode,
     status: String,
     enabled: Boolean,
     onToggle: () -> Unit,
+    onOpenRoutes: (() -> Unit)?,
     profile: @Composable ColumnScope.() -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -111,12 +112,19 @@ internal fun ConnectionHero(
                     color = scheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
-                Surface(color = scheme.primaryContainer, shape = CircleShape) {
-                    Text(
-                        stringResource(if (mode == RunMode.FULL_VPN) R.string.home_mode_vpn_short else R.string.mode_proxy),
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = scheme.onPrimaryContainer,
+                FilledTonalIconButton(
+                    onClick = { onOpenRoutes?.invoke() },
+                    enabled = onOpenRoutes != null,
+                    modifier = Modifier.size(40.dp),
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = scheme.primaryContainer,
+                        contentColor = scheme.onPrimaryContainer,
+                    ),
+                ) {
+                    Icon(
+                        LerNetSymbols.route(),
+                        contentDescription = stringResource(R.string.home_open_routes),
+                        modifier = Modifier.size(21.dp),
                     )
                 }
             }

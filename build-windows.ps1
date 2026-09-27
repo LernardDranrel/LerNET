@@ -12,8 +12,8 @@ if ($LASTEXITCODE -ne 0) { throw "Windows build failed: $LASTEXITCODE" }
 
 $image = Join-Path $root 'desktop-app\build\compose\binaries\main\app\LerNET'
 $artifactDirectory = Join-Path $root 'artifacts'
-$archive = Join-Path $artifactDirectory 'LerNET-1.0.2-portable.zip'
-$installer = Join-Path $artifactDirectory 'LerNET-1.0.2-install.exe'
+$archive = Join-Path $artifactDirectory 'LerNET-1.0.3-portable.zip'
+$installer = Join-Path $artifactDirectory 'LerNET-1.0.3-install.exe'
 New-Item -ItemType Directory -Path $artifactDirectory -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'packaging\windows\Start-LerNET.cmd') -Destination $image -Force
 Copy-Item -LiteralPath (Join-Path $root 'packaging\windows\README-Windows.txt') -Destination $image -Force

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="home_connection_title">Ваше подключение</string>
-    <string name="home_mode_vpn_short">VPN</string>
+    <string name="home_open_routes">Открыть схему маршрутизации</string>
     <string name="home_choose_before_connect">Выберите профиль для подключения</string>
     <string name="home_latency_title">Проверка связи</string>
     <string name="home_latency_check">Проверить связь</string>

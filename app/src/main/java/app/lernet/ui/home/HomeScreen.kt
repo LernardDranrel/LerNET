@@ -63,6 +63,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.lernet.LerNetApp
 import app.lernet.R
+import app.lernet.config.repo.RouteOwners
 import app.lernet.engine.ConnectionCause
 import app.lernet.engine.ConnectionSnapshot
 import app.lernet.engine.ConnectionState
@@ -91,6 +92,7 @@ fun HomeScreen(
     onOpenDrawer: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenDiag: () -> Unit,
+    onOpenRoutes: (String) -> Unit,
     onRefreshHop: () -> Unit,
     showCrashBanner: Boolean = true,
     modifier: Modifier = Modifier,
@@ -119,6 +121,7 @@ fun HomeScreen(
             state = state,
             onIntent = onIntent,
             onOpenDrawer = onOpenDrawer,
+            onOpenRoutes = onOpenRoutes,
             onRefreshHop = onRefreshHop,
             showCrashBanner = showCrashBanner,
             modifier = Modifier.padding(padding),
@@ -131,6 +134,7 @@ private fun HomeBody(
     state: HomeUiState,
     onIntent: (HomeIntent) -> Unit,
     onOpenDrawer: () -> Unit,
+    onOpenRoutes: (String) -> Unit,
     onRefreshHop: () -> Unit,
     showCrashBanner: Boolean,
     modifier: Modifier = Modifier,
@@ -158,10 +162,10 @@ private fun HomeBody(
         }
         ConnectionHero(
             connection = snapshot.state,
-            mode = liveMode,
             status = phaseLabel(snapshot.state),
             enabled = state.activeProfile != null || isSessionActive(snapshot.state),
             onToggle = { onIntent(HomeIntent.ToggleConnect) },
+            onOpenRoutes = homeRouteOwnerId(state)?.let { ownerId -> { onOpenRoutes(ownerId) } },
         ) {
             ProfileChip(
                 name = state.activeProfile?.name,
@@ -214,6 +218,16 @@ private fun HomeBody(
         }
         Spacer(Modifier.height(LerNetDimens.itemGap))
     }
+}
+
+internal fun homeRouteOwnerId(state: HomeUiState): String? {
+    val profileId = (if (isSessionActive(state.snapshot.state)) state.snapshot.activeProfileId else null)
+        ?.takeIf { activeId -> state.profiles.any { it.id == activeId } }
+        ?: state.activeProfile?.id
+        ?: return null
+    return state.groups.firstOrNull { profileId in it.profileIds }
+        ?.let { RouteOwners.group(it.id) }
+        ?: profileId
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
