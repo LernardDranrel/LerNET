@@ -82,7 +82,7 @@ private val panel = Color(0xFF151D2B)
 private val blue = Color(0xFF91ABFF)
 private val muted = Color(0xFFA1AEC4)
 private val green = Color(0xFF80DEBE)
-private const val APP_VERSION = "1.0.1"
+private const val APP_VERSION = "1.0.2"
 internal val desktopColors = darkColorScheme(
     primary = blue, onPrimary = background,
     primaryContainer = Color(0xFF293B62), onPrimaryContainer = Color(0xFFE1E8FF),

@@ -10,6 +10,7 @@ $env:GRADLE_USER_HOME = Join-Path $workspace '.gradle-local'
 $env:TEMP = Join-Path $workspace '.tmp'
 $env:TMP = $env:TEMP
 $env:TMPDIR = $env:TEMP
+$env:WIX_TEMP = $env:TEMP
 $env:JAVA_TOOL_OPTIONS = "-Djava.io.tmpdir=$env:TEMP -Duser.home=$workspace"
 
 if (-not $env:JAVA_HOME -or -not (Test-Path -LiteralPath (Join-Path $env:JAVA_HOME 'bin\jlink.exe'))) {

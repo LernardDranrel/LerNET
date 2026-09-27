@@ -27,11 +27,19 @@ internal fun ConnectionLatencyCard(state: HomeUiState, onIntent: (HomeIntent) ->
     val snapshot = state.snapshot
     val connected = snapshot.state == ConnectionState.CONNECTED
     val liveServerMs = snapshot.serverTcpMs.takeIf { profileId != null && snapshot.activeProfileId == profileId }
-    val serverMs = if (connected) liveServerMs else probe?.tcpMs ?: liveServerMs
+    val serverMs = if (probe != null && !probe.running) probe.tcpMs else liveServerMs
     val serverValue = when {
         probe?.running == true -> stringResource(R.string.home_latency_checking)
         serverMs != null -> stringResource(R.string.home_latency_ms, serverMs)
         probe != null && !probe.reachable -> stringResource(R.string.home_latency_no_response)
+        else -> stringResource(R.string.home_latency_unmeasured)
+    }
+    val tunnelMs = probe?.tunnelMs.takeIf { connected && snapshot.activeProfileId == profileId }
+    val tunnelValue = when {
+        !connected -> stringResource(R.string.home_latency_unmeasured)
+        probe?.running == true -> stringResource(R.string.home_latency_checking)
+        tunnelMs != null -> stringResource(R.string.home_latency_ms, tunnelMs)
+        probe?.tunnelChecked == true -> stringResource(R.string.home_latency_no_response)
         else -> stringResource(R.string.home_latency_unmeasured)
     }
     PanelCard {
@@ -57,11 +65,11 @@ internal fun ConnectionLatencyCard(state: HomeUiState, onIntent: (HomeIntent) ->
             )
             LatencyTile(
                 title = stringResource(R.string.home_latency_tunnel),
-                value = stringResource(R.string.home_latency_unmeasured),
+                value = tunnelValue,
                 subtitle = stringResource(
                     if (connected) R.string.home_latency_tunnel_hint else R.string.home_latency_tunnel_disconnected,
                 ),
-                healthy = false,
+                healthy = tunnelMs != null && probe?.running != true,
                 modifier = Modifier.weight(1f),
             )
         }

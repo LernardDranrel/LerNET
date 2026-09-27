@@ -4,7 +4,7 @@
     <string name="home_mode_vpn_short">VPN</string>
     <string name="home_choose_before_connect">Выберите профиль для подключения</string>
     <string name="home_latency_title">Проверка связи</string>
-    <string name="home_latency_check">Проверить сервер</string>
+    <string name="home_latency_check">Проверить связь</string>
     <string name="home_latency_checking">Проверяем…</string>
     <string name="home_latency_ms">%1$d мс</string>
     <string name="home_latency_no_response">Нет ответа</string>
@@ -12,9 +12,9 @@
     <string name="home_latency_server">До сервера</string>
     <string name="home_latency_server_hint">TCP · напрямую</string>
     <string name="home_latency_tunnel">Через туннель</string>
-    <string name="home_latency_tunnel_hint">RTT пока недоступен</string>
+    <string name="home_latency_tunnel_hint">HTTPS · через профиль</string>
     <string name="home_latency_tunnel_disconnected">Нет подключения</string>
-    <string name="home_latency_distinction">Доступность сервера не подтверждает работу туннеля.</string>
+    <string name="home_latency_distinction">TCP до сервера и HTTPS через выбранный профиль проверяются отдельно.</string>
     <string name="home_hop_title">Путь до VPN</string>
     <string name="home_hop_checking">Проверяем…</string>
     <string name="home_hop_check">Проверить</string>

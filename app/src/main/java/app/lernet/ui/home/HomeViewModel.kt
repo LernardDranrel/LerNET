@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import java.util.concurrent.atomic.AtomicLong
 import app.lernet.LerNetApp
 import app.lernet.config.model.Group
 import app.lernet.config.model.GroupLayout
@@ -25,6 +26,7 @@ import app.lernet.vpn.AndroidProtectedDialer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitAll
@@ -33,7 +35,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -56,7 +61,14 @@ data class HomeUiState(
     val probes: Map<String, ProfileProbe> = emptyMap(),
 )
 
-data class ProfileProbe(val running: Boolean = false, val tcpMs: Long? = null, val reachable: Boolean = false)
+data class ProfileProbe(
+    val running: Boolean = false,
+    val tcpMs: Long? = null,
+    val reachable: Boolean = false,
+    val tunnelMs: Long? = null,
+    val tunnelChecked: Boolean = false,
+    val requestId: Long = 0,
+)
 
 sealed class HomeIntent {
     data object ToggleConnect : HomeIntent()
@@ -178,9 +190,20 @@ class HomeViewModel @Inject constructor(
     private val overlay = MutableStateFlow(
         HomeOverlay(offerLastLogs = (appContext as LerNetApp).logStore.offerBanner),
     )
+    private val probeRequestIds = AtomicLong()
     private var lastDeleted: DeletedSnapshot? = null
 
     init {
+        viewModelScope.launch {
+            controller.snapshot
+                .map { it.state to it.activeProfileId }
+                .distinctUntilChanged()
+                .collectLatest { (connectionState, profileId) ->
+                    if (connectionState == ConnectionState.CONNECTED && profileId != null) {
+                        probeProfiles(listOf(profileId))
+                    }
+                }
+        }
         viewModelScope.launch {
             val legacy = settingsStore.settings.first()
             if (legacy.failoverEnabled && legacy.failoverGroupId != null) {
@@ -356,26 +379,56 @@ class HomeViewModel @Inject constructor(
         val profiles = repository.profiles.first().associateBy { it.id }
         val unique = ids.distinct().filter { it in profiles }
         if (unique.isEmpty()) return
-        overlay.update { old -> old.copy(probes = old.probes + unique.associateWith { ProfileProbe(running = true) }) }
+        val requestId = probeRequestIds.incrementAndGet()
+        overlay.update { old ->
+            old.copy(probes = old.probes + unique.associateWith { ProfileProbe(running = true, requestId = requestId) })
+        }
         val slots = Semaphore(4)
-        unique.map { id ->
-            viewModelScope.async {
-                slots.withPermit {
-                    val endpoint = profiles[id]?.selectedOutbound()?.singBoxJson?.let(OutboundEndpoint::parse)
-                    val result = if (endpoint == null) {
-                        ProfileProbe(reachable = false)
-                    } else {
-                        val startedAt = System.nanoTime()
-                        val ok = AndroidProtectedDialer().dial(endpoint, 3_000).isSuccess
-                        ProfileProbe(
-                            tcpMs = if (ok) ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(1) else null,
-                            reachable = ok
-                        )
+        try {
+            coroutineScope {
+                unique.map { id ->
+                    async {
+                        slots.withPermit {
+                            val endpoint = profiles[id]?.selectedOutbound()?.singBoxJson?.let(OutboundEndpoint::parse)
+                            val server = if (endpoint == null) {
+                                ProfileProbe(reachable = false)
+                            } else {
+                                val startedAt = System.nanoTime()
+                                val ok = AndroidProtectedDialer().dial(endpoint, 3_000).isSuccess
+                                ProfileProbe(
+                                    tcpMs = if (ok) ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(1) else null,
+                                    reachable = ok,
+                                )
+                            }
+                            val snapshot = controller.snapshot.value
+                            val tunnel = if (snapshot.state == ConnectionState.CONNECTED && snapshot.activeProfileId == id) {
+                                AndroidTunnelProbe.measure()
+                            } else {
+                                null
+                            }
+                            val result = server.copy(
+                                tunnelMs = tunnel?.getOrNull(),
+                                tunnelChecked = tunnel != null,
+                                requestId = requestId,
+                            )
+                            overlay.update { old ->
+                                if (old.probes[id]?.requestId == requestId) {
+                                    old.copy(probes = old.probes + (id to result))
+                                } else {
+                                    old
+                                }
+                            }
+                        }
                     }
-                    overlay.update { old -> old.copy(probes = old.probes + (id to result)) }
-                }
+                }.awaitAll()
             }
-        }.awaitAll()
+        } finally {
+            overlay.update { old ->
+                old.copy(probes = old.probes.mapValues { (id, probe) ->
+                    if (id in unique && probe.requestId == requestId) probe.copy(running = false) else probe
+                })
+            }
+        }
     }
 
     fun assignImportedToGroup(groupId: String, profileIds: List<String>) {

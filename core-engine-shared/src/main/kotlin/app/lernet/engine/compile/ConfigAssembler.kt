@@ -32,6 +32,9 @@ object ConfigAssembler {
     const val TUN_MTU = 1500
     const val TUN_ADDRESS = "172.19.0.1/30"
     const val TUN_STACK = "gvisor"
+    const val ANDROID_PROBE_PORT = 2081
+    const val ANDROID_PROBE_HOST = "cp.cloudflare.com"
+    const val ANDROID_PROBE_URL = "https://cp.cloudflare.com/generate_204"
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -71,7 +74,7 @@ object ConfigAssembler {
         val inbound = inboundFor(mode, defaults, platform)
         val preparedDns = DnsBlock.prepare(dnsJson, outbound.tag, dnsPolicy, defaults.directDnsServer)
         val dns = preparedDns.dns
-        val rules = platformRules(mode) +
+        val rules = platformRules(mode, platform, outbound.tag) +
             RouteCompiler.toSingBoxRules(compiledRoute, outbound.tag, pipeTags) +
             finalReject(compiledRoute)
         val finalTag = when (compiledRoute.finalAction) {
@@ -86,7 +89,10 @@ object ConfigAssembler {
                 put("timestamp", true)
             }
             put("dns", dns)
-            put("inbounds", buildJsonArray { add(inbound) })
+            put("inbounds", buildJsonArray {
+                add(inbound)
+                if (platform == EnginePlatform.ANDROID) add(androidProbeInbound())
+            })
             put("outbounds", outboundArray(tagged, clones.map { it.outbound }))
             put("route", routeBlock(rules, finalTag, dns, ruleSets.entries))
         }
@@ -141,8 +147,21 @@ object ConfigAssembler {
             )
         }
 
-    private fun platformRules(mode: RunMode): List<JsonObject> =
+    private fun platformRules(mode: RunMode, platform: EnginePlatform, proxyTag: String): List<JsonObject> =
         buildList {
+            if (platform == EnginePlatform.ANDROID) {
+                // Permit only this health endpoint to bypass user rules via the loopback probe listener.
+                add(buildJsonObject {
+                    put("inbound", buildJsonArray { add(JsonPrimitive("probe-in")) })
+                    put("domain", buildJsonArray { add(JsonPrimitive(ANDROID_PROBE_HOST)) })
+                    put("port", buildJsonArray { add(JsonPrimitive(443)) })
+                    put("outbound", proxyTag)
+                })
+                add(buildJsonObject {
+                    put("inbound", buildJsonArray { add(JsonPrimitive("probe-in")) })
+                    put("action", "reject")
+                })
+            }
             // Canonical: sniff without inbound so TCP rematches after timeout.
             // Hijack port 53 then protocol=dns (sing-box#3878). Never mixed.
             add(
@@ -172,6 +191,13 @@ object ConfigAssembler {
                 )
             }
         }
+
+    private fun androidProbeInbound(): JsonObject = buildJsonObject {
+        put("type", "mixed")
+        put("tag", "probe-in")
+        put("listen", "127.0.0.1")
+        put("listen_port", ANDROID_PROBE_PORT)
+    }
 
     private fun finalReject(compiledRoute: CompiledRoute): List<JsonObject> =
         if (compiledRoute.finalAction == RouteAction.BLOCK) {

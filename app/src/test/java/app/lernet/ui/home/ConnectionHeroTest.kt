@@ -77,7 +77,7 @@ class ConnectionHeroTest {
     }
 
     @Test
-    fun mobileHomeShowsServerLatencyWithoutClaimingATunnelMeasurement() {
+    fun mobileHomeShowsServerAndTunnelLatency() {
         val profile = Profile(
             id = "selected",
             name = "Amsterdam · основной",
@@ -101,6 +101,7 @@ class ConnectionHeroTest {
                         activeProfile = profile,
                         profiles = listOf(profile),
                         engineAvailable = true,
+                        probes = mapOf(profile.id to ProfileProbe(tcpMs = 46, reachable = true, tunnelMs = 147, tunnelChecked = true)),
                     ),
                     onIntent = {},
                     onOpenDrawer = {},
@@ -113,7 +114,8 @@ class ConnectionHeroTest {
         rule.onNodeWithContentDescription("Отключить").assertIsDisplayed()
         rule.onNodeWithText(profile.name).assertIsDisplayed()
         rule.onNodeWithText("46 мс").assertIsDisplayed()
-        rule.onNodeWithText("RTT пока недоступен").assertIsDisplayed()
+        rule.onNodeWithText("147 мс").assertIsDisplayed()
+        rule.onNodeWithText("HTTPS · через профиль").assertIsDisplayed()
         val screenshot = File("build/reports/ui/mobile-home.png")
         screenshot.parentFile?.mkdirs()
         rule.runOnIdle {
