@@ -1,0 +1,33 @@
+name: Publish LerNET v1.0.3
+
+on:
+  push:
+    branches:
+      - codex/release-upload-v1.0.3
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Verify release files
+        working-directory: uploads/v1.0.3
+        run: sha256sum -c SHA256SUMS.txt
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v1.0.3 \
+            uploads/v1.0.3/LerNET-1.0.3.apk \
+            uploads/v1.0.3/LerNET-1.0.3-install.exe \
+            uploads/v1.0.3/LerNET-1.0.3-portable.zip \
+            uploads/v1.0.3/SHA256SUMS.txt \
+            --repo LernardDranrel/LerNET \
+            --verify-tag \
+            --title "LerNET 1.0.3" \
+            --notes-file uploads/v1.0.3/RELEASE_NOTES.md
