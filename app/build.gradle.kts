@@ -11,6 +11,7 @@ plugins {
 
 val packEmuAbis =
     providers.gradleProperty("emuAbis").orElse("false").get().toBoolean()
+val lernetVersion = providers.gradleProperty("lernetVersion").get()
 
 val signingPropertiesFile = rootProject.file(".release/signing.properties")
 val signingProperties = Properties().apply {
@@ -25,8 +26,8 @@ android {
         applicationId = "app.lernet"
         minSdk = 26
         targetSdk = 36
-        versionCode = 103
-        versionName = "1.0.3"
+        versionCode = 104
+        versionName = lernetVersion
         buildConfigField("String", "GIT_SHA", "\"${gitHeadSha()}\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {

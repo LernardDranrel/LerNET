@@ -219,7 +219,7 @@
     <string name="dismiss_crash">Закрыть</string>
     <string name="logs_share_failed">Не удалось открыть шаринг</string>
     <string name="settings_about">О приложении</string>
-    <string name="app_version">LerNET %1$s</string>
+    <string name="app_version">LerNET v%1$s</string>
     <string name="libbox_version">Ядро libbox: %1$s</string>
     <string name="version_copied">Версия ядра скопирована</string>
     <string name="groups_title">Папки</string>

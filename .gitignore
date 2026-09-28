@@ -29,6 +29,7 @@ local.properties
 notes-private/
 uploads/
 agent-tools/
+.codex-remote-attachments/
 keystore.properties
 *.jks
 *.keystore

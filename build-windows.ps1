@@ -2,6 +2,10 @@ param([switch]$PackageOnly)
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
+$versionLine = Get-Content -LiteralPath (Join-Path $root 'gradle.properties') |
+    Where-Object { $_ -match '^lernetVersion=' } | Select-Object -First 1
+if (-not $versionLine) { throw 'lernetVersion is missing from gradle.properties' }
+$appVersion = $versionLine.Substring('lernetVersion='.Length).Trim()
 $tasks = if ($PackageOnly) {
     @(':desktop-app:createDistributable', ':desktop-app:packageExe', '--offline', '--no-daemon')
 } else {
@@ -12,8 +16,8 @@ if ($LASTEXITCODE -ne 0) { throw "Windows build failed: $LASTEXITCODE" }
 
 $image = Join-Path $root 'desktop-app\build\compose\binaries\main\app\LerNET'
 $artifactDirectory = Join-Path $root 'artifacts'
-$archive = Join-Path $artifactDirectory 'LerNET-1.0.3-portable.zip'
-$installer = Join-Path $artifactDirectory 'LerNET-1.0.3-install.exe'
+$archive = Join-Path $artifactDirectory "LerNET-$appVersion-portable.zip"
+$installer = Join-Path $artifactDirectory "LerNET-$appVersion-install.exe"
 New-Item -ItemType Directory -Path $artifactDirectory -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'packaging\windows\Start-LerNET.cmd') -Destination $image -Force
 Copy-Item -LiteralPath (Join-Path $root 'packaging\windows\README-Windows.txt') -Destination $image -Force

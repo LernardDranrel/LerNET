@@ -5,6 +5,14 @@ plugins {
     id("org.jetbrains.compose") version "1.10.3"
 }
 
+val lernetVersion = providers.gradleProperty("lernetVersion").get()
+
+tasks.processResources {
+    filesMatching("lernet-version.txt") {
+        expand("lernetVersion" to lernetVersion)
+    }
+}
+
 java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
@@ -43,7 +51,7 @@ compose.desktop {
                 org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe,
             )
             packageName = "LerNET"
-            packageVersion = "1.0.3"
+            packageVersion = lernetVersion
             // Desktop features use JDK services that jdeps can miss through reflection.
             includeAllModules = true
             windows {

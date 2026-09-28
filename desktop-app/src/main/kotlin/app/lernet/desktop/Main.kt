@@ -38,6 +38,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
@@ -53,6 +54,9 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.semantics.Role
@@ -82,7 +86,9 @@ private val panel = Color(0xFF151D2B)
 private val blue = Color(0xFF91ABFF)
 private val muted = Color(0xFFA1AEC4)
 private val green = Color(0xFF80DEBE)
-private const val APP_VERSION = "1.0.3"
+private val APP_VERSION: String = AppVersionResource::class.java.getResourceAsStream("/lernet-version.txt")
+    ?.bufferedReader()?.use { it.readText().trim() }?.takeIf { it.isNotBlank() } ?: "dev"
+private object AppVersionResource
 internal val desktopColors = darkColorScheme(
     primary = blue, onPrimary = background,
     primaryContainer = Color(0xFF293B62), onPrimaryContainer = Color(0xFFE1E8FF),
@@ -231,7 +237,7 @@ private fun DesktopScreen(controller: DesktopController, onRequestElevation: () 
             Spacer(Modifier.weight(1f))
             HorizontalDivider(color = desktopColors.outlineVariant)
             Spacer(Modifier.height(12.dp))
-            Text("LerNET $APP_VERSION", color = muted, fontSize = 11.sp)
+            Text("LerNET v$APP_VERSION", color = muted, fontSize = 11.sp)
         }
         Column(Modifier.weight(1f).fillMaxHeight().padding(22.dp)) {
             val statusLine = (if (tunnel.status == TunnelStatus.RUNNING) ui.healthMessage else tunnel.message)
@@ -425,6 +431,14 @@ private fun Profiles(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, 
                             modifier = Modifier.fillMaxWidth().onGloballyPositioned { groupBounds[group.id] = it.boundsInWindow() }
                                 .graphicsLayer { translationY = if (draggingGroupId == group.id) groupDragDelta.y else 0f
                                     shadowElevation = if (draggingGroupId == group.id) 20f else 0f }
+                                .wholeCardDrag(group.id,
+                                    onDragStart = { local ->
+                                        draggingGroupId = group.id
+                                        groupDragStart = (groupBounds[group.id]?.topLeft ?: Offset.Zero) + local
+                                        groupDragDelta = Offset.Zero
+                                    },
+                                    onDrag = { groupDragDelta += it },
+                                    onDragEnd = finishGroupDrag)
                                 .focusRequester(groupFocus).focusable()
                                 .onPreviewKeyEvent { event ->
                                     if (event.type == KeyEventType.KeyDown && event.key in setOf(Key.Delete, Key.Backspace)) {
@@ -439,29 +453,44 @@ private fun Profiles(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, 
                                 FolderGlyph()
                                 Spacer(Modifier.width(10.dp))
                                 Column(Modifier.weight(1f)) {
-                                    Text(group.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
-                                    Text("${saved.profiles.count { it.groupId == group.id }} конфигов" + if (group.autoSwap) " · автопереключение ⇄" else "",
-                                        color = muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(group.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                            fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f, fill = false))
+                                        if (group.autoSwap) {
+                                            Spacer(Modifier.width(6.dp))
+                                            Text("АВТО", color = green, fontSize = 9.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                modifier = Modifier.clip(RoundedCornerShape(4.dp))
+                                                    .background(green.copy(alpha = .12f))
+                                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                                                    .semantics { contentDescription = "Автопереключение включено" })
+                                        }
+                                        Spacer(Modifier.width(4.dp))
+                                        FolderChevron(group.id in expanded)
+                                    }
+                                    Text("${saved.profiles.count { it.groupId == group.id }} конфигов",
+                                        color = muted, fontSize = 11.sp, maxLines = 1)
                                     val groupResults = saved.profiles.filter { it.groupId == group.id }.mapNotNull { probes[it.id] }
                                     if (groupResults.isNotEmpty()) {
                                         Text("Сервер ${groupResults.count { it.latencyMs != null }} · канал ${groupResults.count { it.tunnelLatencyMs != null }}",
                                             color = blue, fontSize = 10.sp, maxLines = 1)
                                     }
                                 }
-                                FolderChevron(group.id in expanded)
-                                TextButton(onClick = { controller.probe(saved.profiles.filter { it.groupId == group.id }.map { it.id }) },
-                                    modifier = Modifier.size(30.dp), contentPadding = PaddingValues(0.dp)) { Text("↻", fontSize = 19.sp) }
-                                DragHandle(onDragStart = { point ->
-                                    draggingGroupId = group.id; groupDragStart = point; groupDragDelta = Offset.Zero
-                                }, onDrag = { groupDragDelta += it }, onDragEnd = finishGroupDrag)
+                                GroupActionButton("Проверить серверы папки",
+                                    onClick = { controller.probe(saved.profiles.filter { it.groupId == group.id }.map { it.id }) }) { color ->
+                                    PingGlyph(color)
+                                }
+                                Spacer(Modifier.width(2.dp))
                                 Box {
-                                    TextButton(onClick = { groupMenu = group.id }, modifier = Modifier.size(28.dp),
-                                        contentPadding = PaddingValues(0.dp)) { Text("⋮", fontSize = 19.sp) }
+                                    GroupActionButton("Действия с папкой", onClick = { groupMenu = group.id }) { color ->
+                                        Text("⋮", color = color, fontSize = 18.sp, lineHeight = 18.sp)
+                                    }
                                     DropdownMenu(expanded = groupMenu == group.id, onDismissRequest = { groupMenu = null }) {
+                                        DropdownMenuItem(text = { Text(if (group.autoSwap) "Выключить автосмену" else "Включить автосмену") },
+                                            onClick = { controller.setGroupSwap(group.id, !group.autoSwap); groupMenu = null })
                                         DropdownMenuItem(text = { Text("Добавить конфиг сюда") }, onClick = { onImport(group.id); groupMenu = null })
                                         DropdownMenuItem(text = { Text("Маршруты папки") }, onClick = { onGroupRoutes(group.id); groupMenu = null })
                                         DropdownMenuItem(text = { Text("Экспортировать папку") }, onClick = { groupMenu = null; onExportGroup(group) })
-                                        DropdownMenuItem(text = { Text(if (group.autoSwap) "Выключить автопереключение" else "Включить автопереключение") }, onClick = { controller.setGroupSwap(group.id, !group.autoSwap); groupMenu = null })
                                         DropdownMenuItem(text = { Text("Переименовать") }, onClick = { renameGroup = group; groupMenu = null })
                                         DropdownMenuItem(text = { Text("Удалить папку") }, onClick = { deleteGroup = group; groupMenu = null })
                                     }
@@ -478,7 +507,8 @@ private fun Profiles(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, 
                                 if (controller.setGroup(profile.id, destination) && destination != null) expanded = expanded + destination
                             },
                             dragging = draggingId == profile.id, dropTarget = hoveredProfile == profile.id, indent = true, dragOffset = dragDelta,
-                            onBounds = { profileBounds[profile.id] = it }, onDragStart = { local -> beginDrag(profile.id, local) },
+                            onBounds = { profileBounds[profile.id] = it },
+                            onDragStart = { local -> beginDrag(profile.id, (profileBounds[profile.id]?.topLeft ?: Offset.Zero) + local) },
                             onDrag = { dragDelta += it }, onDragEnd = finishDrag,
                             onDelete = { delete = profile }) { controller.select(profile.id) }
                     }
@@ -492,7 +522,8 @@ private fun Profiles(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, 
                             if (controller.setGroup(profile.id, destination) && destination != null) expanded = expanded + destination
                         },
                         dragging = draggingId == profile.id, dropTarget = hoveredProfile == profile.id, indent = false, dragOffset = dragDelta,
-                        onBounds = { profileBounds[profile.id] = it }, onDragStart = { local -> beginDrag(profile.id, local) },
+                        onBounds = { profileBounds[profile.id] = it },
+                        onDragStart = { local -> beginDrag(profile.id, (profileBounds[profile.id]?.topLeft ?: Offset.Zero) + local) },
                         onDrag = { dragDelta += it }, onDragEnd = finishDrag,
                         onDelete = { delete = profile }) { controller.select(profile.id) }
                 }
@@ -529,7 +560,7 @@ private fun Profiles(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, 
                 val active = busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RUNNING, TunnelStatus.RECONNECTING)
                 Panel {
                     saved.groups.firstOrNull { it.id == selected.groupId }?.let { group ->
-                        Text(group.name + if (group.autoSwap) "  ⇄ авто-смена" else "", color = blue, fontSize = 12.sp)
+                        Text(group.name + if (group.autoSwap) "  ·  автосмена" else "", color = blue, fontSize = 12.sp)
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(22.dp)) {
@@ -834,35 +865,76 @@ private fun ProfileDetail(label: String, value: String) {
 }
 
 @Composable
-internal fun DragHandle(onDragStart: (Offset) -> Unit, onDrag: (Offset) -> Unit, onDragEnd: () -> Unit) {
-    var origin by remember { mutableStateOf(Offset.Zero) }
+private fun Modifier.wholeCardDrag(key: String, onDragStart: (Offset) -> Unit, onDrag: (Offset) -> Unit,
+    onDragEnd: () -> Unit): Modifier {
     val start by rememberUpdatedState(onDragStart)
     val drag by rememberUpdatedState(onDrag)
     val end by rememberUpdatedState(onDragEnd)
-    Canvas(Modifier.width(28.dp).height(40.dp).onGloballyPositioned { origin = it.boundsInWindow().topLeft }
-        .pointerInput(Unit) {
-            detectDragGestures(onDragStart = { start(origin + it) }, onDragEnd = { end() }, onDragCancel = { end() }) { change, amount ->
-                change.consume()
-                drag(amount)
-            }
-        }) {
-        val radius = 1.8.dp.toPx()
-        val gap = 6.dp.toPx()
-        val center = Offset(size.width / 2f, size.height / 2f)
-        for (row in -1..1) for (column in 0..1) {
-            drawCircle(muted, radius, Offset(center.x + (column - .5f) * gap, center.y + row * gap))
+    return pointerInput(key) {
+        detectDragGestures(onDragStart = { start(it) }, onDragEnd = { end() }, onDragCancel = { end() }) { change, amount ->
+            change.consume()
+            drag(amount)
         }
     }
 }
 
 @Composable
-private fun FolderChevron(expanded: Boolean) {
+private fun GroupActionButton(label: String, onClick: () -> Unit,
+    icon: @Composable (Color) -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val pressed by interaction.collectIsPressedAsState()
+    val fill by animateColorAsState(
+        when {
+            pressed -> blue.copy(alpha = .18f)
+            hovered -> blue.copy(alpha = .11f)
+            else -> Color.Transparent
+        },
+        label = "folder-action-fill",
+    )
+    Box(Modifier.size(30.dp).clip(RoundedCornerShape(7.dp)).background(fill)
+        .hoverable(interaction)
+        .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
+        .semantics {
+            contentDescription = label
+        }, contentAlignment = Alignment.Center) {
+        icon(if (hovered) blue else muted)
+    }
+}
+
+@Composable
+private fun PingGlyph(color: Color) {
     Canvas(Modifier.size(18.dp)) {
-        val center = Offset(size.width / 2f, size.height / 2f)
+        val stroke = 1.7.dp.toPx()
+        val left = size.width * .33f
+        val right = size.width * .67f
+        val top = size.height * .19f
+        val bottom = size.height * .81f
+        val wing = size.width * .14f
+        drawLine(color, Offset(left, bottom), Offset(left, top), stroke, cap = StrokeCap.Round)
+        drawLine(color, Offset(left, top), Offset(left - wing, top + wing), stroke, cap = StrokeCap.Round)
+        drawLine(color, Offset(left, top), Offset(left + wing, top + wing), stroke, cap = StrokeCap.Round)
+        drawLine(color, Offset(right, top), Offset(right, bottom), stroke, cap = StrokeCap.Round)
+        drawLine(color, Offset(right, bottom), Offset(right - wing, bottom - wing), stroke, cap = StrokeCap.Round)
+        drawLine(color, Offset(right, bottom), Offset(right + wing, bottom - wing), stroke, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+private fun FolderChevron(expanded: Boolean) {
+    Canvas(Modifier.size(12.dp)) {
         val stroke = 1.6.dp.toPx()
-        drawCircle(blue.copy(alpha = .55f), radius = size.minDimension * .44f, center = center, style = Stroke(stroke))
-        drawLine(blue, Offset(size.width * .28f, center.y), Offset(size.width * .72f, center.y), stroke)
-        if (!expanded) drawLine(blue, Offset(center.x, size.height * .28f), Offset(center.x, size.height * .72f), stroke)
+        if (expanded) {
+            drawLine(muted, Offset(size.width * .25f, size.height * .38f),
+                Offset(size.width * .5f, size.height * .62f), stroke, cap = StrokeCap.Round)
+            drawLine(muted, Offset(size.width * .5f, size.height * .62f),
+                Offset(size.width * .75f, size.height * .38f), stroke, cap = StrokeCap.Round)
+        } else {
+            drawLine(muted, Offset(size.width * .38f, size.height * .25f),
+                Offset(size.width * .62f, size.height * .5f), stroke, cap = StrokeCap.Round)
+            drawLine(muted, Offset(size.width * .62f, size.height * .5f),
+                Offset(size.width * .38f, size.height * .75f), stroke, cap = StrokeCap.Round)
+        }
     }
 }
 
@@ -900,6 +972,7 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
     Card(
         modifier = Modifier.fillMaxWidth().padding(start = if (indent) 14.dp else 0.dp).onGloballyPositioned { onBounds(it.boundsInWindow()) }
             .graphicsLayer { translationY = if (dragging) dragOffset.y else 0f; shadowElevation = if (dragging) 20f else 0f }
+            .wholeCardDrag(profile.id, onDragStart, onDrag, onDragEnd)
             .clip(RoundedCornerShape(13.dp)).focusRequester(focus).focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown && event.key in setOf(Key.Delete, Key.Backspace)) {
@@ -918,13 +991,11 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
                 Spacer(Modifier.width(9.dp))
                 Text(profile.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.weight(1f))
-                DragHandle(onDragStart = onDragStart, onDrag = onDrag, onDragEnd = onDragEnd)
                 Box {
                     TextButton(onClick = { menu = true }, modifier = Modifier.size(28.dp), contentPadding = PaddingValues(0.dp)) {
                         Text("⋮", fontSize = 19.sp)
                     }
                     DropdownMenu(menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Проверить подключение") }, onClick = { onProbe(); menu = false })
                         DropdownMenuItem(text = { Text("Выше") }, onClick = { onMove(-1); menu = false })
                         DropdownMenuItem(text = { Text("Ниже") }, onClick = { onMove(1); menu = false })
                         DropdownMenuItem(text = { Text("Переместить в папку…") }, onClick = { menu = false; folderMenu = true })
@@ -953,8 +1024,9 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
                     else -> "Не проверен"
                 }, probe?.tunnelLatencyMs?.let { "$it мс" } ?: "—",
                     probe?.tunnelLatencyMs != null, Modifier.weight(1f))
-                TextButton(onClick = onProbe, enabled = probe?.checking != true, modifier = Modifier.size(28.dp),
-                    contentPadding = PaddingValues(0.dp)) { Text("↻", fontSize = 19.sp) }
+                TextButton(onClick = onProbe, enabled = probe?.checking != true,
+                    modifier = Modifier.size(28.dp).semantics { contentDescription = "Проверить подключение" },
+                    contentPadding = PaddingValues(0.dp)) { PingGlyph(blue) }
             }
         }
     }

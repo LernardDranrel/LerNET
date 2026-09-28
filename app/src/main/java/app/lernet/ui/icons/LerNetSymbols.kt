@@ -3,7 +3,6 @@ package app.lernet.ui.icons
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Autorenew
-import androidx.compose.material.icons.filled.SyncAlt
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.painter.Painter
@@ -76,7 +75,7 @@ object LerNetSymbols {
     fun swapVert(): Painter = painterResource(SymbolR.drawable.materialsymbols_ic_swap_vert_outlined)
 
     @Composable
-    fun probe(): Painter = rememberVectorPainter(Icons.Default.SyncAlt)
+    fun probe(): Painter = swapVert()
 
     @Composable
     fun autoSwap(): Painter = rememberVectorPainter(Icons.Default.Autorenew)

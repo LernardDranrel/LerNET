@@ -603,7 +603,19 @@ private fun FolderHeader(
     ListItem(
         modifier = Modifier.fillMaxWidth().onGloballyPositioned { onBounds(it.boundsInRoot()) }.clickable(onClick = onToggle),
         leadingContent = { Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-        headlineContent = { Text(group.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        headlineContent = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(group.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false))
+                if (group.autoFailover) {
+                    Surface(shape = RoundedCornerShape(5.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .12f)) {
+                        Icon(LerNetSymbols.autoSwap(), contentDescription = "Автопереключение включено",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(2.dp).size(15.dp))
+                    }
+                }
+            }
+        },
         supportingContent = {
             val results = group.profileIds.mapNotNull(probe::get)
             Text(
@@ -622,12 +634,6 @@ private fun FolderHeader(
         colors = ListItemDefaults.colors(containerColor = containerColor),
         trailingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (group.autoFailover) {
-                    Icon(
-                        LerNetSymbols.autoSwap(), contentDescription = "Автопереключение включено",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
                 IconButton(onClick = { actions.onProbe(group.profileIds) }) {
                     Icon(
                         LerNetSymbols.probe(), contentDescription = "Проверить папку",
