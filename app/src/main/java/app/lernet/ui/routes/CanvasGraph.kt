@@ -154,10 +154,22 @@ object CanvasGraph {
         tree.nodes.forEach { (id, point) ->
             placed[CanvasIds.rule(id)] = CanvasPoint(point.x, point.y)
         }
-        val pipeX = (tree.nodes.values.maxOfOrNull { it.x } ?: tree.root.x) + column
-        pipes.forEachIndexed { index, name ->
+        val pipeY = (tree.nodes.values.maxOfOrNull { it.y } ?: tree.root.y) + row
+        val sources = namedPipeLinks(nodes).groupBy { it.toId }
+        var previousX = Float.NEGATIVE_INFINITY
+        pipes.mapIndexed { index, name ->
             val id = CanvasIds.pipe(name)
-            placed[id] = CanvasPoint(pipeX, 36f + row * (index + 1))
+            val sourceXs = sources[id].orEmpty().mapNotNull { placed[it.fromId]?.x }
+            val preferredX = if (sourceXs.isEmpty()) {
+                (tree.nodes.values.maxOfOrNull { it.x } ?: tree.root.x) + column * (index + 1)
+            } else {
+                sourceXs.average().toFloat()
+            }
+            id to preferredX
+        }.sortedBy { it.second }.forEach { (id, preferredX) ->
+            val x = preferredX.coerceAtLeast(previousX + column)
+            placed[id] = CanvasPoint(x, pipeY)
+            previousX = x
         }
         return placed
     }

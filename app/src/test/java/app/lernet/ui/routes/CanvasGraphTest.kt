@@ -170,6 +170,22 @@ class CanvasGraphTest {
     }
 
     @Test
+    fun namedPipeSitsBelowTheTreeAndUnderItsSourceRule() {
+        val nodes = listOf(
+            rule("leaf", pipeName = "video"),
+            rule("fork", sort = 1),
+            rule("deep", parentId = "fork"),
+        )
+        val placed = CanvasGraph.layout(nodes, listOf("video"), emptyMap())
+        val source = placed.getValue(CanvasIds.rule("leaf"))
+        val deepest = placed.getValue(CanvasIds.rule("deep"))
+        val pipe = placed.getValue(CanvasIds.pipe("video"))
+
+        assertThat(pipe.x).isEqualTo(source.x)
+        assertThat(pipe.y).isGreaterThan(deepest.y)
+    }
+
+    @Test
     fun missingAxisReflowsRootAboveTheChild() {
         val placed = CanvasGraph.layout(listOf(rule("a")), listOf(""), emptyMap())
         val root = placed.getValue(CanvasIds.ROOT)

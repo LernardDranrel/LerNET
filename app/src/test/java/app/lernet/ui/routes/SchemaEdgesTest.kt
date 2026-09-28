@@ -53,15 +53,19 @@ class SchemaEdgesTest {
     }
 
     @Test
-    fun aStraightPipeHitsItsMiddleAndMissesTheCard() {
+    fun aPipeBelowItsSourceConnectsTheBottomAndTopEdges() {
         val rule = NodeRect(0f, 0f, 80f, 40f)
-        val pipe = NodeRect(200f, 0f, 280f, 40f)
+        val pipe = NodeRect(0f, 200f, 80f, 240f)
         val nodes = listOf(rule("leaf", pipeName = "video"))
         val rects = mapOf(CanvasIds.rule("leaf") to rule, CanvasIds.pipe("video") to pipe)
         val segments = SchemaEdges.segments(nodes, rects, vertical = true, scale = 1f)
         val pipeEdge = segments.single { it.edge.kind == SchemaEdgeKind.PIPE }
         val mid = SchemaEdges.pointAt(pipeEdge, 0.5f)
         assertThat(pipeEdge.straight).isTrue()
+        assertThat(pipeEdge.x0).isEqualTo(40f)
+        assertThat(pipeEdge.y0).isEqualTo(rule.bottom)
+        assertThat(pipeEdge.x1).isEqualTo(40f)
+        assertThat(pipeEdge.y1).isEqualTo(pipe.top)
         assertThat(SchemaEdges.pick(segments, rects.values, mid.first, mid.second, slop = 24f))
             .isEqualTo(pipeEdge.edge)
         assertThat(SchemaEdges.pick(segments, rects.values, 20f, 20f, slop = 48f)).isNull()

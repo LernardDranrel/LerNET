@@ -79,7 +79,7 @@ object SchemaEdges {
         val to = rects[edge.toId] ?: return@mapNotNull null
         when (edge.kind) {
             SchemaEdgeKind.TREE -> curve(edge, from, to, vertical, scale)
-            SchemaEdgeKind.PIPE -> straight(edge, from, to)
+            SchemaEdgeKind.PIPE -> straight(edge, from, to, vertical)
         }
     }
 
@@ -177,9 +177,9 @@ object SchemaEdges {
         )
     }
 
-    private fun straight(edge: SchemaEdge, from: NodeRect, to: NodeRect): SchemaSegment {
-        val start = anchor(from, AnchorSide.RIGHT)
-        val end = anchor(to, AnchorSide.LEFT)
+    private fun straight(edge: SchemaEdge, from: NodeRect, to: NodeRect, vertical: Boolean): SchemaSegment {
+        val start = anchor(from, if (vertical) AnchorSide.BOTTOM else AnchorSide.RIGHT)
+        val end = anchor(to, if (vertical) AnchorSide.TOP else AnchorSide.LEFT)
         return SchemaSegment(
             edge,
             start.first,
