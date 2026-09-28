@@ -33,6 +33,92 @@ class ConnectionControllerTest {
     private val dispatcher = StandardTestDispatcher()
 
     @Test
+    fun startupProbeWaitsForSlowNetworkWithoutSlowingConnectedRefresh() = runTest(dispatcher) {
+        val timeouts = mutableListOf<Int>()
+        val engine = RecordingBoxEngine()
+        val controller = controller(
+            this,
+            engine,
+            hardStopTimeoutMs = 2_500,
+            dialer = OutboundDialer { _, timeout ->
+                timeouts += timeout
+                Result.success(Unit)
+            },
+        )
+
+        controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
+        runCurrent()
+        assertThat(timeouts).contains(30_000)
+        engine.emit(EngineEvent.DnsAlive(answers = 1))
+        runCurrent()
+
+        testScheduler.advanceTimeBy(30_000)
+        runCurrent()
+        assertThat(timeouts).contains(8_000)
+    }
+
+    @Test
+    fun tunnelHealthConfirmsTwoFailuresBeforeReconnecting() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine()
+        var checks = 0
+        val controller = controller(
+            this, engine, hardStopTimeoutMs = 2_500,
+            reconnect = ReconnectSettings(maxAttempts = 3, watchdogTimeoutMs = 60_000),
+            tunnelHealthProbe = {
+                checks++
+                Result.failure(IllegalStateException("HTTP 504"))
+            },
+        )
+        controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
+        runCurrent()
+
+        testScheduler.advanceTimeBy(5_000)
+        runCurrent()
+        assertThat(checks).isEqualTo(1)
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
+
+        testScheduler.advanceTimeBy(2_000)
+        runCurrent()
+        assertThat(checks).isEqualTo(2)
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.RECONNECTING)
+        assertThat(controller.snapshot.value.cause).isEqualTo(ConnectionCause.TunnelHealthFailed("HTTP 504"))
+    }
+
+    @Test
+    fun tunnelHealthSuccessResetsFailureCount() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine()
+        var checks = 0
+        val controller = controller(
+            this, engine, hardStopTimeoutMs = 2_500,
+            reconnect = ReconnectSettings(maxAttempts = 3, watchdogTimeoutMs = 60_000),
+            tunnelHealthProbe = {
+                checks++
+                if (checks == 2) Result.success(42L)
+                else Result.failure(IllegalStateException("no reply"))
+            },
+        )
+        controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
+        runCurrent()
+        engine.emit(EngineEvent.DnsAlive(answers = 1))
+        runCurrent()
+
+        testScheduler.advanceTimeBy(7_000)
+        runCurrent()
+        assertThat(checks).isEqualTo(2)
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
+
+        testScheduler.advanceTimeBy(5_000)
+        runCurrent()
+        assertThat(checks).isEqualTo(3)
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
+
+        testScheduler.advanceTimeBy(2_000)
+        runCurrent()
+        assertThat(checks).isEqualTo(4)
+        assertThat(controller.snapshot.value.cause).isInstanceOf(ConnectionCause.TunnelHealthFailed::class.java)
+    }
+
+    @Test
     fun groupFailoverProbesAndLoadsTheSelectedProfile() = runTest(dispatcher) {
         val engine = RecordingBoxEngine()
         val first = sampleProfile()
@@ -715,6 +801,7 @@ class ConnectionControllerTest {
         reconnect: ReconnectSettings = ReconnectSettings(maxAttempts = 1, watchdogTimeoutMs = 60_000),
         dialer: OutboundDialer = OutboundDialer { _, _ -> Result.success(Unit) },
         l7UrlTestEnabled: Boolean = false,
+        tunnelHealthProbe: (suspend () -> Result<Long>)? = null,
     ): ConnectionController {
         val controller = ConnectionController(
             engine = engine,
@@ -722,6 +809,8 @@ class ConnectionControllerTest {
             hardStopTimeoutMs = hardStopTimeoutMs,
             outboundDialer = dialer,
             l7UrlTestEnabled = l7UrlTestEnabled,
+            tunnelHealthProbe = tunnelHealthProbe,
+            tunnelHealthIntervalMs = { 5_000L },
             pathDispatcher = dispatcher,
         )
         controller.updateSettings(reconnect, failoverEnabled = false, group = null)

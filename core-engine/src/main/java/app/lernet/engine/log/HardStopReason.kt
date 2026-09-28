@@ -9,6 +9,7 @@ object HardStopReason {
         when (cause) {
             ConnectionCause.UserDisconnected -> "user"
             is ConnectionCause.WatchdogTimeout -> "watchdog"
+            is ConnectionCause.TunnelHealthFailed -> "tunnel-health"
             is ConnectionCause.DnsStalled,
             is ConnectionCause.DnsUnreachable,
             -> "dns"

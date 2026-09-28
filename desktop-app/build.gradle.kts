@@ -8,6 +8,7 @@ plugins {
 val lernetVersion = providers.gradleProperty("lernetVersion").get()
 
 tasks.processResources {
+    inputs.property("lernetVersion", lernetVersion)
     filesMatching("lernet-version.txt") {
         expand("lernetVersion" to lernetVersion)
     }

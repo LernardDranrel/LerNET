@@ -4,6 +4,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
+import java.time.OffsetDateTime
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -134,6 +135,13 @@ class WindowsBoxProcess(private val directory: Path) : AutoCloseable {
     }
 
     override fun close() = stop()
+
+    /** Keep failed preflight details alongside the regular core journal and in the diagnostics tab. */
+    fun logDiagnostic(message: String) {
+        val line = "${OffsetDateTime.now()} [preflight] ${message.replace('\r', ' ').replace('\n', ' ').take(2048)}"
+        mutable.update { it.copy(logs = (it.logs + line).takeLast(400)) }
+        runCatching { appendJournal(line) }
+    }
 
     private fun appendJournal(line: String) = synchronized(journalLock) {
         Files.createDirectories(directory)

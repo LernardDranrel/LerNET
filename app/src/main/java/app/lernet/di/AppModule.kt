@@ -16,6 +16,7 @@ import app.lernet.engine.net.OutboundDialer
 import app.lernet.engine.net.RipeStatHopDetails
 import app.lernet.engine.net.ShellPingTracer
 import app.lernet.settings.SettingsStore
+import app.lernet.ui.home.AndroidTunnelProbe
 import app.lernet.vpn.AndroidProtectedDialer
 import app.lernet.vpn.VpnRuntime
 import dagger.Module
@@ -78,6 +79,7 @@ object AppModule {
         engine,
         scope,
         outboundDialer = dialer,
+        tunnelHealthProbe = AndroidTunnelProbe::measure,
         ruleSetDirectory = GeoRuleSetStore.install(context),
     ).also { controller ->
         AsnCaches.protect = VpnRuntime::protectDatagram

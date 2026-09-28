@@ -95,7 +95,7 @@ class LocalCoreApi(
         return CoreDiagnostics(root.long("uploadTotal"), root.long("downloadTotal"), connections)
     }
 
-    fun delay(outboundTag: String, url: String, timeoutMs: Int = 6_000): Long {
+    fun delay(outboundTag: String, url: String, timeoutMs: Int = 30_000): Long {
         val tag = URLEncoder.encode(outboundTag, Charsets.UTF_8).replace("+", "%20")
         val target = URLEncoder.encode(url, Charsets.UTF_8)
         val request = HttpRequest.newBuilder(URI("http://127.0.0.1:$port/proxies/$tag/delay?url=$target&timeout=$timeoutMs"))
@@ -103,7 +103,17 @@ class LocalCoreApi(
             .header("Authorization", "Bearer $secret")
             .GET().build()
         val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-        check(response.statusCode() == 200) { "Проверка VPN: HTTP ${response.statusCode()}" }
+        check(response.statusCode() == 200) {
+            val body = response.body().trim()
+            val detail = runCatching {
+                val error = json.parseToJsonElement(body).jsonObject
+                (error["message"] ?: error["error"])?.jsonPrimitive?.contentOrNull
+            }.getOrNull().orEmpty().ifBlank { body }.replace('\r', ' ').replace('\n', ' ').take(160)
+            val reason = if (response.statusCode() == 504) "истёк лимит ${timeoutMs} мс" else detail
+            "Проверка VPN: HTTP ${response.statusCode()}" +
+                reason.takeIf(String::isNotBlank)?.let { " · $it" }.orEmpty() +
+                detail.takeIf { it.isNotBlank() && it != reason }?.let { " ($it)" }.orEmpty()
+        }
         return json.parseToJsonElement(response.body()).jsonObject.long("delay")
             .takeIf { it > 0 } ?: error("Проверка VPN не вернула задержку")
     }

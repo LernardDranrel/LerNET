@@ -12,6 +12,7 @@ class ConnectionCauseTest {
         assertThat(ConnectionCause.DialFailure("refused").isRetryable()).isTrue()
         assertThat(ConnectionCause.DialTimeout(5).isRetryable()).isTrue()
         assertThat(ConnectionCause.WatchdogTimeout(20).isRetryable()).isTrue()
+        assertThat(ConnectionCause.TunnelHealthFailed("HTTP 504").isRetryable()).isTrue()
         assertThat(ConnectionCause.DnsStalled(8).isRetryable()).isTrue()
         assertThat(ConnectionCause.DnsUnreachable(8).isRetryable()).isTrue()
         assertThat(ConnectionCause.ConnectTimeout(15).isRetryable()).isTrue()

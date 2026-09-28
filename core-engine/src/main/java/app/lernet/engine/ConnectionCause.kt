@@ -27,6 +27,8 @@ sealed class ConnectionCause {
 
     data class WatchdogTimeout(val silentForSeconds: Int) : ConnectionCause()
 
+    data class TunnelHealthFailed(val detail: String) : ConnectionCause()
+
     data class DnsStalled(val silentForSeconds: Int) : ConnectionCause()
 
     data class DnsUnreachable(val silentForSeconds: Int) : ConnectionCause()
@@ -58,6 +60,7 @@ sealed class ConnectionCause {
             is DialFailure,
             is DialTimeout,
             is WatchdogTimeout,
+            is TunnelHealthFailed,
             is DnsStalled,
             is DnsUnreachable,
             is ConnectTimeout,
@@ -102,6 +105,7 @@ private object CauseTitles {
             is ConnectionCause.DialFailure -> "Не удалось дозвониться"
             is ConnectionCause.DialTimeout -> "Таймаут дозвона"
             is ConnectionCause.WatchdogTimeout -> "Нет трафика"
+            is ConnectionCause.TunnelHealthFailed -> "Туннель не отвечает"
             is ConnectionCause.DnsStalled -> "DNS не отвечает"
             is ConnectionCause.DnsUnreachable -> "DNS не отвечает"
             is ConnectionCause.ConnectTimeout -> "Таймаут подключения"
@@ -140,6 +144,7 @@ private object CauseDetails {
             is ConnectionCause.DialTimeout -> "${cause.timeoutSeconds} с"
             is ConnectionCause.WatchdogTimeout ->
                 "${cause.silentForSeconds} с без прироста байт и без dns query ok"
+            is ConnectionCause.TunnelHealthFailed -> cause.detail.ifBlank { null }
             is ConnectionCause.DnsStalled ->
                 "нет dns query ok ${cause.silentForSeconds} с — перезапуск ядра"
             is ConnectionCause.DnsUnreachable ->

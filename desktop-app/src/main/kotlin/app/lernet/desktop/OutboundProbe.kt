@@ -21,10 +21,14 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 
-data class OutboundProbeResult(val latencyMs: Long? = null, val message: String = "")
+data class OutboundProbeResult(
+    val latencyMs: Long? = null,
+    val message: String = "",
+    val diagnostics: List<String> = emptyList(),
+)
 
 /**
- * Preflight uses a short-lived sing-box process with a localhost-only inbound.
+ * Preflight uses a temporary sing-box process with a localhost-only inbound.
  * Clash's delay endpoint sends an HTTP request via the real outbound, including
  * its TLS/Reality/XHTTP handshake. It never creates a TUN or changes OS routes.
  */
@@ -32,7 +36,7 @@ object OutboundProbe {
     private val json = Json { ignoreUnknownKeys = true }
 
     fun check(profile: StoredProfile, saved: StoredState, executable: Path, workDirectory: Path,
-        timeoutMs: Int = 6_000): OutboundProbeResult {
+        timeoutMs: Int = 30_000): OutboundProbeResult {
         val outbound = profile.selectedOutbound ?: return OutboundProbeResult(message = "Нет выбранного сервера")
         val compiled = RouteCompiler.compile(listOf(
             RuleNode("probe-else", null, true, 0, RuleMatch(), RouteAction.PROXY),
@@ -44,7 +48,7 @@ object OutboundProbe {
             outbound = outbound,
             compiledRoute = compiled,
             mode = RunMode.PROXY,
-            logLevel = "error",
+            logLevel = "info",
             dnsJson = profile.dnsJson,
             dnsPolicy = policy,
             defaults = EngineDefaults(saved.tunMtu, saved.xmuxConcurrency, saved.directDnsServer),
@@ -73,11 +77,18 @@ object OutboundProbe {
             val latency = api.delay(assembled.proxyTag, saved.healthUrl, timeoutMs)
             OutboundProbeResult(latencyMs = latency, message = "HTTP через выбранный узел")
         } catch (error: Exception) {
-            OutboundProbeResult(message = when (error) {
+            val message = when (error) {
                 is InterruptedException -> "Проверка прервана"
                 is java.nio.file.FileSystemException -> "Нет доступа к файлам временной проверки"
                 else -> error.message?.take(180) ?: "Узел не ответил через VPN"
-            })
+            }
+            val coreLines = runCatching { Files.readAllLines(logFile).filter(String::isNotBlank).takeLast(12) }
+                .getOrDefault(emptyList())
+                .map { it.take(500) }
+            OutboundProbeResult(
+                message = message,
+                diagnostics = listOf("Временное ядро: ${error.javaClass.simpleName}; лимит $timeoutMs мс") + coreLines,
+            )
         } finally {
             process?.let { running ->
                 running.destroy()

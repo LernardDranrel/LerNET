@@ -195,7 +195,7 @@
     <string name="settings_connection">Подключение</string>
     <string name="settings_reconnect">Переподключение</string>
     <string name="max_attempts">Попыток перед сменой сервера</string>
-    <string name="watchdog_seconds">Без ответа до переподключения, с</string>
+    <string name="watchdog_seconds">Пауза без трафика, с</string>
     <string name="backoff_cap_seconds">Максимальная пауза между попытками, с</string>
     <string name="settings_failover">Переключение внутри папки</string>
     <string name="failover_hint">После серии неудачных попыток приложение проверит конфигурации выбранной папки и подключится к первой доступной.</string>

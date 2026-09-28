@@ -37,6 +37,7 @@ import app.lernet.engine.redact.LerNetLog
 import app.lernet.routing.RouteCompiler
 import app.lernet.routing.RuleNode
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -59,6 +60,8 @@ class ConnectionController(
     private val outboundDialer: OutboundDialer = ImmediateSuccessDialer,
     private val probeTimeoutMs: Int = PROBE_TIMEOUT_MS,
     private val l7UrlTestEnabled: Boolean = DEFAULT_L7_URL_TEST_ENABLED,
+    private val tunnelHealthProbe: (suspend () -> Result<Long>)? = null,
+    private val tunnelHealthIntervalMs: () -> Long = { Random.nextLong(5_000L, 10_001L) },
     val liveFeed: LiveFeed = LiveFeed(),
     private val ruleSetDirectory: String = "",
     /** Hop walk only — never Main. Tests inject the test dispatcher. */
@@ -76,6 +79,7 @@ class ConnectionController(
     private var connectTimeoutJob: Job? = null
     private var probeJob: Job? = null
     private var latencyJob: Job? = null
+    private var tunnelHealthJob: Job? = null
     private var groupProbeJob: Job? = null
     private var failoverSwitchJob: Job? = null
     private var stopJob: Job? = null
@@ -384,6 +388,7 @@ class ConnectionController(
                 connectTimeoutJob?.cancel()
                 probeJob?.cancel()
                 latencyJob?.cancel()
+                tunnelHealthJob?.cancel()
                 groupProbeJob?.cancel()
                 failoverSwitchJob?.cancel()
                 dropInFlightPath()
@@ -399,6 +404,7 @@ class ConnectionController(
                 retryJob?.cancel()
                 healthJob?.cancel()
                 latencyJob?.cancel()
+                tunnelHealthJob?.cancel()
                 dnsHealthJob?.cancel()
                 connectTimeoutJob?.cancel()
                 groupProbeJob?.cancel()
@@ -544,6 +550,7 @@ class ConnectionController(
                 armTrafficWatch()
                 armDnsHealth()
                 armLatencyRefresh()
+                armTunnelHealth()
                 return@launch
             }
             CrashTrail.mark("L7 URLTestOutbound tag=$tag url=$L7_PROBE_URL")
@@ -561,6 +568,7 @@ class ConnectionController(
                 armTrafficWatch()
                 armDnsHealth()
                 armLatencyRefresh()
+                armTunnelHealth()
             } else {
                 val detail = l7.exceptionOrNull()?.message ?: "L7 probe failed"
                 LerNetLog.e(TAG, "L7 probe failed tag=$tag: $detail")
@@ -586,7 +594,7 @@ class ConnectionController(
                     break
                 }
                 val startedAt = System.nanoTime()
-                val result = runCatching { outboundDialer.dial(target, probeTimeoutMs) }
+                val result = runCatching { outboundDialer.dial(target, ACTIVE_PROBE_TIMEOUT_MS) }
                     .getOrElse { Result.failure(it) }
                 if (_snapshot.value.state == ConnectionState.CONNECTED &&
                     _snapshot.value.activeProfileId == profileId
@@ -598,6 +606,48 @@ class ConnectionController(
                             null
                         }
                     )
+                }
+            }
+        }
+    }
+
+    private fun armTunnelHealth() {
+        tunnelHealthJob?.cancel()
+        val probe = tunnelHealthProbe ?: return
+        val profileId = _snapshot.value.activeProfileId
+        val outboundId = _snapshot.value.activeOutboundId
+        tunnelHealthJob = scope.launch {
+            var failures = 0
+            while (true) {
+                delay(if (failures == 0) tunnelHealthIntervalMs() else 2_000L)
+                val before = _snapshot.value
+                if (before.state != ConnectionState.CONNECTED ||
+                    before.activeProfileId != profileId || before.activeOutboundId != outboundId
+                ) return@launch
+
+                val result = try {
+                    probe()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    Result.failure(error)
+                }
+                val after = _snapshot.value
+                if (after.state != ConnectionState.CONNECTED ||
+                    after.activeProfileId != profileId || after.activeOutboundId != outboundId
+                ) return@launch
+
+                if (result.isSuccess) {
+                    if (failures > 0) LerNetLog.i(TAG, "tunnel health recovered after $failures miss")
+                    failures = 0
+                } else {
+                    failures++
+                    val detail = result.exceptionOrNull()?.message?.take(160) ?: "HTTPS probe failed"
+                    LerNetLog.w(TAG, "tunnel health failed ($failures/2): $detail")
+                    if (failures >= 2) {
+                        dispatch(PolicyEvent.EngineFailed(ConnectionCause.TunnelHealthFailed(detail)))
+                        return@launch
+                    }
                 }
             }
         }
@@ -683,6 +733,7 @@ class ConnectionController(
 
     private fun resetConnectMarkersLocked() {
         latencyJob?.cancel()
+        tunnelHealthJob?.cancel()
         loggedTunBytes = false
         dnsOkInWindow = false
         dnsOkSession = false
@@ -809,7 +860,7 @@ class ConnectionController(
     private suspend fun probeHopOnce() {
         hopCheckedThisWindow = true
         val target = pendingEndpoint ?: return
-        val tcp = runCatching { outboundDialer.dial(target, probeTimeoutMs) }.getOrElse { Result.failure(it) }
+        val tcp = runCatching { outboundDialer.dial(target, ACTIVE_PROBE_TIMEOUT_MS) }.getOrElse { Result.failure(it) }
         channel = ChannelWatch.afterProbe(hopUp, tcp.isSuccess)
         hopUp = tcp.isSuccess
         _snapshot.value = _snapshot.value.copy(channel = channel)
@@ -894,7 +945,8 @@ class ConnectionController(
 
     companion object {
         const val HARD_STOP_TIMEOUT_MS = 2_500L
-        const val PROBE_TIMEOUT_MS = 8_000
+        const val PROBE_TIMEOUT_MS = 30_000
+        private const val ACTIVE_PROBE_TIMEOUT_MS = 8_000
         const val L7_PROBE_URL = "https://cp.cloudflare.com/generate_204"
         const val DEFAULT_L7_URL_TEST_ENABLED = false
         private const val STATUS_LOG_EVERY = 5

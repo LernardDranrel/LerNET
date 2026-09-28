@@ -1437,7 +1437,7 @@ private fun Settings(saved: StoredState, controller: DesktopController) {
                 "Через этот адрес проверяется интернет через выбранный профиль: перед подключением и во время работы VPN.")
             OutlinedTextField(healthUrl, { healthUrl = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Адрес проверки") },
                 singleLine = true, isError = !healthUrl.startsWith("https://"))
-            Text("Во время подключения приложение проверяет путь через Windows каждые 12 секунд и после смены сети. Две неудачи подряд запускают переподключение или смену сервера внутри папки, если она включена. Используйте небольшой HTTPS-ресурс, доступный через VPN.",
+            Text("Во время подключения приложение проверяет путь через Windows через случайные 5–10 секунд после предыдущей проверки и после смены сети. После первой неудачи повторяет проверку через 2 секунды. Две неудачи подряд запускают переподключение или смену сервера внутри папки, если она включена. Используйте небольшой HTTPS-ресурс, доступный через VPN.",
                 color = muted, fontSize = 12.sp, lineHeight = 18.sp)
             Button(onClick = { controller.setHealthUrl(healthUrl) }, enabled = healthUrl.startsWith("https://") && healthUrl != saved.healthUrl) { Text("Сохранить адрес") }
         }

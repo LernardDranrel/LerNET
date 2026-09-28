@@ -21,6 +21,6 @@
     <string name="settings_megabytes">МБ</string>
     <string name="settings_journal_limit">Лимит журнала</string>
     <string name="settings_attempts_help">Сколько раз пробовать восстановить связь после сбоя.</string>
-    <string name="settings_watchdog_help">Сколько ждать ответа при проверке соединения, прежде чем считать его неработающим.</string>
+    <string name="settings_watchdog_help">Дополнительный контроль трафика и DNS. Сам туннель проверяется через профиль каждые 5–10 с, после сбоя — повторно через 2 с.</string>
     <string name="settings_backoff_help">Максимальная пауза между повторными попытками подключения.</string>
 </resources>

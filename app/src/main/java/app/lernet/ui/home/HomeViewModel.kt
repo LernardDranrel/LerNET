@@ -394,7 +394,7 @@ class HomeViewModel @Inject constructor(
                                 ProfileProbe(reachable = false)
                             } else {
                                 val startedAt = System.nanoTime()
-                                val ok = AndroidProtectedDialer().dial(endpoint, 3_000).isSuccess
+                                val ok = AndroidProtectedDialer().dial(endpoint, 30_000).isSuccess
                                 ProfileProbe(
                                     tcpMs = if (ok) ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(1) else null,
                                     reachable = ok,

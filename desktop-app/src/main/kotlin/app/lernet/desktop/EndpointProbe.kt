@@ -37,7 +37,7 @@ object EndpointProbe {
         return if (tls?.get("enabled")?.jsonPrimitive?.booleanOrNull == true) "TLS" else "TCP"
     }
 
-    fun check(profile: StoredProfile, timeoutMs: Int = 4_000): ProbeResult {
+    fun check(profile: StoredProfile, timeoutMs: Int = 30_000): ProbeResult {
         val protocol = protocol(profile)
         val outbound = profile.selectedOutbound ?: return ProbeResult(message = "Нет выбранного сервера")
         val endpoint = OutboundPatch.read(outbound.singBoxJson)

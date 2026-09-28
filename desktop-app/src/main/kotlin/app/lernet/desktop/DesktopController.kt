@@ -27,6 +27,7 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.Executors
@@ -72,7 +73,7 @@ class DesktopController(
     @Volatile private var monitorOpen = true
     private val monitorThread = thread(name = "lernet-windows-diagnostics", isDaemon = true) {
         var lastStatus = TunnelStatus.STOPPED
-        var lastHealthAt = System.currentTimeMillis()
+        var nextHealthAt = 0L
         var failedChecks = 0
         var lastNetwork = runCatching { WindowsTunnelHealth.networkSignature() }.getOrDefault("")
         var lastNetworkScanAt = 0L
@@ -84,7 +85,7 @@ class DesktopController(
                     .getOrElse { previous -> CoreDiagnostics(error = previous.message ?: "Нет данных от ядра") }
                 recordConnections(mutableDiagnostics.value.connections)
                 if (lastStatus != TunnelStatus.RUNNING) {
-                    lastHealthAt = System.currentTimeMillis() - 12_000
+                    nextHealthAt = 0L
                     failedChecks = 0
                     mutable.update { it.copy(message = "", healthMessage = "Проверяем соединение", healthFailures = 0, healthVerified = null, tunnelLatencyMs = null) }
                 }
@@ -99,8 +100,7 @@ class DesktopController(
                         }
                     }
                 }
-                if (now - lastHealthAt >= 12_000 || networkChangedAt != 0L && now - networkChangedAt >= 3_000) {
-                    lastHealthAt = now
+                if (now >= nextHealthAt || networkChangedAt != 0L && now - networkChangedAt >= 3_000) {
                     networkChangedAt = 0L
                     val saved = state.value.saved
                     val profile = saved.profiles.firstOrNull { it.id == saved.selectedProfileId }
@@ -133,6 +133,9 @@ class DesktopController(
                             }
                         }
                     }
+                    // Wait from completion, so a slow request never overlaps the next check.
+                    nextHealthAt = System.currentTimeMillis() + if (failedChecks > 0) 2_000L
+                        else ThreadLocalRandom.current().nextLong(5_000L, 10_001L)
                 }
             } else if (mutableDiagnostics.value != CoreDiagnostics()) {
                 mutableDiagnostics.value = CoreDiagnostics()
@@ -211,12 +214,18 @@ class DesktopController(
         }
     }
 
-    private fun checkOutbound(profile: StoredProfile, saved: StoredState): OutboundProbeResult =
-        runCatching {
+    private fun checkOutbound(profile: StoredProfile, saved: StoredState): OutboundProbeResult {
+        val result = runCatching {
             val executable = saved.corePath.takeIf { it.isNotBlank() }?.let(Path::of)
                 ?: synchronized(coreInstallLock) { BundledCore.install(store.workDirectory()) }
             OutboundProbe.check(profile, saved, executable, store.workDirectory())
         }.getOrElse { OutboundProbeResult(message = it.message?.take(180) ?: "Не удалось проверить канал") }
+        if (result.latencyMs == null) {
+            tunnel.logDiagnostic("Профиль «${profile.name}»: ${result.message}")
+            result.diagnostics.forEach(tunnel::logDiagnostic)
+        }
+        return result
+    }
 
     fun exportBundle(groupId: String? = null): String = DesktopTransfer.export(state.value.saved, groupId)
 

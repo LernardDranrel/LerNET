@@ -32,6 +32,33 @@ class WindowsConfigTest {
     }
 
     @Test
+    fun delayTimeoutKeepsApiReasonAndIsWrittenToJournal() {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/proxies/probe/delay") { exchange ->
+            val body = """{"message":"Request timeout"}""".toByteArray()
+            exchange.sendResponseHeaders(504, body.size.toLong())
+            exchange.responseBody.use { it.write(body) }
+        }
+        server.start()
+        val directory = Files.createTempDirectory("lernet-preflight-journal-test")
+        try {
+            val failure = runCatching {
+                LocalCoreApi(port = server.address.port).delay("probe", "https://example.com")
+            }.exceptionOrNull()
+            assertThat(failure).isNotNull()
+            assertThat(failure!!.message).contains("HTTP 504 · истёк лимит 30000 мс")
+            assertThat(failure.message).contains("Request timeout")
+
+            val tunnel = WindowsBoxProcess(directory)
+            tunnel.logDiagnostic("Профиль «test»: ${failure.message}")
+            assertThat(Files.readString(directory.resolve("session.log"))).contains("Request timeout")
+            assertThat(tunnel.state.value.logs.last()).contains("HTTP 504")
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
     fun windowsHealthChecksTheApplicationPath() {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/health") { exchange ->
