@@ -28,6 +28,7 @@ import app.lernet.R
 import app.lernet.config.repo.RuleNodeRecord
 import app.lernet.ui.icons.LerNetSymbols
 import app.lernet.ui.theme.LerNetDimens
+import app.lernet.ui.theme.LerNetWarn
 import kotlin.math.roundToInt
 
 @Composable
@@ -75,21 +76,27 @@ internal fun SchemaEdgeLayer(
     vertical: Boolean,
     scale: Float,
     selected: SchemaEdge?,
+    selectedChannel: String?,
     canBreak: Boolean,
     onBreak: (SchemaEdge) -> Unit,
 ) {
     val segments = SchemaEdges.segments(nodes, rects, vertical, scale)
+    val pipeLineColor = MaterialTheme.colorScheme.outline
+    val highlightedColor = LerNetWarn
     Box(Modifier.fillMaxSize()) {
         Canvas(Modifier.matchParentSize()) {
             segments.forEach { segment ->
                 val chosen = segment.edge == selected
-                // Tree greys come from the canvas library. We draw tones for pipes always,
-                // and a thicker selected stroke on top of the same Path geometry.
+                // The canvas library draws tree links; channel links use the same quiet outline tone.
                 val pipe = segment.edge.kind == SchemaEdgeKind.PIPE
+                val highlighted = pipe && segment.edge.toId == selectedChannel
                 if (!chosen && !pipe) return@forEach
-                val color = SchemaEdges.tone(nodes, segment.edge).ink()
-                val width = if (chosen) 6.dp.toPx() else 4.dp.toPx()
+                val color = if (highlighted) highlightedColor else if (pipe) pipeLineColor else SchemaEdges.tone(nodes, segment.edge).ink()
+                val width = if (pipe) (if (chosen || highlighted) 2.5.dp else 1.5.dp).toPx()
+                    else 6.dp.toPx()
                 drawPath(segment.toPath(), color, style = Stroke(width = width, cap = StrokeCap.Round))
+                if (pipe) drawCircle(color, radius = if (highlighted) 3.dp.toPx() else 2.dp.toPx(),
+                    center = Offset(segment.x1, segment.y1))
             }
         }
         if (canBreak && selected != null) {
@@ -155,5 +162,10 @@ private suspend fun AwaitPointerEventScope.followUntilUp(
 
 private fun SchemaSegment.toPath(): Path = Path().apply {
     moveTo(x0, y0)
-    if (straight) lineTo(x1, y1) else cubicTo(c1x, c1y, c2x, c2y, x1, y1)
+    if (orthogonal) {
+        val middleY = (y0 + y1) / 2f
+        lineTo(x0, middleY)
+        lineTo(x1, middleY)
+        lineTo(x1, y1)
+    } else if (straight) lineTo(x1, y1) else cubicTo(c1x, c1y, c2x, c2y, x1, y1)
 }

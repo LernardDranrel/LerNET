@@ -314,11 +314,18 @@ class DesktopController(
 
     fun switchMode(profile: StoredProfile?, mode: RunMode) {
         reconfigureConnection { saved ->
-            if (profile?.modeOverride != null) saved.copy(profiles = saved.profiles.map {
-                if (it.id == profile.id) it.copy(modeOverride = mode.name) else it
-            }) else saved.copy(mode = mode.name)
+            saved.withMode(profile, mode)
         }
     }
+
+    /** Persist the requested VPN mode before UAC starts a second process. */
+    fun prepareVpnElevation(profile: StoredProfile?): Boolean =
+        change { it.withMode(profile, RunMode.FULL_VPN) }
+
+    private fun StoredState.withMode(profile: StoredProfile?, mode: RunMode): StoredState =
+        if (profile?.modeOverride != null) copy(profiles = profiles.map {
+            if (it.id == profile.id) it.copy(modeOverride = mode.name) else it
+        }) else copy(mode = mode.name)
 
     fun clearModeOverride(profileId: String) {
         reconfigureConnection { saved -> saved.copy(profiles = saved.profiles.map {

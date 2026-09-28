@@ -282,7 +282,7 @@ private fun DesktopScreen(controller: DesktopController, onRequestElevation: () 
                     onExportGroup = { group -> exportRequest = ExportSelection(group.id, "LerNET-${group.name.take(30)}.lernet.json") })
                 Tab.ROUTES -> DesktopRoutes(ui.saved, controller, routeOwnerId)
                 Tab.DIAGNOSTICS -> Diagnostics(ui.saved, tunnel, diagnostics, connectionHistory, trace, traceDetailsRequest, controller)
-                Tab.SETTINGS -> Settings(ui.saved, controller)
+                Tab.SETTINGS -> Settings(ui.saved, controller, onRequestElevation)
             }
         }
     }
@@ -750,8 +750,9 @@ private fun HomeModeSelector(saved: StoredState, profile: StoredProfile?, locked
             selected = effectiveMode,
             enabled = !locked,
             onSelect = { value ->
-                controller.switchMode(profile, RunMode.valueOf(value))
-                if (value == RunMode.FULL_VPN.name && !WindowsElevation.isElevated) onRequestElevation()
+                if (value == RunMode.FULL_VPN.name && !WindowsElevation.isElevated) {
+                    if (controller.prepareVpnElevation(profile)) onRequestElevation()
+                } else controller.switchMode(profile, RunMode.valueOf(value))
             },
         )
         Text(if (!WindowsElevation.isElevated && requestedMode == RunMode.FULL_VPN.name)
@@ -1327,7 +1328,7 @@ private fun bytesText(value: Long): String = when {
 }
 
 @Composable
-private fun Settings(saved: StoredState, controller: DesktopController) {
+private fun Settings(saved: StoredState, controller: DesktopController, onRequestElevation: () -> Unit) {
     var path by remember(saved.corePath) { mutableStateOf(saved.corePath) }
     var mtu by remember(saved.tunMtu) { mutableStateOf(saved.tunMtu.toString()) }
     var xmuxMin by remember(saved.xmuxConcurrency) { mutableStateOf(saved.xmuxConcurrency.substringBefore('-')) }
@@ -1352,7 +1353,11 @@ private fun Settings(saved: StoredState, controller: DesktopController) {
             SegmentedChoice(
                 listOf(RunMode.FULL_VPN.name to "VPN · весь трафик", RunMode.PROXY.name to "Локальный прокси"),
                 saved.mode,
-            ) { controller.switchMode(null, RunMode.valueOf(it)) }
+            ) { value ->
+                if (value == RunMode.FULL_VPN.name && !WindowsElevation.isElevated) {
+                    if (controller.prepareVpnElevation(null)) onRequestElevation()
+                } else controller.switchMode(null, RunMode.valueOf(value))
+            }
             Text(
                 if (saved.mode == RunMode.FULL_VPN.name)
                     "При запуске Windows запросит права администратора. Если доступ не предоставлен, LerNET откроется в режиме прокси. Профиль может иметь собственный режим."

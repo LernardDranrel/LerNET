@@ -95,6 +95,23 @@ class WindowsConfigTest {
     }
 
     @Test
+    fun vpnChoiceIsSavedBeforeElevationRelaunch() {
+        val directory = java.nio.file.Files.createTempDirectory("lernet-elevation-choice")
+        val profile = StoredProfile("profile", "VPN", "test", emptyList(), "", modeOverride = "PROXY")
+        val store = DesktopStore(directory)
+        store.save(StoredState(profiles = listOf(profile), selectedProfileId = profile.id, mode = "PROXY"))
+        val controller = DesktopController(store)
+        try {
+            assertThat(controller.prepareVpnElevation(profile)).isTrue()
+            val persisted = DesktopStore(directory).load()
+            assertThat(persisted.profiles.single().modeOverride).isEqualTo(RunMode.FULL_VPN.name)
+            assertThat(DesktopStartup.needsElevation(persisted, elevated = false)).isTrue()
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
     fun tunPermissionFailureIsDistinguishedFromEndpointFailure() {
         val denied = "FATAL[0000] start service: start inbound/tun[tun-in]: configure tun interface: Access is denied."
         assertThat(WindowsBoxProcess.isTunPermissionFailure(denied)).isTrue()

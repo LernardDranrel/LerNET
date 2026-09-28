@@ -181,7 +181,7 @@ class CanvasGraphTest {
         val deepest = placed.getValue(CanvasIds.rule("deep"))
         val pipe = placed.getValue(CanvasIds.pipe("video"))
 
-        assertThat(pipe.x).isEqualTo(source.x)
+        assertThat(pipe.x + 90f).isEqualTo(source.x + 105f)
         assertThat(pipe.y).isGreaterThan(deepest.y)
     }
 
@@ -200,6 +200,23 @@ class CanvasGraphTest {
         val links = CanvasGraph.links(nodes)
         assertThat(links.map { it.toId }).contains(CanvasIds.rule("kept"))
         assertThat(links.map { it.toId }).doesNotContain(CanvasIds.rule("loose"))
+    }
+
+    @Test
+    fun sharedChannelHasOneBlockAndListsOnlyAttachedTerminalSources() {
+        val nodes = listOf(
+            rule("left", pipeName = "work"),
+            rule("parent", sort = 1),
+            rule("right", parentId = "parent", pipeName = "work"),
+            rule("loose", parentId = RouteFolders.ORPHAN, pipeName = "work"),
+            rule("direct", action = "direct", pipeName = "work"),
+        )
+        val names = CanvasGraph.pipeNames(RouteFolders.attached(nodes), emptyList())
+        val positions = CanvasGraph.layout(RouteFolders.attached(nodes), names, emptyMap())
+
+        assertThat(names).containsExactly("work")
+        assertThat(positions.keys.count { it == CanvasIds.pipe("work") }).isEqualTo(1)
+        assertThat(channelSources(nodes, "work").map { it.id }).containsExactly("left", "right").inOrder()
     }
 
     private fun rule(

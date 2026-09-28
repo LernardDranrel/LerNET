@@ -21,6 +21,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -39,6 +40,8 @@ import androidx.compose.foundation.focusable
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
@@ -76,6 +79,7 @@ private val routeMuted = Color(0xFFA1AEC4)
 private val routeBlue = Color(0xFF91ABFF)
 private val routeGreen = Color(0xFF80DEBE)
 private val routeRed = Color(0xFFFFB4AB)
+private val routeAmber = Color(0xFFF5C16C)
 private val routeCard = Color(0xFF151D2B)
 
 private enum class RouteView { SCHEME, LIST }
@@ -109,6 +113,7 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
     }
     var view by remember(activeOwner) { mutableStateOf(RouteView.SCHEME) }
     var selectedId by remember(activeOwner) { mutableStateOf<String?>(null) }
+    var selectedChannel by remember(activeOwner) { mutableStateOf<String?>(null) }
     var editing by remember(activeOwner) { mutableStateOf<StoredRule?>(null) }
     var deleting by remember(activeOwner) { mutableStateOf<StoredRule?>(null) }
     var ownerMenu by remember { mutableStateOf(false) }
@@ -142,6 +147,11 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
         }
     }
     val selected = rules.firstOrNull { it.id == selectedId }
+    LaunchedEffect(rules, selectedChannel) {
+        if (selectedChannel != null && selectedChannel !in namedChannelSources(rules, activeOwner)) {
+            selectedChannel = null
+        }
+    }
     val previewProfileId = if (activeOwner.startsWith("grp_"))
         saved.profiles.firstOrNull { it.groupId == activeOwner.removePrefix("grp_") }?.id else activeOwner
     val preview = remember(rules, previewProfileId, saved.mode, saved.defaultDnsPolicy, saved.tunMtu, saved.xmuxConcurrency, saved.directDnsServer) {
@@ -188,7 +198,7 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
                 Text("Маршруты · ${rules.size} правил · ${if (dirty) "есть несохранённый черновик" else "сохранённая версия"}", color = if (dirty) routeBlue else routeMuted, fontSize = 12.sp)
             }
             if (dirty) {
-                OutlinedButton(onClick = { rules = baseline; selectedId = null; draftError = null; controller.clearRuleDraft(activeOwner) }) { Text("Отменить") }
+                OutlinedButton(onClick = { rules = baseline; selectedId = null; selectedChannel = null; draftError = null; controller.clearRuleDraft(activeOwner) }) { Text("Отменить") }
                 Button(onClick = { saveDraft() }) { Text("Сохранить") }
             }
             FilterChip(view == RouteView.SCHEME, onClick = { view = RouteView.SCHEME }, label = { Text("Схема") })
@@ -218,12 +228,16 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(16.dp)).border(1.dp, routeBorder, RoundedCornerShape(16.dp))) {
                 if (view == RouteView.SCHEME) {
-                    RouteScheme(activeOwner, rules, selectedId, onSelect = { selectedId = it },
+                    RouteScheme(activeOwner, rules, selectedId, selectedChannel,
+                        onSelect = { selectedId = it; selectedChannel = null },
+                        onSelectChannel = { selectedChannel = it; selectedId = null },
                         onAddChild = { editing = newRule(activeOwner, it.id, rules) }, onReorder = { id, target, after ->
                             applyEdit(DesktopRouteTree.reorder(rules, id, target, after))
                         })
                 } else {
-                    RouteList(activeOwner, rules, selectedId, onSelect = { selectedId = it },
+                    RouteList(activeOwner, rules, selectedId, selectedChannel,
+                        onSelect = { selectedId = it; selectedChannel = null },
+                        onSelectChannel = { selectedChannel = it; selectedId = null },
                         onAddChild = { editing = newRule(activeOwner, it.id, rules) }, onReorder = { id, target, after ->
                             applyEdit(DesktopRouteTree.reorder(rules, id, target, after))
                         })
@@ -231,6 +245,7 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
             }
             RouteInspector(
                 selected = selected,
+                selectedChannel = selectedChannel,
                 rules = rules,
                 modifier = Modifier.width(302.dp).fillMaxHeight(),
                 onEdit = { editing = it },
@@ -245,7 +260,7 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
             draft = draft,
             rules = rules,
             onClose = { editing = null },
-            onSave = { if (applyEdit(DesktopRouteTree.save(rules, it))) { selectedId = it.id; editing = null } },
+            onSave = { if (applyEdit(DesktopRouteTree.save(rules, it))) { selectedId = it.id; selectedChannel = null; editing = null } },
         )
     }
     deleting?.let { rule ->
@@ -315,12 +330,36 @@ private fun orderedTree(rules: List<StoredRule>, profileId: String): List<Pair<S
     return out
 }
 
+internal fun namedChannelSources(rules: List<StoredRule>, profileId: String): Map<String, List<StoredRule>> {
+    val attached = orderedTree(rules, profileId).map { it.first }
+    val parents = attached.mapNotNull { it.parentId }.toSet()
+    return attached.filter { it.action == "PROXY" && it.pipeName.isNotBlank() && it.id !in parents }
+        .groupBy { it.pipeName }
+}
+
+@Composable
+private fun ChannelPortalMark(count: Int) {
+    Canvas(Modifier.size(18.dp).semantics { contentDescription = "Общий канал, источников: $count" }) {
+        val stroke = 1.7.dp.toPx()
+        val middle = size.height / 2f
+        val left = size.width * .08f
+        val join = size.width * .47f
+        val ring = Offset(size.width * .73f, middle)
+        drawLine(routeAmber, Offset(left, size.height * .2f), Offset(join, middle), stroke, StrokeCap.Round)
+        drawLine(routeAmber, Offset(left, size.height * .8f), Offset(join, middle), stroke, StrokeCap.Round)
+        drawLine(routeAmber, Offset(join, middle), Offset(size.width * .57f, middle), stroke, StrokeCap.Round)
+        drawCircle(routeAmber, radius = size.width * .21f, center = ring, style = Stroke(stroke))
+    }
+}
+
 @Composable
 private fun RouteScheme(
     profileId: String,
     rules: List<StoredRule>,
     selectedId: String?,
+    selectedChannel: String?,
     onSelect: (String?) -> Unit,
+    onSelectChannel: (String) -> Unit,
     onAddChild: (StoredRule) -> Unit,
     onReorder: (String, String, Boolean) -> Unit,
 ) {
@@ -346,6 +385,17 @@ private fun RouteScheme(
     }
     val root = RulePosition(layout.root.x, layout.root.y)
     val positions = layout.nodes.mapValues { (_, point) -> RulePosition(point.x, point.y) }
+    val pipeSources = namedChannelSources(rules, profileId)
+    var previousPipeX = Float.NEGATIVE_INFINITY
+    val pipeY = (positions.values.maxOfOrNull { it.y } ?: root.y) + 146f
+    val pipePositions = pipeSources.map { (name, sources) ->
+        val preferred = sources.mapNotNull { positions[it.id]?.x?.plus(15f) }.average().toFloat()
+        name to preferred
+    }.sortedBy { it.second }.associate { (name, preferred) ->
+        val x = preferred.coerceAtLeast(previousPipeX + 210f)
+        previousPipeX = x
+        name to RulePosition(x, pipeY)
+    }
     val density = androidx.compose.ui.platform.LocalDensity.current
     val centeredPan = {
         with(density) { Offset(canvasSize.width / 2f - (root.x + 105f).dp.toPx(), 16.dp.toPx()) }
@@ -406,6 +456,28 @@ private fun RouteScheme(
                 drawPath(path, if (rule.id == selectedId) routeBlue else routeBorder, style = Stroke(width = if (rule.id == selectedId) 2.5.dp.toPx() else 1.5.dp.toPx()))
                 drawCircle(if (rule.id == selectedId) routeBlue else routeBorder, radius = 3.dp.toPx(), center = end)
             }
+            pipeSources.forEach { (name, sources) ->
+                val target = pipePositions[name] ?: return@forEach
+                sources.sortedBy { positions[it.id]?.x ?: 0f }.forEachIndexed { index, source ->
+                    val origin = positions[source.id] ?: return@forEachIndexed
+                    val start = anchor(origin, true)
+                    val inletX = target.x + 180f * (index + 1) / (sources.size + 1)
+                    val end = Offset(inletX.dp.toPx() * zoom + pan.x,
+                        target.y.dp.toPx() * zoom + pan.y)
+                    val middleY = (start.y + end.y) / 2f
+                    val path = Path().apply {
+                        moveTo(start.x, start.y)
+                        lineTo(start.x, middleY)
+                        lineTo(end.x, middleY)
+                        lineTo(end.x, end.y)
+                    }
+                    val highlighted = selectedChannel == name
+                    drawPath(path, if (highlighted) routeAmber else routeBorder,
+                        style = Stroke(width = (if (highlighted) 2.5.dp else 1.5.dp).toPx()))
+                    drawCircle(if (highlighted) routeAmber else routeBorder,
+                        radius = (if (highlighted) 3.dp else 2.dp).toPx(), center = end)
+                }
+            }
         }
         @Composable fun positioned(position: RulePosition, z: Float = 0f, content: @Composable () -> Unit) {
             Box(Modifier.offset {
@@ -444,6 +516,24 @@ private fun RouteScheme(
                 )
             }
         }
+        pipePositions.forEach { (name, position) ->
+            positioned(position) {
+                Surface(shape = RoundedCornerShape(10.dp), color = routeCard,
+                    border = androidx.compose.foundation.BorderStroke(if (selectedChannel == name) 2.dp else 1.dp, routeAmber),
+                    modifier = Modifier.width(180.dp).height(56.dp).clickable { onSelectChannel(name) }) {
+                    Column(Modifier.padding(horizontal = 12.dp, vertical = 7.dp), verticalArrangement = Arrangement.Center) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(name, color = routeAmber, fontWeight = FontWeight.SemiBold,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp,
+                                modifier = Modifier.weight(1f))
+                            val count = pipeSources[name].orEmpty().size
+                            if (count > 1) ChannelPortalMark(count)
+                        }
+                        Text("Источников: ${pipeSources[name].orEmpty().size}", color = routeMuted, fontSize = 10.sp)
+                    }
+                }
+            }
+        }
         Column(Modifier.align(Alignment.TopEnd).padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             FilledTonalButton(onClick = { zoom = (zoom + .15f).coerceAtMost(1.5f) }) { Text("+") }
             FilledTonalButton(onClick = { zoom = (zoom - .15f).coerceAtLeast(.6f) }) { Text("−") }
@@ -467,6 +557,7 @@ private fun RouteNodeCard(rule: StoredRule, selected: Boolean, childCount: Int,
         childCount > 0 -> routeBlue
         rule.action == "DIRECT" -> routeGreen
         rule.action == "BLOCK" -> routeRed
+        rule.pipeName.isNotBlank() -> routeAmber
         else -> routeBlue
     }
     Box(Modifier.width(210.dp).height(if (selected) 124.dp else 76.dp)) {
@@ -511,7 +602,7 @@ private fun RouteNodeFace(rule: StoredRule, childCount: Int, tone: Color, select
                     maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
                 Text(if (DesktopRouteTree.isElse(rule)) "Любой оставшийся трафик" else ruleSummary(rule),
                     color = routeMuted, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp)
-                Text(if (childCount > 0) "Развилка · $childCount ветвей" else actionLabelDesktop(rule.action),
+                Text(if (childCount > 0) "Развилка · $childCount ветвей" else actionLabelDesktop(rule),
                     color = tone, fontSize = 11.sp)
             }
             Text("${rule.sortIndex + 1}", color = routeBlue, fontSize = 11.sp,
@@ -521,9 +612,11 @@ private fun RouteNodeFace(rule: StoredRule, childCount: Int, tone: Color, select
 }
 
 @Composable
-private fun RouteList(profileId: String, rules: List<StoredRule>, selectedId: String?, onSelect: (String) -> Unit,
+private fun RouteList(profileId: String, rules: List<StoredRule>, selectedId: String?,
+    selectedChannel: String?, onSelect: (String) -> Unit, onSelectChannel: (String) -> Unit,
     onAddChild: (StoredRule) -> Unit, onReorder: (String, String, Boolean) -> Unit) {
     val ordered = remember(rules) { orderedTree(rules, profileId) }
+    val channels = remember(rules, profileId) { namedChannelSources(rules, profileId) }
     val bounds = remember(profileId) { mutableStateMapOf<String, Rect>() }
     var draggingId by remember(profileId) { mutableStateOf<String?>(null) }
     var dragStart by remember(profileId) { mutableStateOf(Offset.Zero) }
@@ -590,6 +683,34 @@ private fun RouteList(profileId: String, rules: List<StoredRule>, selectedId: St
                 }
             }
         }
+        if (channels.isNotEmpty()) {
+            item(key = "channels-heading") {
+                Text("КАНАЛЫ", color = routeMuted, fontSize = 11.sp,
+                    modifier = Modifier.padding(start = 8.dp, top = 14.dp, bottom = 3.dp))
+            }
+            items(channels.entries.toList(), key = { "channel:${it.key}" }) { (name, sources) ->
+                val chosen = selectedChannel == name
+                Surface(
+                    color = if (chosen) Color(0xFF302B1D) else routeCard,
+                    shape = RoundedCornerShape(11.dp),
+                    border = androidx.compose.foundation.BorderStroke(if (chosen) 2.dp else 1.dp,
+                        if (chosen) routeAmber else routeBorder),
+                    modifier = Modifier.fillMaxWidth().clickable { onSelectChannel(name) },
+                ) {
+                    Row(Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        if (sources.size > 1) {
+                            ChannelPortalMark(sources.size)
+                        } else Spacer(Modifier.size(18.dp))
+                        Spacer(Modifier.width(9.dp))
+                        Column {
+                            Text(name, color = routeText, fontWeight = FontWeight.Medium)
+                            Text("Источников: ${sources.size}", color = routeMuted, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -602,7 +723,7 @@ private fun RouteListRowContent(rule: StoredRule, rules: List<StoredRule>, selec
             Text(displayTitle(rule), color = routeText, fontWeight = FontWeight.Medium,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             val childCount = rules.count { it.parentId == rule.id }
-            Text("${ruleSummary(rule)}  ·  ${if (childCount > 0) "Развилка · $childCount ветвей" else actionLabelDesktop(rule.action)}",
+            Text("${ruleSummary(rule)}  ·  ${if (childCount > 0) "Развилка · $childCount ветвей" else actionLabelDesktop(rule)}",
                 color = routeMuted, fontSize = 11.sp, maxLines = 1)
         }
         if (selected) RouteListAddButton(onClick = { onAddChild(rule) }, enabled = addEnabled)
@@ -625,14 +746,33 @@ private fun RouteListAddButton(onClick: () -> Unit, enabled: Boolean = true) {
 
 @Composable
 private fun RouteInspector(
-    selected: StoredRule?, rules: List<StoredRule>, modifier: Modifier,
+    selected: StoredRule?, selectedChannel: String?, rules: List<StoredRule>, modifier: Modifier,
     onEdit: (StoredRule) -> Unit, onAddChild: (StoredRule) -> Unit,
     onToggle: (StoredRule) -> Unit, onDelete: (StoredRule) -> Unit,
 ) {
     Surface(modifier, color = routeCard, shape = RoundedCornerShape(16.dp), border = androidx.compose.foundation.BorderStroke(1.dp, routeBorder)) {
         Column(Modifier.padding(17.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("ПРАВИЛО", color = routeMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-            if (selected == null) {
+            Text(if (selectedChannel == null) "ПРАВИЛО" else "КАНАЛ",
+                color = routeMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            if (selectedChannel != null) {
+                val sources = namedChannelSources(rules, rules.firstOrNull()?.profileId.orEmpty())[selectedChannel].orEmpty()
+                Text(selectedChannel, color = routeAmber, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (sources.size > 1) {
+                        ChannelPortalMark(sources.size)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text("Источников: ${sources.size}", color = routeMuted, fontSize = 12.sp)
+                }
+                HorizontalDivider(color = routeBorder)
+                sources.forEachIndexed { index, source ->
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("${index + 1}. ${displayTitle(source)}", color = routeText,
+                            fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text(ruleBreadcrumb(source.parentId, rules), color = routeMuted, fontSize = 11.sp)
+                    }
+                }
+            } else if (selected == null) {
                 Text("Выберите блок на схеме или строку в списке", color = routeText, fontSize = 16.sp)
                 Text("Выделите блок и нажмите + под ним. Порядок одноуровневых правил меняется перетаскиванием.", color = routeMuted, fontSize = 12.sp)
             } else {
@@ -642,8 +782,8 @@ private fun RouteInspector(
                 Text(ruleBreadcrumb(selected.parentId, rules), color = routeMuted, fontSize = 11.sp)
                 Text(ruleSummary(selected), color = routeText, fontSize = 13.sp)
                 val childCount = rules.count { it.parentId == selected.id }
-                Text(if (childCount > 0) "Развилка · исход выбирают дочерние правила" else actionLabelDesktop(selected.action),
-                    color = if (childCount > 0) routeBlue else when (selected.action) { "DIRECT" -> routeGreen; "BLOCK" -> routeRed; else -> routeBlue })
+                Text(if (childCount > 0) "Развилка · исход выбирают дочерние правила" else actionLabelDesktop(selected),
+                    color = if (childCount > 0) routeBlue else when (selected.action) { "DIRECT" -> routeGreen; "BLOCK" -> routeRed; else -> if (selected.pipeName.isNotBlank()) routeAmber else routeBlue })
                 Button(onClick = { onEdit(selected) }, modifier = Modifier.fillMaxWidth()) { Text("Редактировать") }
                 OutlinedButton(onClick = { onAddChild(selected) }, modifier = Modifier.fillMaxWidth()) { Text("+ Дочернее правило") }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -676,12 +816,15 @@ private fun RouteRuleEditor(draft: StoredRule, rules: List<StoredRule>, onClose:
         }
     ) }
     var action by remember(draft.id) { mutableStateOf(draft.action.uppercase()) }
+    var namedPipe by remember(draft.id) { mutableStateOf(draft.pipeName.isNotBlank()) }
+    var pipeName by remember(draft.id) { mutableStateOf(draft.pipeName) }
     var parentMenu by remember { mutableStateOf(false) }
     var addBlockMenu by remember { mutableStateOf(false) }
     val candidates = rules.filter { it.id != draft.id && it.id !in descendants(rules, draft.id) }
     val hasChildren = rules.any { it.parentId == draft.id }
     val maxPriority = rules.count { it.profileId == draft.profileId && it.parentId == parentId && it.id != draft.id && !DesktopRouteTree.isElse(it) }
-    val valid = wasElse || (conditions.blocks.isNotEmpty() && conditions.blocks.all { block -> block.values.any(String::isNotBlank) })
+    val valid = (wasElse || (conditions.blocks.isNotEmpty() && conditions.blocks.all { block -> block.values.any(String::isNotBlank) })) &&
+        (hasChildren || action != "PROXY" || !namedPipe || pipeName.trim().isNotBlank())
     DialogWindow(onCloseRequest = onClose, title = if (wasElse) "Правило «Иначе»" else "Правило маршрута", state = rememberDialogState(size = DpSize(700.dp, 760.dp))) {
         LaunchedEffect(window) { WindowsTitleBar.dark(window) }
         MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
@@ -746,7 +889,23 @@ private fun RouteRuleEditor(draft: StoredRule, rules: List<StoredRule>, onClose:
                             Text("ДЕЙСТВИЕ", color = routeMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                             Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                                 listOf("PROXY", "DIRECT", "BLOCK").forEach { value ->
-                                    FilterChip(action == value, onClick = { action = value }, label = { Text(actionLabelDesktop(value)) })
+                                    FilterChip(action == value && (value != "PROXY" || !namedPipe),
+                                        onClick = { action = value; namedPipe = false }, label = { Text(actionLabelDesktop(value)) })
+                                }
+                                FilterChip(action == "PROXY" && namedPipe,
+                                    onClick = { action = "PROXY"; namedPipe = true }, label = { Text("Отдельный канал") })
+                            }
+                            if (action == "PROXY" && namedPipe) {
+                                OutlinedTextField(pipeName, { pipeName = it }, label = { Text("Название канала") },
+                                    supportingText = { Text("Одинаковое имя направляет правила в один канал") },
+                                    modifier = Modifier.fillMaxWidth(), singleLine = true)
+                                val existingPipes = rules.map { it.pipeName }.filter(String::isNotBlank).distinct()
+                                if (existingPipes.isNotEmpty()) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                                        existingPipes.take(4).forEach { name ->
+                                            AssistChip(onClick = { pipeName = name }, label = { Text(name, maxLines = 1) })
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -758,7 +917,8 @@ private fun RouteRuleEditor(draft: StoredRule, rules: List<StoredRule>, onClose:
                         Button(onClick = {
                             val projection = ConditionCodec.project(conditions)
                             onSave(draft.copy(
-                                title = title.trim(), parentId = parentId, sortIndex = priority.coerceIn(0, maxPriority), action = action, join = conditions.join.name,
+                                title = title.trim(), parentId = parentId, sortIndex = priority.coerceIn(0, maxPriority), action = action,
+                                pipeName = if (!hasChildren && action == "PROXY" && namedPipe) pipeName.trim() else "", join = conditions.join.name,
                                 domains = if (wasElse) emptyList() else projection.domains,
                                 domainSuffixes = if (wasElse) emptyList() else projection.domainSuffixes,
                                 cidrs = if (wasElse) emptyList() else projection.ipCidrs,
@@ -1009,6 +1169,8 @@ private fun ruleBreadcrumb(parentId: String?, rules: List<StoredRule>): String {
     return path.joinToString("  /  ")
 }
 private fun actionLabelDesktop(action: String) = when (action) { "DIRECT" -> "Напрямую"; "BLOCK" -> "Запретить"; else -> "Через VPN" }
+private fun actionLabelDesktop(rule: StoredRule): String =
+    if (rule.action == "PROXY" && rule.pipeName.isNotBlank()) "Канал: ${rule.pipeName}" else actionLabelDesktop(rule.action)
 private fun displayTitle(rule: StoredRule): String = rule.title.ifBlank { if (DesktopRouteTree.isElse(rule)) "Иначе" else "Правило ${rule.sortIndex + 1}" }
 private fun ruleSummary(rule: StoredRule): String = (rule.domains + rule.domainSuffixes.map { "*.$it" } + rule.cidrs + rule.countries + rule.processes)
     .take(3).joinToString(" · ").ifBlank { "Любой трафик" }

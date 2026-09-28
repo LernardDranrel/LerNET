@@ -42,6 +42,7 @@ data class SchemaSegment(
     val x1: Float,
     val y1: Float,
     val straight: Boolean,
+    val orthogonal: Boolean = false,
 )
 
 object SchemaEdges {
@@ -74,12 +75,24 @@ object SchemaEdges {
         rects: Map<String, NodeRect>,
         vertical: Boolean,
         scale: Float,
-    ): List<SchemaSegment> = edges(nodes).mapNotNull { edge ->
-        val from = rects[edge.fromId] ?: return@mapNotNull null
-        val to = rects[edge.toId] ?: return@mapNotNull null
-        when (edge.kind) {
-            SchemaEdgeKind.TREE -> curve(edge, from, to, vertical, scale)
-            SchemaEdgeKind.PIPE -> straight(edge, from, to, vertical)
+    ): List<SchemaSegment> {
+        val all = edges(nodes)
+        val pipeRanks = all.filter { it.kind == SchemaEdgeKind.PIPE }
+            .groupBy { it.toId }
+            .values.flatMap { incoming ->
+                incoming.sortedBy { edge -> rects[edge.fromId]?.let { (it.left + it.right) / 2f } ?: 0f }
+                    .mapIndexed { index, edge -> edge to (index to incoming.size) }
+            }.toMap()
+        return all.mapNotNull { edge ->
+            val from = rects[edge.fromId] ?: return@mapNotNull null
+            val to = rects[edge.toId] ?: return@mapNotNull null
+            when (edge.kind) {
+                SchemaEdgeKind.TREE -> curve(edge, from, to, vertical, scale)
+                SchemaEdgeKind.PIPE -> {
+                    val (index, count) = pipeRanks[edge] ?: (0 to 1)
+                    straight(edge, from, to, vertical, index, count)
+                }
+            }
         }
     }
 
@@ -104,6 +117,14 @@ object SchemaEdges {
     }
 
     fun pointAt(segment: SchemaSegment, t: Float): Pair<Float, Float> {
+        if (segment.orthogonal) {
+            val middleY = (segment.y0 + segment.y1) / 2f
+            return when {
+                t < 1f / 3f -> segment.x0 to segment.y0 + (middleY - segment.y0) * t * 3f
+                t < 2f / 3f -> segment.x0 + (segment.x1 - segment.x0) * (t * 3f - 1f) to middleY
+                else -> segment.x1 to middleY + (segment.y1 - middleY) * (t * 3f - 2f)
+            }
+        }
         if (segment.straight) {
             val x = segment.x0 + (segment.x1 - segment.x0) * t
             val y = segment.y0 + (segment.y1 - segment.y0) * t
@@ -177,9 +198,13 @@ object SchemaEdges {
         )
     }
 
-    private fun straight(edge: SchemaEdge, from: NodeRect, to: NodeRect, vertical: Boolean): SchemaSegment {
+    private fun straight(edge: SchemaEdge, from: NodeRect, to: NodeRect, vertical: Boolean,
+        inletIndex: Int, inletCount: Int): SchemaSegment {
         val start = anchor(from, if (vertical) AnchorSide.BOTTOM else AnchorSide.RIGHT)
-        val end = anchor(to, if (vertical) AnchorSide.TOP else AnchorSide.LEFT)
+        val end = if (vertical) {
+            val inletX = to.left + (to.right - to.left) * (inletIndex + 1) / (inletCount + 1)
+            inletX to to.top
+        } else anchor(to, AnchorSide.LEFT)
         return SchemaSegment(
             edge,
             start.first,
@@ -191,6 +216,7 @@ object SchemaEdges {
             end.first,
             end.second,
             straight = true,
+            orthogonal = vertical && abs(start.first - end.first) > 1f,
         )
     }
 
@@ -218,6 +244,14 @@ object SchemaEdges {
     }
 
     private fun distanceToCurve(segment: SchemaSegment, x: Float, y: Float): Float {
+        if (segment.orthogonal) {
+            val middleY = (segment.y0 + segment.y1) / 2f
+            return minOf(
+                distanceToSegment(x, y, segment.x0, segment.y0, segment.x0, middleY),
+                distanceToSegment(x, y, segment.x0, middleY, segment.x1, middleY),
+                distanceToSegment(x, y, segment.x1, middleY, segment.x1, segment.y1),
+            )
+        }
         if (segment.straight) {
             return distanceToSegment(x, y, segment.x0, segment.y0, segment.x1, segment.y1)
         }

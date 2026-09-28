@@ -66,6 +66,7 @@ import app.lernet.R
 import app.lernet.config.repo.RuleNodeRecord
 import app.lernet.ui.icons.LerNetSymbols
 import app.lernet.ui.theme.LerNetDimens
+import app.lernet.ui.theme.LerNetWarn
 import app.lernet.ui.theme.lernetButton
 import kotlinx.coroutines.flow.drop
 import sh.calvin.reorderable.ReorderableCollectionItemScope
@@ -207,6 +208,10 @@ private fun FolderReorderList(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
+    val channelNames = if (folderId == null) {
+        CanvasGraph.pipeNames(RouteFolders.attached(state.nodes), state.extraPipes)
+    } else emptyList()
+    var openChannel by remember(folderId) { mutableStateOf<String?>(null) }
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
     val rowBounds = remember(folderId) { mutableStateMapOf<String, Rect>() }
@@ -245,6 +250,28 @@ private fun FolderReorderList(
                     )
                 }
             }
+            if (channelNames.isNotEmpty()) {
+                item(key = "channel-heading") {
+                    Text(stringResource(R.string.route_channels_heading),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = LerNetDimens.cardGap))
+                }
+                items(channelNames, key = { "channel:$it" }) { name ->
+                    val sourceCount = channelSources(state.nodes, name).size
+                    ListItem(
+                        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
+                        modifier = Modifier.combinedClickable(onClick = { openChannel = name }),
+                        leadingContent = {
+                            if (sourceCount > 1) ChannelPortalMark(sourceCount)
+                            else Icon(LerNetSymbols.route(), contentDescription = null,
+                                tint = LerNetWarn)
+                        },
+                        headlineContent = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        supportingContent = { Text(stringResource(R.string.route_channel_sources, sourceCount)) },
+                    )
+                }
+            }
         }
         val held = placeholder
         val original = held?.let { drag -> rows.firstOrNull { it.id == drag.id } }
@@ -261,6 +288,9 @@ private fun FolderReorderList(
                     onIntent = {}, modifier = Modifier.fillMaxSize())
             }
         }
+    }
+    openChannel?.let { name ->
+        ChannelDetailsDialog(name, state.nodes) { openChannel = null }
     }
 }
 

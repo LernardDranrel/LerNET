@@ -72,6 +72,39 @@ class SchemaEdgesTest {
     }
 
     @Test
+    fun sharedChannelUsesSeparateInletsOrderedBySourcePosition() {
+        val nodes = listOf(rule("right", pipeName = "video"), rule("left", pipeName = "video"))
+        val rects = mapOf(
+            CanvasIds.rule("left") to NodeRect(0f, 0f, 80f, 40f),
+            CanvasIds.rule("right") to NodeRect(240f, 0f, 320f, 40f),
+            CanvasIds.pipe("video") to NodeRect(100f, 200f, 220f, 240f),
+        )
+        val incoming = SchemaEdges.segments(nodes, rects, vertical = true, scale = 1f)
+            .filter { it.edge.kind == SchemaEdgeKind.PIPE }
+            .associateBy { it.edge.fromId }
+
+        assertThat(incoming).hasSize(2)
+        assertThat(incoming.getValue(CanvasIds.rule("left")).x1).isEqualTo(140f)
+        assertThat(incoming.getValue(CanvasIds.rule("right")).x1).isEqualTo(180f)
+        assertThat(incoming.values.map { it.y1 }).containsExactly(200f, 200f)
+    }
+
+    @Test
+    fun anOffsetPipeUsesRightAngleSegments() {
+        val rule = NodeRect(0f, 0f, 80f, 40f)
+        val pipe = NodeRect(120f, 200f, 200f, 240f)
+        val rects = mapOf(CanvasIds.rule("leaf") to rule, CanvasIds.pipe("video") to pipe)
+        val segment = SchemaEdges.segments(listOf(rule("leaf", pipeName = "video")), rects,
+            vertical = true, scale = 1f).single { it.edge.kind == SchemaEdgeKind.PIPE }
+
+        assertThat(segment.orthogonal).isTrue()
+        assertThat(SchemaEdges.pointAt(segment, 0.5f)).isEqualTo(100f to 120f)
+        assertThat(SchemaEdges.pick(listOf(segment), rects.values, 100f, 120f, slop = 8f))
+            .isEqualTo(segment.edge)
+        assertThat(SchemaEdges.pick(listOf(segment), rects.values, 100f, 80f, slop = 8f)).isNull()
+    }
+
+    @Test
     fun breakingAChildOrphansItAndKeepsItsDescendant() {
         val nodes = listOf(
             rule("parent", domains = listOf("parent.example")),

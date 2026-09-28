@@ -498,6 +498,11 @@
     <string name="cfg_save_failed">Не удалось сохранить профиль. Изменения остались в редакторе.</string>
     <string name="saving">Сохранение…</string>
     <string name="route_pipe_delete">Удалить неиспользуемый канал</string>
+    <string name="route_channels_heading">КАНАЛЫ</string>
+    <string name="route_channel_title">Канал «%1$s»</string>
+    <string name="route_channel_sources">Источников: %1$d</string>
+    <string name="route_channel_shared">Общий канал, источников: %1$d</string>
+    <string name="route_channel_no_sources">К этому каналу пока не ведёт ни одно правило.</string>
     <string name="group_routes">Маршруты группы</string>
     <string name="group_routes_active">Маршруты группы активны — правила профилей в группе не применяются</string>
     <string name="routes_owned_by_group">Маршруты задаёт группа «%1$s». Пока профиль в группе с маршрутами, правила профиля не применяются.</string>

@@ -2,6 +2,7 @@ package app.lernet.ui.routes
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -92,14 +93,21 @@ internal fun RouteCanvas(
     val density = LocalDensity.current
     val column = with(density) { 246.dp.toPx() }
     val row = with(density) { 300.dp.toPx() }
-    val points = remember(visible, pipes, state.layout, column, row) {
-        CanvasGraph.layout(visible, pipes, state.layout, column, row)
+    val ruleWidth = with(density) { 210.dp.toPx() }
+    val pipeWidth = with(density) { 180.dp.toPx() }
+    val points = remember(visible, pipes, state.layout, column, row, ruleWidth, pipeWidth) {
+        CanvasGraph.layout(visible, pipes, state.layout, column, row, ruleWidth, pipeWidth)
     }
     val board = remember { AnchorBoard() }
     var dragGhost by remember { mutableStateOf<RuleDragGhost?>(null) }
+    var openChannel by remember(state.ownerId) { mutableStateOf<String?>(null) }
     val freePipes = state.extraPipes.filter { name -> state.nodes.none { it.pipeName == name } }.toSet()
     val nodes = canvasNodes(visible, pipes, freePipes, points, holders, board, state.canvasSelection,
-        canvasState.viewport.scale, state.routesLocked, onIntent, onDragGhost = { dragGhost = it })
+        canvasState.viewport.scale, state.routesLocked, onIntent, onDragGhost = { dragGhost = it },
+        onOpenChannel = { name ->
+            onIntent(RouteEditorIntent.SelectCanvas(CanvasIds.pipe(name)))
+            openChannel = name
+        })
     SyncCanvasLinks(
         canvasState,
         state.nodes,
@@ -137,6 +145,12 @@ internal fun RouteCanvas(
         )
         CanvasNotices(state, onIntent)
         CanvasBoard(canvasState, nodes, board, points, visible, panning, state, dragGhost, onIntent)
+    }
+    openChannel?.let { name ->
+        ChannelDetailsDialog(name, state.nodes) {
+            openChannel = null
+            onIntent(RouteEditorIntent.SelectCanvas(null))
+        }
     }
 }
 
@@ -197,6 +211,7 @@ private fun ColumnScope.CanvasBoard(
             vertical = vertical,
             scale = scale,
             selected = state.selectedEdge,
+            selectedChannel = state.canvasSelection?.takeIf(CanvasIds::isPipe),
             canBreak = !state.routesLocked,
             onBreak = { edge -> onIntent(RouteEditorIntent.RequestBreakEdge(edge)) },
         )
@@ -341,6 +356,7 @@ private fun canvasNodes(
     locked: Boolean,
     onIntent: (RouteEditorIntent) -> Unit,
     onDragGhost: (RuleDragGhost?) -> Unit,
+    onOpenChannel: (String) -> Unit,
 ): List<CanvasNode> {
     val rootState = holder(holders, CanvasIds.ROOT, points, fixed = true)
     board.bind(CanvasIds.ROOT, rootState)
@@ -370,6 +386,7 @@ private fun canvasNodes(
         )
     }
     val pipeNodes = pipes.map { name ->
+        val sourceCount = channelSources(nodes, name).size
         val pipeState = holder(holders, CanvasIds.pipe(name), points, fixed = true)
         board.bind(CanvasIds.pipe(name), pipeState)
         CanvasNode(
@@ -381,7 +398,7 @@ private fun canvasNodes(
                 .trackNode(board, CanvasIds.pipe(name)),
             state = pipeState,
             content = {
-                SchemaCard {
+                SchemaCard(modifier = Modifier.clickable { onOpenChannel(name) }) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             name.ifBlank { stringResource(R.string.route_pipe_default) },
@@ -391,6 +408,7 @@ private fun canvasNodes(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
                         )
+                        if (sourceCount > 1) ChannelPortalMark(sourceCount, Modifier.padding(start = 6.dp))
                         if (name in freePipes) {
                             IconButton(onClick = { onIntent(RouteEditorIntent.RemovePipe(name)) }) {
                                 Icon(
@@ -400,6 +418,11 @@ private fun canvasNodes(
                             }
                         }
                     }
+                    Text(
+                        stringResource(R.string.route_channel_sources, sourceCount),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
                 }
             },
         )
@@ -408,7 +431,7 @@ private fun canvasNodes(
 }
 
 @Composable
-private fun SchemaCard(content: @Composable ColumnScope.() -> Unit) {
+private fun SchemaCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     val onCard = MaterialTheme.colorScheme.onSurface
     // The canvas library provides light text defaults. Restore our dark theme
     // explicitly inside each node so cards match the rest of the editor.
@@ -417,7 +440,7 @@ private fun SchemaCard(content: @Composable ColumnScope.() -> Unit) {
         LocalTextStyle provides TextStyle(color = onCard),
     ) {
         Column(
-            Modifier
+            modifier
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                 .padding(LerNetDimens.contentPadding),

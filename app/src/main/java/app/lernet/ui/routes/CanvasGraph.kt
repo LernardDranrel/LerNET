@@ -64,7 +64,7 @@ object CanvasGraph {
         }
     }
 
-    /** Yellow edge only for a leaf «В обход» with a named pipe. A fan-out is not that edge. */
+    /** A separate-channel link exists only for a proxy leaf with a named pipe. */
     fun namedPipeLinks(nodes: List<RuleNodeRecord>): List<CanvasLink> {
         val withKids = nodes.mapNotNull { it.parentId }.toSet()
         return RouteFolders.attached(nodes).mapNotNull { node ->
@@ -138,6 +138,8 @@ object CanvasGraph {
         @Suppress("UNUSED_PARAMETER") saved: Map<String, CanvasPoint>,
         column: Float = COLUMN,
         row: Float = ROW,
+        ruleWidth: Float = 210f,
+        pipeWidth: Float = 180f,
     ): Map<String, CanvasPoint> {
         val tree = RouteTreeLayout.vertical(
             nodes.sortedWith(compareBy({ it.sortIndex }, { it.id }))
@@ -159,7 +161,7 @@ object CanvasGraph {
         var previousX = Float.NEGATIVE_INFINITY
         pipes.mapIndexed { index, name ->
             val id = CanvasIds.pipe(name)
-            val sourceXs = sources[id].orEmpty().mapNotNull { placed[it.fromId]?.x }
+            val sourceXs = sources[id].orEmpty().mapNotNull { placed[it.fromId]?.x?.plus((ruleWidth - pipeWidth) / 2f) }
             val preferredX = if (sourceXs.isEmpty()) {
                 (tree.nodes.values.maxOfOrNull { it.x } ?: tree.root.x) + column * (index + 1)
             } else {

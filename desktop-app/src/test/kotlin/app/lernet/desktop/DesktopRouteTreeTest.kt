@@ -9,6 +9,18 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
 class DesktopRouteTreeTest {
+    @Test fun sharedNamedChannelHasOneEntryWithBothSources() {
+        val rules = listOf(
+            rule("left").copy(pipeName = "office"),
+            rule("parent", sort = 1),
+            rule("right", parent = "parent").copy(pipeName = "office"),
+            rule("inactive", sort = 2).copy(action = "DIRECT", pipeName = "office"),
+        )
+        val channels = namedChannelSources(rules, "profile")
+        assertThat(channels.keys).containsExactly("office")
+        assertThat(channels.getValue("office").map { it.id }).containsExactly("left", "right").inOrder()
+    }
+
     @Test fun profileDropReordersAndMovesIntoOneLevelFolder() {
         val directory = java.nio.file.Files.createTempDirectory("lernet-profile-drop")
         val profiles = listOf("a", "b", "c").map { id ->
