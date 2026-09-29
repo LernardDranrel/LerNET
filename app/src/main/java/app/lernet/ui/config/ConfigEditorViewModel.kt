@@ -18,6 +18,7 @@ import app.lernet.engine.compile.OutboundPatch
 import app.lernet.engine.redact.LerNetLog
 import app.lernet.engine.toRuleNode
 import app.lernet.routing.CompiledRoute
+import app.lernet.routing.RoutePlatform
 import app.lernet.routing.RouteCompiler
 import app.lernet.routing.RuleNode
 import app.lernet.settings.SettingsStore
@@ -159,7 +160,7 @@ class ConfigEditorViewModel @Inject constructor(
             type = outbound.type,
             json = outbound.singBoxJson,
             dnsJson = profile.dnsJson,
-            route = RouteCompiler.compile(nodes.toRouting()),
+            route = RouteCompiler.compile(nodes.toRouting(), RoutePlatform.ANDROID),
             mode = settings.mode,
             logLevel = settings.logLevel,
             defaults = settings.engineDefaults,

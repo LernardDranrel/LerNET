@@ -52,6 +52,7 @@ object DesktopTransfer {
         val groupIds = bundle.groups.associate { it.id to newId() }
         val profileIds = bundle.profiles.associate { it.id to newId() }
         val ruleIds = bundle.rules.associate { it.id to newId() }
+        val ownerIds = TransferCodec.remapOwnerIds(profileIds, groupIds)
         val layouts = bundle.profiles.associate { it.id to it.canvasLayout } +
             bundle.groups.associate { groupOwner(it.id) to it.canvasLayout }
         val importedGroups = bundle.groups.map { group ->
@@ -77,9 +78,8 @@ object DesktopTransfer {
         val importedRules = bundle.rules.map { rule ->
             StoredRule(
                 id = ruleIds.getValue(rule.id),
-                profileId = if (rule.ownerId.startsWith("grp_")) groupOwner(groupIds.getValue(rule.ownerId.removePrefix("grp_")))
-                    else profileIds.getValue(rule.ownerId),
-                parentId = rule.parentId?.let(ruleIds::getValue),
+                profileId = ownerIds.getValue(rule.ownerId),
+                parentId = TransferCodec.remapParentId(rule.parentId, ruleIds),
                 enabled = rule.enabled, sortIndex = rule.sortIndex, action = rule.action.uppercase(),
                 pipeName = rule.pipeName, title = rule.title, join = rule.join,
                 apps = rule.apps, processes = rule.processes, domains = rule.domains,

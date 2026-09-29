@@ -497,6 +497,7 @@ private fun RouteScheme(
             positioned(position, if (draggingId == rule.id) 10f else 0f) {
                 RouteNodeCard(
                     rule = rule, selected = rule.id == selectedId,
+                    unavailable = rule.id in DesktopRouteTree.platformInactiveIds(rules),
                     childCount = rules.count { it.parentId == rule.id },
                     dragging = draggingId == rule.id, dropTarget = hoverTarget == rule.id, dragOffset = dragDelta,
                     onBounds = { nodeBounds[rule.id] = it },
@@ -547,13 +548,14 @@ private fun RouteScheme(
 }
 
 @Composable
-private fun RouteNodeCard(rule: StoredRule, selected: Boolean, childCount: Int,
+private fun RouteNodeCard(rule: StoredRule, selected: Boolean, unavailable: Boolean, childCount: Int,
     dragging: Boolean, dropTarget: Boolean, dragOffset: Offset, onBounds: (Rect) -> Unit,
     onClick: () -> Unit, onAddChild: () -> Unit, onDragStart: (Offset) -> Unit, onDrag: (Offset) -> Unit, onDragEnd: () -> Unit) {
     val currentStart by rememberUpdatedState(onDragStart)
     val currentDrag by rememberUpdatedState(onDrag)
     val currentEnd by rememberUpdatedState(onDragEnd)
     val tone = when {
+        unavailable || !rule.enabled -> routeMuted
         childCount > 0 -> routeBlue
         rule.action == "DIRECT" -> routeGreen
         rule.action == "BLOCK" -> routeRed
@@ -568,13 +570,13 @@ private fun RouteNodeCard(rule: StoredRule, selected: Boolean, childCount: Int,
                     detectDragGestures(onDragStart = { currentStart(it) }, onDragEnd = { currentEnd() }, onDragCancel = { currentEnd() }) { change, amount ->
                         change.consume(); currentDrag(amount)
                     }
-                }.clickable(onClick = onClick))
+                }.clickable(onClick = onClick), unavailable = unavailable)
         if (dragging) RouteNodeFace(rule, childCount, tone, selected = true, dropTarget = false,
             modifier = Modifier.graphicsLayer {
                 translationX = dragOffset.x
                 translationY = dragOffset.y
                 shadowElevation = 22f
-            })
+            }, unavailable = unavailable)
     if (selected && !dragging) {
         Surface(shape = RoundedCornerShape(50), color = routeBlue,
             modifier = Modifier.offset(x = 87.dp, y = 88.dp).size(36.dp).clickable(onClick = onAddChild)) {
@@ -586,9 +588,9 @@ private fun RouteNodeCard(rule: StoredRule, selected: Boolean, childCount: Int,
 
 @Composable
 private fun RouteNodeFace(rule: StoredRule, childCount: Int, tone: Color, selected: Boolean,
-    dropTarget: Boolean, modifier: Modifier = Modifier) {
+    dropTarget: Boolean, modifier: Modifier = Modifier, unavailable: Boolean = false) {
     Surface(
-        color = if (selected) Color(0xFF243056) else routeCard,
+        color = if (unavailable) Color(0xFF202329) else if (selected) Color(0xFF243056) else routeCard,
         shape = RoundedCornerShape(12.dp),
         border = androidx.compose.foundation.BorderStroke(if (selected || dropTarget) 2.dp else 1.dp,
             if (selected || dropTarget) routeBlue else routeBorder),
@@ -598,14 +600,14 @@ private fun RouteNodeFace(rule: StoredRule, childCount: Int, tone: Color, select
             Box(Modifier.size(7.dp).background(if (rule.enabled) tone else routeMuted, RoundedCornerShape(50)))
             Spacer(Modifier.width(9.dp))
             Column(Modifier.weight(1f)) {
-                Text(displayTitle(rule), color = if (rule.enabled) routeText else routeMuted, fontWeight = FontWeight.SemiBold,
+                Text(displayTitle(rule), color = if (rule.enabled && !unavailable) routeText else routeMuted, fontWeight = FontWeight.SemiBold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
                 Text(if (DesktopRouteTree.isElse(rule)) "Любой оставшийся трафик" else ruleSummary(rule),
                     color = routeMuted, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp)
-                Text(if (childCount > 0) "Развилка · $childCount ветвей" else actionLabelDesktop(rule),
+                Text(if (unavailable) "Только Android · неактивно" else if (childCount > 0) "Развилка · $childCount ветвей" else actionLabelDesktop(rule),
                     color = tone, fontSize = 11.sp)
             }
-            Text("${rule.sortIndex + 1}", color = routeBlue, fontSize = 11.sp,
+            Text("${rule.sortIndex + 1}", color = if (unavailable) routeMuted else routeBlue, fontSize = 11.sp,
                 modifier = Modifier.padding(horizontal = 5.dp))
         }
     }
@@ -717,14 +719,16 @@ private fun RouteList(profileId: String, rules: List<StoredRule>, selectedId: St
 @Composable
 private fun RouteListRowContent(rule: StoredRule, rules: List<StoredRule>, selected: Boolean,
     onAddChild: (StoredRule) -> Unit, addEnabled: Boolean = true) {
+    val unavailable = rule.id in DesktopRouteTree.platformInactiveIds(rules)
     Row(Modifier.padding(9.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("${rule.sortIndex + 1}", color = routeBlue, fontSize = 12.sp, modifier = Modifier.width(28.dp))
+        Text("${rule.sortIndex + 1}", color = if (unavailable) routeMuted else routeBlue, fontSize = 12.sp, modifier = Modifier.width(28.dp))
         Column(Modifier.weight(1f)) {
-            Text(displayTitle(rule), color = routeText, fontWeight = FontWeight.Medium,
+            Text(displayTitle(rule), color = if (unavailable || !rule.enabled) routeMuted else routeText, fontWeight = FontWeight.Medium,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             val childCount = rules.count { it.parentId == rule.id }
             Text("${ruleSummary(rule)}  ·  ${if (childCount > 0) "Развилка · $childCount ветвей" else actionLabelDesktop(rule)}",
                 color = routeMuted, fontSize = 11.sp, maxLines = 1)
+            if (unavailable) Text("Только Android · неактивно в Windows", color = routeMuted, fontSize = 11.sp)
         }
         if (selected) RouteListAddButton(onClick = { onAddChild(rule) }, enabled = addEnabled)
     }
@@ -777,7 +781,9 @@ private fun RouteInspector(
                 Text("Выделите блок и нажмите + под ним. Порядок одноуровневых правил меняется перетаскиванием.", color = routeMuted, fontSize = 12.sp)
             } else {
                 Text(displayTitle(selected), color = routeText, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                Text("Приоритет ${selected.sortIndex + 1} · ${if (selected.enabled) "Включено" else "Выключено"}", color = routeMuted, fontSize = 12.sp)
+                val platformNote = DesktopRouteTree.platformNote(selected, rules)
+                if (platformNote != null) Text(platformNote, color = routeMuted, fontSize = 12.sp)
+                Text("Приоритет ${selected.sortIndex + 1} · ${if (platformNote != null) "Неактивно в Windows" else if (selected.enabled) "Включено" else "Выключено"}", color = routeMuted, fontSize = 12.sp)
                 HorizontalDivider(color = routeBorder)
                 Text(ruleBreadcrumb(selected.parentId, rules), color = routeMuted, fontSize = 11.sp)
                 Text(ruleSummary(selected), color = routeText, fontSize = 13.sp)
@@ -788,7 +794,8 @@ private fun RouteInspector(
                 OutlinedButton(onClick = { onAddChild(selected) }, modifier = Modifier.fillMaxWidth()) { Text("+ Дочернее правило") }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Включено", color = routeText, modifier = Modifier.weight(1f))
-                    Switch(selected.enabled, onCheckedChange = { onToggle(selected) }, enabled = !DesktopRouteTree.isElse(selected))
+                    Switch(selected.enabled && platformNote == null, onCheckedChange = { onToggle(selected) },
+                        enabled = !DesktopRouteTree.isElse(selected) && platformNote == null)
                 }
                 TextButton(onClick = { onDelete(selected) }) { Text("Удалить правило", color = routeRed) }
             }
@@ -820,6 +827,8 @@ private fun RouteRuleEditor(draft: StoredRule, rules: List<StoredRule>, onClose:
     var pipeName by remember(draft.id) { mutableStateOf(draft.pipeName) }
     var parentMenu by remember { mutableStateOf(false) }
     var addBlockMenu by remember { mutableStateOf(false) }
+    val currentRule = draft.copy(parentId = parentId, blocksJson = ConditionCodec.encode(conditions))
+    val platformNote = DesktopRouteTree.platformNote(currentRule, rules.filterNot { it.id == draft.id } + currentRule)
     val candidates = rules.filter { it.id != draft.id && it.id !in descendants(rules, draft.id) }
     val hasChildren = rules.any { it.parentId == draft.id }
     val maxPriority = rules.count { it.profileId == draft.profileId && it.parentId == parentId && it.id != draft.id && !DesktopRouteTree.isElse(it) }
@@ -835,6 +844,7 @@ private fun RouteRuleEditor(draft: StoredRule, rules: List<StoredRule>, onClose:
                     Spacer(Modifier.height(12.dp))
                     Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedTextField(title, { title = it }, label = { Text("Название") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        if (platformNote != null) Text(platformNote, color = routeMuted, fontSize = 12.sp)
                         Box {
                             OutlinedButton(onClick = { parentMenu = true }, modifier = Modifier.fillMaxWidth()) {
                                 Text("Родитель: " + (parentId?.let { id -> rules.firstOrNull { it.id == id }?.let(::displayTitle) } ?: "Корень"))
@@ -980,7 +990,7 @@ private fun RouteConditionBlockEditor(block: ConditionBlock, onChange: (Conditio
             when (block.kind) {
                 ConditionKind.PRIVATE -> if (block.values.isEmpty()) TextButton(onClick = { onChange(block.copy(values = listOf("private"))) }) { Text("Добавить частные сети") }
                 ConditionKind.GEOIP -> OutlinedButton(onClick = { countryPicker = true }) { Text("Выбрать страны") }
-                ConditionKind.APP -> Text("Условия Android-приложений сохраняются, но в Windows не выполняются. Удалите блок или замените процессами.", color = routeRed, fontSize = 12.sp)
+                ConditionKind.APP -> Text("Условие для Android. В Windows эта ветка и её дочерние правила неактивны, но сохраняются для экспорта. Можно создать отдельную ветку с Windows-процессами.", color = routeMuted, fontSize = 12.sp)
                 else -> {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(input, { input = it }, singleLine = true, modifier = Modifier.weight(1f),

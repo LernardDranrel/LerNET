@@ -334,6 +334,7 @@ private fun FolderRow(
             branching,
             node.acceptsChildren(state.nodes),
             modifier,
+            node.id in androidInactiveRuleIds(state.nodes),
         ),
         onIntent,
     )
@@ -348,6 +349,7 @@ private data class FolderRow(
     val branching: Boolean,
     val opensFolder: Boolean,
     val modifier: Modifier,
+    val unavailable: Boolean,
 )
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -363,7 +365,8 @@ private fun FolderListItem(
     val opensFolder = row.opensFolder
     val moveUp = stringResource(R.string.move_up)
     val moveDown = stringResource(R.string.move_down)
-    val ruleColor = if (row.branching) MaterialTheme.colorScheme.primary else routeTone(node.action, node.pipeName).ink()
+    val ruleColor = if (row.unavailable || !node.enabled) MaterialTheme.colorScheme.outline
+        else if (row.branching) MaterialTheme.colorScheme.primary else routeTone(node.action, node.pipeName).ink()
     val container = if (placing) {
         MaterialTheme.colorScheme.secondaryContainer
     } else {
@@ -398,6 +401,7 @@ private fun FolderListItem(
                 Row(verticalAlignment = Alignment.Top) {
                     Text(
                         ruleHeadline(node),
+                        color = if (row.unavailable || !node.enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
@@ -405,13 +409,15 @@ private fun FolderListItem(
                     if (!node.isElseRule()) {
                         Text(
                             row.rank.toString(),
-                            color = MaterialTheme.colorScheme.primary,
+                            color = if (row.unavailable) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
                             style = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.padding(start = LerNetDimens.itemGap),
                         )
                     }
                 }
-                RuleSupport(node, misplaced, row.branching)
+                if (row.unavailable) Text(stringResource(R.string.route_windows_only),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                else RuleSupport(node, misplaced, row.branching)
             }
         },
         trailingContent = {
@@ -419,7 +425,7 @@ private fun FolderListItem(
                 IconButton(onClick = { onIntent(RouteEditorIntent.AddChild(node.id)) }) {
                     Icon(LerNetSymbols.add(), contentDescription = stringResource(R.string.route_add_child))
                 }
-                Switch(checked = node.enabled, enabled = !node.isElseRule(),
+                Switch(checked = node.enabled && !row.unavailable, enabled = !node.isElseRule() && !row.unavailable,
                     onCheckedChange = { onIntent(RouteEditorIntent.Toggle(node.id)) })
                 RuleOverflowMenu(node.id, onIntent)
             }

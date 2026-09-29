@@ -546,4 +546,6 @@
     <string name="settings_journal_confirm_body">Журнал будет обрезан до %1$d МБ</string>
     <string name="settings_journal_apply">Обрезать</string>
     <string name="group_grip">Перетащить</string>
+    <string name="route_windows_only">Только Windows · неактивно на Android</string>
+    <string name="route_windows_only_explanation">Эта ветка зависит от условия Windows-процессов и неактивна на Android вместе с дочерними правилами. Исходные условия и состояние включения сохранены для переноса. Для этого устройства можно создать отдельную ветку с Android-приложениями или изменить условия этой ветки.</string>
 </resources>

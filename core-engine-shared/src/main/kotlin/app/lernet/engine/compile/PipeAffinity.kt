@@ -4,8 +4,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 object PipeAffinity {
-    fun tags(names: List<String>): Map<String, String> {
-        val used = HashSet<String>()
+    fun tags(names: List<String>, reserved: Set<String> = emptySet()): Map<String, String> {
+        val used = reserved.toHashSet()
         val out = linkedMapOf<String, String>()
         names.map { it.trim() }.filter { it.isNotEmpty() }.distinct().forEach { name ->
             var tag = tag(name)

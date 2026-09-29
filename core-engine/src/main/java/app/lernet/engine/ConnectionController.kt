@@ -34,6 +34,7 @@ import app.lernet.engine.policy.PolicyCommand
 import app.lernet.engine.policy.PolicyEvent
 import app.lernet.engine.policy.ReconnectSettings
 import app.lernet.engine.redact.LerNetLog
+import app.lernet.routing.RoutePlatform
 import app.lernet.routing.RouteCompiler
 import app.lernet.routing.RuleNode
 import java.util.concurrent.atomic.AtomicInteger
@@ -86,6 +87,7 @@ class ConnectionController(
     private var pendingEndpoint: OutboundEndpoint? = null
     private var pendingOutboundId: String? = null
     private var pendingLogLevel: String = "warn"
+    private var pendingDefaults: EngineDefaults = EngineDefaults()
     private var resolveFailoverProfile: (suspend (String) -> Pair<Profile, List<RuleNodeRecord>>?)? = null
     private var onFailoverSelected: (suspend (String) -> Unit)? = null
     private var pendingProxyTag: String? = null
@@ -234,7 +236,7 @@ class ConnectionController(
             return
         }
         val compiled = try {
-            RouteCompiler.compile(nodes.toRouting())
+            RouteCompiler.compile(nodes.toRouting(), RoutePlatform.ANDROID)
         } catch (error: Throwable) {
             CrashTrail.recordFailure("RouteCompiler.compile", error)
             dispatch(PolicyEvent.EngineFailed(ConnectionCause.InvalidRouteTree(listOf(error.message ?: "compile"))))
@@ -274,6 +276,7 @@ class ConnectionController(
             ?: OutboundEndpoint.fromAssembled(assembled.json, assembled.proxyTag)
         pendingOutboundId = outbound.id
         pendingLogLevel = logLevel
+        pendingDefaults = defaults
         pendingProxyTag = assembled.proxyTag
         resetConnectMarkers()
         assembled.notes.forEach { LerNetLog.i(TAG, it) }
@@ -358,7 +361,7 @@ class ConnectionController(
                             ) {
                                 return@launch
                             }
-                            connect(target.first, target.second, machineState.snapshot.mode, pendingLogLevel)
+                            connect(target.first, target.second, machineState.snapshot.mode, pendingLogLevel, pendingDefaults)
                             if (machineState.snapshot.activeProfileId == target.first.id) {
                                 onFailoverSelected?.invoke(target.first.id)
                             }

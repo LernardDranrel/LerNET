@@ -19,6 +19,8 @@ import app.lernet.routing.ConditionKind
 import app.lernet.routing.MatchJoin
 import app.lernet.routing.RouteAction
 import app.lernet.routing.RouteCompiler
+import app.lernet.routing.RouteElse
+import app.lernet.routing.RoutePlatform
 import app.lernet.routing.RuleConditions
 import app.lernet.routing.RuleMatch
 import app.lernet.routing.RuleNode
@@ -36,10 +38,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 
+data class ConnectionError(val message: String, val routeOwnerId: String? = null)
+
 data class DesktopUiState(
     val saved: StoredState = StoredState(),
     val busy: Boolean = false,
     val message: String = "",
+    val connectionError: ConnectionError? = null,
     val probes: Map<String, ProbeResult> = emptyMap(),
     val healthMessage: String = "",
     val healthFailures: Int = 0,
@@ -404,7 +409,8 @@ class DesktopController(
         val originalRules = saved.rules.filter { it.profileId == profileId }
         val ids = originalRules.associate { it.id to UUID.randomUUID().toString() }
         val copiedRules = originalRules.map { rule ->
-            rule.copy(id = ids.getValue(rule.id), profileId = copyId, parentId = rule.parentId?.let(ids::get))
+            rule.copy(id = ids.getValue(rule.id), profileId = copyId,
+                parentId = app.lernet.config.transfer.TransferCodec.remapParentId(rule.parentId, ids))
         }
         saved.copy(
             profiles = saved.profiles + source.copy(id = copyId, name = source.name + " (копия)",
@@ -436,6 +442,7 @@ class DesktopController(
         profile?.modeOverride ?: state.value.saved.mode, WindowsElevation.isElevated,
     )
     fun showMessage(message: String) { mutable.update { it.copy(message = message) } }
+    fun dismissConnectionError() { mutable.update { it.copy(connectionError = null) } }
     fun setHealthUrl(url: String) = change { it.copy(healthUrl = url.trim()) }
     fun setDefaultDnsPolicy(policy: DnsPolicy) = change { it.copy(defaultDnsPolicy = policy.name) }
     fun setJournalMaxMb(value: Int) = change { it.copy(journalMaxMb = value.coerceIn(1, 500)) }
@@ -547,6 +554,7 @@ class DesktopController(
                 else RuleConditions(
                     join = MatchJoin.entries.firstOrNull { it.name == rule.join } ?: MatchJoin.AND,
                     blocks = buildList {
+                        if (rule.apps.isNotEmpty()) add(ConditionBlock(ConditionKind.APP, rule.apps))
                         if (rule.domains.isNotEmpty() || rule.domainSuffixes.isNotEmpty()) {
                             add(ConditionBlock(ConditionKind.DOMAIN, rule.domains + rule.domainSuffixes.map { "*.$it" }))
                         }
@@ -557,10 +565,10 @@ class DesktopController(
                 ),
             )
         }.let { nodes ->
-            if (nodes.any { it.match.isCatchAll() && it.parentId == null }) nodes
+            if (nodes.any { RouteElse.isElse(it) && it.parentId == null }) nodes
             else nodes + RuleNode("else-${profile.id}", null, true, Int.MAX_VALUE, RuleMatch(), RouteAction.PROXY)
         }
-        val compiled = RouteCompiler.compile(rules)
+        val compiled = RouteCompiler.compile(rules, RoutePlatform.WINDOWS)
         val ruleSetDir = store.workDirectory().resolve("rule-set")
         val assembled = ConfigAssembler.assemble(
             outbound = outbound,
@@ -596,7 +604,7 @@ class DesktopController(
 
     private fun connectInternal(resetFailover: Boolean) {
         if (loaded.isFailure) {
-            mutable.update { it.copy(message = "Файл профилей повреждён. Сохранение отключено до восстановления данных.") }
+            reportConnectionError("Файл профилей повреждён. Сохранение отключено до восстановления данных.")
             return
         }
         if (!connectBusy.compareAndSet(false, true)) return
@@ -607,11 +615,17 @@ class DesktopController(
         if (resetFailover) synchronized(failedInGroup) { failedInGroup.clear() }
         desiredConnection = true
         val ticket = connectGeneration.incrementAndGet()
-        mutable.update { it.copy(busy = true, message = "Подготовка Windows-ядра") }
+        mutable.update { it.copy(busy = true, message = "Подготовка Windows-ядра", connectionError = null) }
         thread(name = "lernet-windows-connect", isDaemon = true) {
+            var routeErrorOwner: String? = null
             try {
                 val assembled = preview()
+                if (!assembled.isValid) {
+                    val profile = state.value.saved.profiles.firstOrNull { it.id == state.value.saved.selectedProfileId }
+                    routeErrorOwner = profile?.groupId?.let { "grp_$it" } ?: profile?.id
+                }
                 check(assembled.isValid) { assembled.errors.joinToString("; ") }
+                assembled.notes.forEach(tunnel::logDiagnostic)
                 traceSelected()
                 prepareRuleSets()
                 tunnel.journalMaxMb = state.value.saved.journalMaxMb
@@ -625,13 +639,19 @@ class DesktopController(
                 mutable.update { it.copy(message = "Запускаем ядро") }
             } catch (error: Exception) {
                 if (connectGeneration.get() == ticket) {
-                    mutable.update { it.copy(message = error.message ?: "Не удалось запустить ядро") }
+                    desiredConnection = false
+                    reportConnectionError(error.message ?: "Не удалось запустить ядро", routeErrorOwner)
                 }
             } finally {
                 connectBusy.set(false)
                 mutable.update { it.copy(busy = false) }
             }
         }
+    }
+
+    private fun reportConnectionError(message: String, routeOwnerId: String? = null) {
+        tunnel.logDiagnostic("Подключение не запущено: $message")
+        mutable.update { it.copy(message = message, connectionError = ConnectionError(message, routeOwnerId)) }
     }
 
     private fun tryFailover(failedProfileId: String): Boolean {
@@ -668,7 +688,9 @@ class DesktopController(
     private fun prepareRuleSets() {
         val saved = state.value.saved
         val profile = saved.profiles.firstOrNull { it.id == saved.selectedProfileId } ?: return
-        val tokens = routingRules(saved, profile).flatMap { rule ->
+        val rules = routingRules(saved, profile)
+        val inactive = DesktopRouteTree.platformInactiveIds(rules)
+        val tokens = rules.filterNot { it.id in inactive }.flatMap { rule ->
             rule.countries + ConditionCodec.decode(rule.blocksJson, ruleMatch(rule)).blocks
                 .filter { it.kind == ConditionKind.GEOIP }.flatMap { it.values }
         }

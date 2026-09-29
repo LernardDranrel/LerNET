@@ -15,6 +15,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(project(":core-routing"))
     api(libs.kotlinx.serialization.json)
     api(libs.okhttp)
     implementation(libs.kotlinx.coroutines.core)

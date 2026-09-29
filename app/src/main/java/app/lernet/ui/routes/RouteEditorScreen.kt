@@ -529,6 +529,10 @@ private fun RuleEditorSheet(
                 }
             }
             RuleTitleField(node, onIntent)
+            if (node.id in androidInactiveRuleIds(nodes)) {
+                Text(stringResource(R.string.route_windows_only_explanation),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             PriorityControls(
                 rank = rank,
                 maxRank = nodes.count { it.parentId == node.parentId && !it.isElseRule() },

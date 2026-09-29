@@ -3,10 +3,29 @@ package app.lernet.desktop
 import app.lernet.routing.RouteTree
 import app.lernet.routing.ConditionCodec
 import app.lernet.routing.RuleMatch
+import app.lernet.routing.RuleNode
+import app.lernet.routing.RouteAction
+import app.lernet.routing.RoutePlatform
+import app.lernet.routing.RoutePlatformRules
 import java.util.UUID
 
 /** One rule list backs both the tree and the diagram. Coordinates never affect routing order. */
 object DesktopRouteTree {
+    fun platformInactiveIds(rules: List<StoredRule>): Set<String> = RoutePlatformRules.inactiveNodeIds(
+        rules.map { rule ->
+            val match = RuleMatch(rule.apps, rule.domains, rule.domainSuffixes, rule.cidrs, rule.countries, rule.processes)
+            RuleNode(rule.id, rule.parentId, rule.enabled, rule.sortIndex, match, RouteAction.PROXY,
+                conditions = rule.blocksJson.takeIf(String::isNotBlank)?.let { ConditionCodec.decode(it, match) })
+        }, RoutePlatform.WINDOWS,
+    )
+
+    fun platformNote(rule: StoredRule, rules: List<StoredRule>): String? {
+        if (rule.id !in platformInactiveIds(rules)) return null
+        return "Эта ветка зависит от условия Android-приложений и неактивна в Windows вместе с дочерними правилами. " +
+            "Исходные условия и состояние включения сохранены для переноса. Для этого компьютера можно создать отдельную " +
+            "ветку с Windows-процессами или изменить условия этой ветки."
+    }
+
     data class Edit(val rules: List<StoredRule>, val error: String? = null)
 
     fun siblings(rules: List<StoredRule>, profileId: String, parentId: String?): List<StoredRule> =
@@ -16,7 +35,7 @@ object DesktopRouteTree {
     fun isElse(rule: StoredRule): Boolean =
         rule.domains.isEmpty() && rule.domainSuffixes.isEmpty() && rule.cidrs.isEmpty() &&
             rule.countries.isEmpty() && rule.processes.isEmpty() && rule.apps.isEmpty() &&
-            (rule.blocksJson.isBlank() || ConditionCodec.decode(rule.blocksJson, RuleMatch()).blocks.all { it.values.isEmpty() })
+            rule.blocksJson.isBlank()
 
     fun save(all: List<StoredRule>, rule: StoredRule): Edit {
         val profile = all.filter { it.profileId == rule.profileId }

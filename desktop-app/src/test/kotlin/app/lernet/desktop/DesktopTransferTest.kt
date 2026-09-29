@@ -62,4 +62,24 @@ class DesktopTransferTest {
         assertEquals(RulePosition(33f, 44f), imported.rulePositions[rule.id])
         assertEquals(33f, TransferCodec.pointInLayout(imported.groups.single().canvasLayout, rule.id)!!.x)
     }
+
+    @Test fun `disconnected branches stay disconnected after export and import`() {
+        val loose = saved.rules.last().copy(parentId = "orphan")
+        val child = loose.copy(id = "child", parentId = loose.id)
+        val state = saved.copy(rules = saved.rules.take(1) + loose + child)
+        val imported = DesktopTransfer.merge(StoredState(), DesktopTransfer.export(state))
+        val rules = imported.rules.filter { it.profileId == imported.profiles.single().id }
+        val parent = rules.single { it.parentId == "orphan" }
+        assertEquals(parent.id, rules.single { it.id != parent.id }.parentId)
+        val exported = TransferCodec.decode(DesktopTransfer.export(imported))
+        assertEquals(1, exported.rules.count { it.parentId == "orphan" })
+    }
+
+    @Test fun `external profile ids starting with group prefix are still profiles`() {
+        val standalone = profile.copy(id = "grp_standalone", groupId = null)
+        val state = StoredState(profiles = listOf(standalone), rules = listOf(
+            saved.rules.last().copy(profileId = standalone.id)))
+        val imported = DesktopTransfer.merge(StoredState(), DesktopTransfer.export(state))
+        assertEquals(imported.profiles.single().id, imported.rules.single().profileId)
+    }
 }

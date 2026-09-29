@@ -4,6 +4,7 @@ import app.lernet.config.model.NormalizedOutbound
 import app.lernet.config.model.Profile
 import app.lernet.config.model.ProfileSource
 import app.lernet.config.repo.RuleNodeRecord
+import app.lernet.engine.compile.EngineDefaults
 import app.lernet.engine.live.ChannelHealth
 import app.lernet.engine.live.ChannelWatch
 import app.lernet.engine.live.LiveConn
@@ -141,7 +142,8 @@ class ConnectionControllerTest {
             failoverEnabled = true,
             group = ManualFailoverGroup("g", "Резерв", listOf("out-1", "out-2")),
         )
-        controller.connect(first, catchAllNodes(), RunMode.FULL_VPN)
+        controller.connect(first, catchAllNodes(), RunMode.FULL_VPN,
+            defaults = EngineDefaults(tunMtu = 1380, directDnsServer = "9.9.9.9"))
         runCurrent()
         controller.onEngineSignal(ConnectionCause.DialFailure("network down"))
         runCurrent()
@@ -151,6 +153,11 @@ class ConnectionControllerTest {
         assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
         assertThat(controller.snapshot.value.banner?.groupName).isEqualTo("Резерв")
         assertThat(engine.startCount).isEqualTo(2)
+        assertThat(engine.startedConfigs).hasSize(2)
+        engine.startedConfigs.forEach { config ->
+            assertThat(config).contains("\"mtu\":1380")
+            assertThat(config).contains("9.9.9.9")
+        }
     }
 
     @Test
@@ -926,6 +933,7 @@ private class RecordingBoxEngine(
     var stopCount: Int = 0
     var abortCount: Int = 0
     var probeCount: Int = 0
+    val startedConfigs = mutableListOf<String>()
 
     override val isNativeAvailable: Boolean = true
     override val engineVersion: String = "fake"
@@ -933,6 +941,7 @@ private class RecordingBoxEngine(
 
     override suspend fun start(compiledJson: String, mode: RunMode) {
         startCount += 1
+        startedConfigs += compiledJson
         val shouldFail = when (failOnStartNumber) {
             null -> startError != null
             else -> startCount == failOnStartNumber

@@ -76,10 +76,14 @@ object ConditionCodec {
 
     fun encode(conditions: RuleConditions): String = json.encodeToString(conditions)
 
+    fun decodeStrict(raw: String): RuleConditions = json.decodeFromString<RuleConditions>(raw)
+
     fun decode(raw: String?, match: RuleMatch): RuleConditions {
         if (raw.isNullOrBlank()) return fromMatch(match)
-        return runCatching { json.decodeFromString<RuleConditions>(raw) }
-            .getOrElse { fromMatch(match) }
+        // Nonempty structured data is authoritative. Invalid JSON stays an invalid rule,
+        // never a fallback to different legacy conditions (or an unconditional action).
+        return runCatching { decodeStrict(raw) }
+            .getOrElse { RuleConditions() }
             .let { conditions ->
                 conditions.copy(
                     blocks = conditions.blocks.map { block ->

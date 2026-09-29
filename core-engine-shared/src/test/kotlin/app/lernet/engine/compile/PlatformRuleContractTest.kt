@@ -18,17 +18,21 @@ class PlatformRuleContractTest {
         RuleNode("otherwise", null, true, 1, RuleMatch(), RouteAction.PROXY),
     ))
 
-    @Test fun windowsProcessRuleIsRejectedOnAndroid() {
+    @Test fun windowsProcessRuleIsInactiveOnAndroid() {
         val assembled = ConfigAssembler.assemble(outbound, route(RuleMatch(processes = listOf("browser.exe"))),
             RunMode.FULL_VPN, "info", platform = EnginePlatform.ANDROID)
-        assertThat(assembled.isValid).isFalse()
-        assertThat(assembled.errors.single()).contains("Windows-")
+        assertThat(assembled.isValid).isTrue()
+        assertThat(assembled.json).doesNotContain("browser.exe")
+        assertThat(assembled.json).doesNotContain("process_name")
+        assertThat(assembled.notes).isNotEmpty()
     }
 
-    @Test fun androidPackageRuleIsRejectedOnWindows() {
+    @Test fun androidPackageRuleIsInactiveOnWindows() {
         val assembled = ConfigAssembler.assemble(outbound, route(RuleMatch(apps = listOf("com.example.app"))),
             RunMode.FULL_VPN, "info", platform = EnginePlatform.WINDOWS)
-        assertThat(assembled.isValid).isFalse()
-        assertThat(assembled.errors.single()).contains("Android-")
+        assertThat(assembled.isValid).isTrue()
+        assertThat(assembled.json).doesNotContain("com.example.app")
+        assertThat(assembled.json).doesNotContain("package_name")
+        assertThat(assembled.notes).isNotEmpty()
     }
 }

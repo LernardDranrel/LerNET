@@ -11,6 +11,12 @@ import app.lernet.R
 import app.lernet.config.repo.RuleNodeRecord
 import app.lernet.routing.ConditionKind
 import app.lernet.routing.PatternSign
+import app.lernet.engine.toRuleNode
+import app.lernet.routing.RoutePlatform
+import app.lernet.routing.RoutePlatformRules
+
+internal fun androidInactiveRuleIds(nodes: List<RuleNodeRecord>): Set<String> =
+    RoutePlatformRules.inactiveNodeIds(nodes.map { it.toRuleNode() }, RoutePlatform.ANDROID)
 
 @Composable
 internal fun ruleHeadline(node: RuleNodeRecord): String {

@@ -237,6 +237,7 @@ private fun ColumnScope.CanvasBoard(
                     .border(3.dp, LerNetAccent, RoundedCornerShape(8.dp)),
             ) {
                 RuleNodeContent(draggedNode, RouteFolders.priorityRank(visible, draggedNode), branching,
+                    unavailable = draggedNode.id in androidInactiveRuleIds(visible),
                     onEdit = {}, onDelete = {})
             }
         }
@@ -358,6 +359,7 @@ private fun canvasNodes(
     onDragGhost: (RuleDragGhost?) -> Unit,
     onOpenChannel: (String) -> Unit,
 ): List<CanvasNode> {
+    val inactive = androidInactiveRuleIds(nodes)
     val rootState = holder(holders, CanvasIds.ROOT, points, fixed = true)
     board.bind(CanvasIds.ROOT, rootState)
     val root = CanvasNode(
@@ -372,6 +374,7 @@ private fun canvasNodes(
     val rules = nodes.map { node ->
         ruleNode(
             node,
+            node.id in inactive,
             RouteFolders.priorityRank(nodes, node),
             nodes.any { it.parentId == node.id },
             board,
@@ -508,6 +511,7 @@ private fun selectionBorder(selected: Boolean): Modifier {
 @Composable
 private fun ruleNode(
     node: RuleNodeRecord,
+    unavailable: Boolean,
     rank: Int,
     branching: Boolean,
     board: AnchorBoard,
@@ -564,13 +568,14 @@ private fun ruleNode(
         modifier = Modifier
             .width(210.dp)
             .graphicsLayer { alpha = if (dragging) .35f else 1f }
-            .border(2.dp, if (branching) LerNetAccent else routeTone(node.action, node.pipeName).ink(), RoundedCornerShape(8.dp))
+            .border(2.dp, if (unavailable || !node.enabled) MaterialTheme.colorScheme.outline else if (branching) LerNetAccent else routeTone(node.action, node.pipeName).ink(), RoundedCornerShape(8.dp))
             .then(selectionBorder(selected || dragging))
             .then(drag)
             .trackNode(board, CanvasIds.rule(node.id)),
         state = nodeState,
         content = {
             RuleNodeContent(node, rank, branching,
+                unavailable = unavailable,
                 onEdit = { onIntent(RouteEditorIntent.Edit(node.id)) },
                 onDelete = { onIntent(RouteEditorIntent.RequestDelete(node.id)) })
         },
@@ -579,12 +584,12 @@ private fun ruleNode(
 
 @Composable
 private fun RuleNodeContent(node: RuleNodeRecord, rank: Int, branching: Boolean,
-    onEdit: () -> Unit, onDelete: () -> Unit) {
+    onEdit: () -> Unit, onDelete: () -> Unit, unavailable: Boolean = false) {
     SchemaCard {
                 Row(verticalAlignment = Alignment.Top) {
                     Text(
                         ruleHeadline(node),
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = if (unavailable || !node.enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.titleSmall,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -593,7 +598,7 @@ private fun RuleNodeContent(node: RuleNodeRecord, rank: Int, branching: Boolean,
                     if (!node.isElseRule()) {
                         Text(
                             rank.toString(),
-                            color = MaterialTheme.colorScheme.primary,
+                            color = if (unavailable) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
                             style = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.padding(start = 6.dp),
                         )
@@ -609,7 +614,9 @@ private fun RuleNodeContent(node: RuleNodeRecord, rank: Int, branching: Boolean,
                     )
                 }
                 RulePreviewLines(node, MaterialTheme.colorScheme.onSurfaceVariant)
-                OutcomeStub(node.action, node.pipeName, branching)
+                if (unavailable) Text(stringResource(R.string.route_windows_only),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                else OutcomeStub(node.action, node.pipeName, branching)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(
                         onClick = onEdit,

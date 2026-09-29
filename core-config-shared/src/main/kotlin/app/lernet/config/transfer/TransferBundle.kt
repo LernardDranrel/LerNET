@@ -1,6 +1,7 @@
 package app.lernet.config.transfer
 
 import kotlinx.serialization.Serializable
+import app.lernet.routing.ConditionCodec
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -78,6 +79,8 @@ data class TransferRule(
 )
 
 object TransferCodec {
+    /** Wire value for a saved branch detached from the active tree, not an actual rule id. */
+    const val ORPHAN_PARENT = "orphan"
     private const val MAX_CHARS = 20_000_000
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -127,6 +130,16 @@ object TransferCodec {
         }.toString()
     }
 
+    /** Missing local references also stay detached; copying must never promote them to root. */
+    fun remapParentId(parentId: String?, ruleIds: Map<String, String>): String? = when (parentId) {
+        null -> null
+        ORPHAN_PARENT -> ORPHAN_PARENT
+        else -> ruleIds[parentId] ?: ORPHAN_PARENT
+    }
+
+    fun remapOwnerIds(profileIds: Map<String, String>, groupIds: Map<String, String>): Map<String, String> =
+        profileIds + groupIds.map { (old, fresh) -> "grp_$old" to "grp_$fresh" }
+
     fun validate(bundle: TransferBundle) {
         require(bundle.format == TransferBundle.FORMAT) { "Это не архив LerNET" }
         require(bundle.version == TransferBundle.VERSION) { "Неподдерживаемая версия архива: ${bundle.version}" }
@@ -146,19 +159,31 @@ object TransferCodec {
                 profile.selectedOutboundId in profile.outbounds.map { it.id } &&
                 profile.outbounds.map { it.id }.distinct().size == profile.outbounds.size
         }) { "Повреждён профиль в архиве" }
+        require(bundle.profiles.all { it.modeOverride == null || it.modeOverride in setOf("FULL_VPN", "PROXY") }) {
+            "Неизвестный режим подключения в архиве"
+        }
+        require(bundle.profiles.all { it.dnsPolicy in setOf("SYSTEM", "UNDERLAY", "PROFILE") }) {
+            "Неизвестный источник DNS в архиве"
+        }
         val profileSet = profileIds.toSet()
         require(bundle.groups.flatMap { it.profileIds }.let { it.size == it.toSet().size && it.all(profileSet::contains) }) {
             "Папка ссылается на отсутствующий или повторный профиль"
         }
         val ownerIds = profileIds.toSet() + groupIds.map { "grp_$it" }
+        require(ownerIds.size == profileIds.size + groupIds.size) { "Неоднозначные владельцы правил в архиве" }
         val ruleById = bundle.rules.associateBy { it.id }
         require(bundle.rules.all { rule ->
-            rule.id.isNotBlank() && rule.ownerId in ownerIds &&
+            rule.id.isNotBlank() && rule.id != ORPHAN_PARENT && rule.ownerId in ownerIds &&
                 rule.action.uppercase() in setOf("PROXY", "DIRECT", "BLOCK") &&
                 (rule.position == null || rule.position.x.isFinite() && rule.position.y.isFinite()) &&
-                (rule.parentId == null || ruleById[rule.parentId]?.ownerId == rule.ownerId)
+                (rule.parentId == null || rule.parentId == ORPHAN_PARENT || ruleById[rule.parentId]?.ownerId == rule.ownerId)
         }) { "Правило ссылается на отсутствующего владельца или родителя" }
         val settled = HashSet<String>()
+        bundle.rules.filter { it.blocksJson.isNotBlank() }.forEach { rule ->
+            require(runCatching { ConditionCodec.decodeStrict(rule.blocksJson) }.isSuccess) {
+                "Повреждены блоки условий правила «${rule.title.ifBlank { rule.id }}»"
+            }
+        }
         bundle.rules.forEach { rule ->
             val chain = HashSet<String>()
             var cursor: String? = rule.id

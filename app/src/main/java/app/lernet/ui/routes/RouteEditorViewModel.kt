@@ -14,6 +14,7 @@ import app.lernet.engine.toRuleNode
 import app.lernet.routing.ConditionCodec
 import app.lernet.routing.MatchJoin
 import app.lernet.routing.RouteAction
+import app.lernet.routing.RoutePlatform
 import app.lernet.routing.RouteCompiler
 import app.lernet.routing.RouteElse
 import app.lernet.routing.RouteTree
@@ -402,7 +403,8 @@ class RouteEditorViewModel @Inject constructor(
             _state.update { it.copy(editingId = null, fieldErrors = emptyList()) }
             return
         }
-        val errors = RuleSheetGate.errors(node.shownConditions())
+        val errors = if (node.id in androidInactiveRuleIds(state.nodes)) emptyList()
+            else RuleSheetGate.errors(node.shownConditions())
         if (errors.isEmpty()) {
             _state.update {
                 it.copy(
@@ -628,7 +630,8 @@ class RouteEditorViewModel @Inject constructor(
             try {
                 val ownerId = _state.value.ownerId
                 val ordered = _state.value.nodes.map { it.copy(profileId = ownerId) }
-                val incomplete = ordered.filterNot { it.isElseRule() }.firstOrNull { node ->
+                val inactive = androidInactiveRuleIds(ordered)
+                val incomplete = ordered.filterNot { it.isElseRule() || it.id in inactive }.firstOrNull { node ->
                     RuleSheetGate.isIncomplete(node.shownConditions())
                 }
                 if (incomplete != null) {
@@ -641,7 +644,7 @@ class RouteEditorViewModel @Inject constructor(
                     }
                     return@launch
                 }
-                val compiled = withContext(Dispatchers.Default) { RouteCompiler.compile(ordered.toRouting()) }
+                val compiled = withContext(Dispatchers.Default) { RouteCompiler.compile(ordered.toRouting(), RoutePlatform.ANDROID) }
                 if (!compiled.isValid) {
                     _state.update { it.copy(fieldErrors = compiled.errors.map { e -> "${e.field}: ${e.message}" }, nodes = ordered) }
                     return@launch
@@ -894,7 +897,7 @@ class RouteEditorViewModel @Inject constructor(
         _state.update { state ->
             val seeded = RouteFolders.seedMissingElse(state.nodes, state.ownerId, ::newId)
             val ordered = seeded.map { it.copy(profileId = state.ownerId) }
-            val compiled = RouteCompiler.compile(ordered.toRouting())
+            val compiled = RouteCompiler.compile(ordered.toRouting(), RoutePlatform.ANDROID)
             val errors = if (compiled.isValid) {
                 emptyList()
             } else {

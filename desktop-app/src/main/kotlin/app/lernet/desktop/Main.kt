@@ -272,7 +272,7 @@ private fun DesktopScreen(controller: DesktopController, onRequestElevation: () 
                 }
             }
             if (ui.message.isNotBlank() && ui.message != statusLine)
-                Text(ui.message, color = muted, maxLines = 2)
+                Text(ui.message, color = if (ui.connectionError != null) desktopColors.error else muted, maxLines = 2)
             Spacer(Modifier.height(18.dp))
             when (tab) {
                 Tab.PROFILES -> Profiles(ui.saved, tunnel, ui.busy, ui.probes, ui.tunnelLatencyMs, trace, controller,
@@ -285,6 +285,31 @@ private fun DesktopScreen(controller: DesktopController, onRequestElevation: () 
                 Tab.SETTINGS -> Settings(ui.saved, controller, onRequestElevation)
             }
         }
+    }
+    ui.connectionError?.let { error ->
+        AlertDialog(
+            onDismissRequest = controller::dismissConnectionError,
+            title = { Text("Не удалось подключиться") },
+            text = {
+                SelectionContainer {
+                    Text(error.message, modifier = Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()))
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    controller.dismissConnectionError()
+                    if (error.routeOwnerId != null) {
+                        routeOwnerId = error.routeOwnerId
+                        tab = Tab.ROUTES
+                    } else {
+                        tab = Tab.DIAGNOSTICS
+                    }
+                }) { Text(if (error.routeOwnerId != null) "Открыть маршруты" else "Диагностика") }
+            },
+            dismissButton = {
+                TextButton(onClick = controller::dismissConnectionError) { Text("Закрыть") }
+            },
+        )
     }
     if (importOpen) ImportDialog(
         groupName = ui.saved.groups.firstOrNull { it.id == importGroupId }?.name,

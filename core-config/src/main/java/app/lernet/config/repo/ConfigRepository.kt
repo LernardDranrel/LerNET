@@ -137,6 +137,7 @@ class ConfigRepository(
             val groupIds = bundle.groups.associate { it.id to newId() }
             val profileIds = bundle.profiles.associate { it.id to newId() }
             val ruleIds = bundle.rules.associate { it.id to newId() }
+            val ownerIds = TransferCodec.remapOwnerIds(profileIds, groupIds)
             bundle.profiles.forEach { item ->
                 val outboundIds = item.outbounds.associate { it.id to newId() }
                 restoreProfile(Profile(
@@ -165,9 +166,8 @@ class ConfigRepository(
             val remappedRules = bundle.rules.map { rule ->
                 RuleNodeRecord(
                     id = ruleIds.getValue(rule.id),
-                    profileId = RouteOwners.groupIdOf(rule.ownerId)?.let { RouteOwners.group(groupIds.getValue(it)) }
-                        ?: profileIds.getValue(rule.ownerId),
-                    parentId = rule.parentId?.let(ruleIds::getValue), enabled = rule.enabled,
+                    profileId = ownerIds.getValue(rule.ownerId),
+                    parentId = TransferCodec.remapParentId(rule.parentId, ruleIds), enabled = rule.enabled,
                     sortIndex = rule.sortIndex, action = rule.action.lowercase(),
                     apps = rule.apps, domains = rule.domains, domainSuffixes = rule.domainSuffixes,
                     processes = rule.processes,
@@ -229,6 +229,12 @@ class ConfigRepository(
     suspend fun renameProfile(profileId: String, name: String) {
         val profile = profileDao.getProfile(profileId) ?: return
         profileDao.updateProfile(profile.copy(name = name, updatedAtEpochMs = nowMs()))
+    }
+
+    suspend fun setModeOverride(profileId: String, mode: String?) {
+        require(mode == null || mode == "FULL_VPN" || mode == "PROXY")
+        val profile = profileDao.getProfile(profileId) ?: return
+        profileDao.updateProfile(profile.copy(modeOverride = mode, updatedAtEpochMs = nowMs()))
     }
 
     suspend fun reorderProfiles(orderedIds: List<String>) {
@@ -302,7 +308,7 @@ class ConfigRepository(
                 node.copy(
                     id = nodeIdMap.getValue(node.id),
                     profileId = newProfileId,
-                    parentId = node.parentId?.let { nodeIdMap[it] },
+                    parentId = TransferCodec.remapParentId(node.parentId, nodeIdMap),
                 )
             },
         )

@@ -7,6 +7,8 @@ import app.lernet.routing.CompiledRoute
 import app.lernet.routing.GeoRuleSets
 import app.lernet.routing.RouteAction
 import app.lernet.routing.RouteCompiler
+import app.lernet.routing.RoutePlatform
+import app.lernet.routing.RoutePlatformRules
 import java.io.File
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -56,15 +58,11 @@ object ConfigAssembler {
                 errors = compiledRoute.errors.map { "${it.field}: ${it.message}" },
             )
         }
-        val unsupportedRule = when {
-            platform == EnginePlatform.ANDROID && compiledRoute.rules.any { it.match.processes.isNotEmpty() } ->
-                "Правила Windows-процессов не работают на Android. Замените их условиями Android-приложений."
-            platform == EnginePlatform.WINDOWS && compiledRoute.rules.any { it.match.apps.isNotEmpty() } ->
-                "Правила Android-приложений не работают в Windows. Замените их условиями Windows-процессов."
-            else -> null
-        }
-        if (unsupportedRule != null) return AssembledConfig("", outbound.tag, listOf(unsupportedRule))
-        val ruleSets = ruleSetEntries(compiledRoute, ruleSetDirectory)
+        val routingPlatform = if (platform == EnginePlatform.WINDOWS) RoutePlatform.WINDOWS else RoutePlatform.ANDROID
+        // Also protect callers that supplied a route compiled without a platform.
+        val unsupported = compiledRoute.rules.filter { RoutePlatformRules.unsupported(it.match, routingPlatform) }
+        val activeRoute = compiledRoute.copy(rules = compiledRoute.rules - unsupported.toSet())
+        val ruleSets = ruleSetEntries(activeRoute, ruleSetDirectory)
         val ruleSetError = ruleSets.error
         if (ruleSetError != null) {
             return AssembledConfig("", outbound.tag, listOf(ruleSetError))
@@ -76,16 +74,16 @@ object ConfigAssembler {
         val taggedRaw = JsonObject(outboundObj.toMutableMap().apply { put("tag", JsonPrimitive(outbound.tag)) })
         val xhttp = XhttpMode.normalize(taggedRaw, defaults.xmuxConcurrency)
         val tagged = xhttp.outbound
-        val pipeNames = compiledRoute.rules.map { it.pipeName.trim() }.filter { it.isNotEmpty() }.distinct()
-        val pipeTags = PipeAffinity.tags(pipeNames)
+        val pipeNames = activeRoute.rules.map { it.pipeName.trim() }.filter { it.isNotEmpty() }.distinct()
+        val pipeTags = PipeAffinity.tags(pipeNames, setOf(outbound.tag, "direct"))
         val clones = pipeNames.map { name -> PipeAffinity.clone(taggedRaw, pipeTags.getValue(name), defaults.xmuxConcurrency) }
         val inbound = inboundFor(mode, defaults, platform)
         val preparedDns = DnsBlock.prepare(dnsJson, outbound.tag, dnsPolicy, defaults.directDnsServer)
         val dns = preparedDns.dns
         val rules = platformRules(mode, platform, outbound.tag) +
-            RouteCompiler.toSingBoxRules(compiledRoute, outbound.tag, pipeTags) +
-            finalReject(compiledRoute)
-        val finalTag = when (compiledRoute.finalAction) {
+            RouteCompiler.toSingBoxRules(activeRoute, outbound.tag, pipeTags) +
+            finalReject(activeRoute)
+        val finalTag = when (activeRoute.finalAction) {
             RouteAction.PROXY -> outbound.tag
             RouteAction.DIRECT,
             RouteAction.BLOCK,
@@ -105,6 +103,8 @@ object ConfigAssembler {
             put("route", routeBlock(rules, finalTag, dns, ruleSets.entries))
         }
         val notes = buildList {
+            val inactiveCount = (compiledRoute.inactiveNodeIds + unsupported.map { it.nodeId }).size
+            if (inactiveCount > 0) add("На этом устройстве неактивны ветки другой платформы: $inactiveCount. Они сохранены для редактирования и экспорта.")
             xhttp.note?.let(::add)
             clones.mapNotNull { it.note }.forEach(::add)
             addAll(preparedDns.notes)

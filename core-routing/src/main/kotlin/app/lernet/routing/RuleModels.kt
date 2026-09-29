@@ -80,6 +80,7 @@ data class CompiledRoute(
     val rules: List<CompiledRule>,
     val finalAction: RouteAction,
     val errors: List<FieldError>,
+    val inactiveNodeIds: Set<String> = emptySet(),
 ) {
     val isValid: Boolean get() = errors.isEmpty()
 }

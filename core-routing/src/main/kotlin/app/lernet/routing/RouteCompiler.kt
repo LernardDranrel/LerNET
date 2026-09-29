@@ -1,5 +1,7 @@
 package app.lernet.routing
 
+import java.net.Inet6Address
+import java.net.InetAddress
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -8,7 +10,7 @@ object RouteCompiler {
     private val ipv4Cidr = Regex("""^(\d{1,3}\.){3}\d{1,3}/(\d{1,2})$""")
     private val ipv6Cidr = Regex("""^[0-9a-fA-F:]+/\d{1,3}$""")
     private val packageName = Regex("""^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$""")
-    private val processName = Regex("""^[a-zA-Z0-9_.-]+$""")
+    private val invalidProcessCharacters = setOf('<', '>', ':', '"', '/', '\\', '|', '?', '*')
     private val geoCode = Regex("""^!?([a-zA-Z]{2}|private)$""")
 
     /**
@@ -16,7 +18,36 @@ object RouteCompiler {
      * A node with children is a structural fork. Only leaf actions are emitted; ancestor constraints are AND-ed.
      * Sibling priority is [RuleNode.sortIndex]. Specificity does not reorder rules.
      */
-    fun compile(input: List<RuleNode>): CompiledRoute {
+    fun compile(input: List<RuleNode>, platform: RoutePlatform? = null): CompiledRoute {
+        // Validate the same conditions that will be emitted, not stale legacy mirror fields.
+        val normalized = input.map { node ->
+            node.conditions?.let { node.copy(match = ConditionCodec.project(it)) } ?: node
+        }
+        val available = withoutDisabledDescendants(RouteTree.keepAttached(normalized))
+        val inactive = platform?.let { RoutePlatformRules.inactiveNodeIds(available, it) }.orEmpty()
+        val result = compileAvailable(available.filterNot { it.id in inactive }, inactive.isNotEmpty())
+        return result.copy(inactiveNodeIds = inactive)
+    }
+
+    /** Retain disabled siblings for fallback validation, but their descendants cannot execute. */
+    private fun withoutDisabledDescendants(nodes: List<RuleNode>): List<RuleNode> {
+        val children = nodes.groupBy { it.parentId }
+        val descendants = HashSet<String>()
+        val pending = ArrayDeque<String>()
+        nodes.filterNot { it.enabled }.forEach { node ->
+            children[node.id].orEmpty().forEach { pending.add(it.id) }
+        }
+        while (pending.isNotEmpty()) {
+            val id = pending.removeFirst()
+            if (descendants.add(id)) children[id].orEmpty().forEach { pending.add(it.id) }
+        }
+        return nodes.filterNot { it.id in descendants }
+    }
+
+    private fun compileAvailable(input: List<RuleNode>, platformFiltered: Boolean): CompiledRoute {
+        if (platformFiltered && input.isEmpty()) {
+            return CompiledRoute(emptyList(), RouteAction.PROXY, emptyList())
+        }
         val nested = RouteTerminal.childErrors(input)
         val nodes = if (nested.isEmpty()) RouteTree.keepAttached(input) else emptyList()
         val errors = mutableListOf<FieldError>()
@@ -188,6 +219,11 @@ object RouteCompiler {
 
     private fun validate(node: RuleNode): List<FieldError> {
         val errors = mutableListOf<FieldError>()
+        if (!node.match.isCatchAll() && node.conditions?.blocks?.any { block ->
+                block.values.none { PatternSign.body(it).isNotBlank() }
+            } == true) {
+            errors += FieldError(node.id, "match", "Заполните все блоки условий правила")
+        }
         node.match.domains.forEach { value ->
             val body = PatternSign.body(value)
             if (body.isBlank() || body.contains(' ')) {
@@ -214,7 +250,8 @@ object RouteCompiler {
             }
         }
         node.match.processes.forEach { value ->
-            if (!processName.matches(PatternSign.body(value))) {
+            val body = PatternSign.body(value)
+            if (body.isBlank() || body.any { it in invalidProcessCharacters || it.isISOControl() } || body == "." || body == "..") {
                 errors += FieldError(node.id, "process_name", "Недопустимое имя процесса: '$value'")
             }
         }
@@ -229,7 +266,10 @@ object RouteCompiler {
         }
         if (ipv6Cidr.matches(value)) {
             val prefix = prefixLength(value)
-            return prefix in 0..128
+            val address = value.substringBefore('/')
+            // Only numeric IPv6 text reaches the parser; never resolve a hostname here.
+            return prefix in 0..128 && ':' in address &&
+                runCatching { InetAddress.getByName(address) is Inet6Address }.getOrDefault(false)
         }
         return false
     }

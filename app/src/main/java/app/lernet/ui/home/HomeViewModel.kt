@@ -59,7 +59,9 @@ data class HomeUiState(
     val pendingMode: RunMode? = null,
     val offerLastLogs: Boolean = false,
     val probes: Map<String, ProfileProbe> = emptyMap(),
-)
+) {
+    val effectiveMode: RunMode get() = RunMode.resolve(activeProfile?.modeOverride, settings.mode)
+}
 
 data class ProfileProbe(
     val running: Boolean = false,
@@ -131,6 +133,7 @@ private data class HomeOverlay(
     val pendingMode: RunMode? = null,
     /** Mode chosen while connected; apply only after VPN consent. */
     val modeAwaitingVpn: RunMode? = null,
+    val profileAwaitingVpn: String? = null,
     val offerLastLogs: Boolean = false,
     val probes: Map<String, ProfileProbe> = emptyMap(),
 )
@@ -447,11 +450,12 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             CrashTrail.mark("ui vpn permission granted=$granted")
             val awaiting = overlay.value.modeAwaitingVpn
+            val profileId = overlay.value.profileAwaitingVpn
+            overlay.update { it.copy(modeAwaitingVpn = null, profileAwaitingVpn = null) }
             if (awaiting != null) {
-                overlay.update { it.copy(modeAwaitingVpn = null) }
                 if (granted) {
-                    settingsStore.setMode(awaiting)
-                    startEngine()
+                    persistMode(awaiting, profileId)
+                    startEngine(profileId)
                 }
                 return@launch
             }
@@ -459,7 +463,7 @@ class HomeViewModel @Inject constructor(
                 controller.onPermissionDenied()
                 return@launch
             }
-            startEngine()
+            startEngine(profileId)
         }
     }
 
@@ -475,31 +479,38 @@ class HomeViewModel @Inject constructor(
 
     private suspend fun requestMode(mode: RunMode) {
         val current = state.value
-        if (current.settings.mode == mode) return
+        if (current.effectiveMode == mode) return
         if (isSessionActive(current.snapshot.state)) {
             overlay.update { it.copy(pendingMode = mode, pendingSwitchId = null) }
             return
         }
-        settingsStore.setMode(mode)
+        persistMode(mode, current.activeProfile?.id)
+    }
+
+    private suspend fun persistMode(mode: RunMode, profileId: String?) {
+        val profile = profileId?.let { repository.getProfile(it) }
+        if (profile?.modeOverride != null) repository.setModeOverride(profile.id, mode.name)
+        else settingsStore.setMode(mode)
     }
 
     private suspend fun confirmSwitch() {
         val pending = state.value.pendingSwitch ?: return
         overlay.update { it.copy(pendingSwitchId = null) }
         settingsStore.setActiveProfile(pending.id)
-        startEngine()
+        requestConnection(pending.id)
     }
 
     private suspend fun confirmModeSwitch() {
         val pending = state.value.pendingMode ?: return
+        val profileId = state.value.activeProfile?.id
         overlay.update { it.copy(pendingMode = null) }
         if (pending == RunMode.FULL_VPN) {
-            overlay.update { it.copy(modeAwaitingVpn = pending) }
+            overlay.update { it.copy(modeAwaitingVpn = pending, profileAwaitingVpn = profileId) }
             events.emit(HomeEvent.RequestVpnPermission)
             return
         }
-        settingsStore.setMode(pending)
-        startEngine()
+        persistMode(pending, profileId)
+        startEngine(profileId)
     }
 
     private suspend fun deleteProfile(id: String) {
@@ -525,29 +536,39 @@ class HomeViewModel @Inject constructor(
             return
         }
         CrashTrail.mark("ui connect tap")
-        CrashTrail.mark("ui connect mode=${current.settings.mode} profile=${current.activeProfile?.id}")
-        LerNetLog.i(TAG, "ui connect mode=${current.settings.mode} profile=${current.activeProfile?.id}")
-        if (current.settings.mode == RunMode.FULL_VPN) {
+        requestConnection()
+    }
+
+    private suspend fun readConnectionRequest(profileId: String? = null): HomeConnectionRequest? =
+        homeConnectionRequest(settingsStore.settings.first(), repository.profiles.first(), profileId)
+
+    private suspend fun requestConnection(profileId: String? = null) {
+        val request = readConnectionRequest(profileId) ?: return
+        CrashTrail.mark("ui connect mode=${request.mode} profile=${request.profile.id}")
+        LerNetLog.i(TAG, "ui connect mode=${request.mode} profile=${request.profile.id}")
+        if (request.mode == RunMode.FULL_VPN) {
+            overlay.update { it.copy(profileAwaitingVpn = request.profile.id) }
             events.emit(HomeEvent.RequestVpnPermission)
         } else {
-            startEngine()
+            startEngine(request.profile.id)
         }
     }
 
-    private suspend fun startEngine() {
+    private suspend fun startEngine(profileId: String? = null) {
+        val request = readConnectionRequest(profileId) ?: return
+        val profile = request.profile
+        val settings = request.settings
         (appContext as LerNetApp).logStore.armCrashWatch()
-        val current = state.value
-        val profile = current.activeProfile ?: return
         val (ownerId, _) = repository.routingOwnerForProfile(profile.id)
         val nodes = repository.ensureDefaultElse(ownerId)
-        if (current.settings.activeProfileId == null) {
+        if (settings.activeProfileId == null) {
             settingsStore.setActiveProfile(profile.id)
         }
-        CrashTrail.mark("ui startEngine profile=${profile.id} mode=${current.settings.mode} routes=$ownerId")
-        LerNetLog.i(TAG, "ui startEngine profile=${profile.id} mode=${current.settings.mode} routes=$ownerId")
+        CrashTrail.mark("ui startEngine profile=${profile.id} mode=${request.mode} routes=$ownerId")
+        LerNetLog.i(TAG, "ui startEngine profile=${profile.id} mode=${request.mode} routes=$ownerId")
         controller.connect(
-            profile, nodes, current.settings.mode, current.settings.logLevel,
-            current.settings.engineDefaults
+            profile, nodes, request.mode, settings.logLevel,
+            settings.engineDefaults
         )
     }
 

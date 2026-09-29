@@ -51,6 +51,31 @@ object DnsDependency {
         val dnsTags = servers.mapNotNull(::tagOf).filter { it.isNotBlank() }.toSet()
         val outbounds = outboundObjects(root)
         val problems = serverEdges(servers, dnsTags, outbounds).toMutableList()
+        val outboundTags = (root["outbounds"] as? JsonArray)?.mapNotNull { tagOf(it as? JsonObject ?: return@mapNotNull null) }.orEmpty()
+        outboundTags.groupingBy { it }.eachCount().filterValues { it > 1 }.keys.forEach { tag ->
+            problems += "duplicate outbound tag[$tag]"
+        }
+        outbounds.forEach { (tag, outbound) ->
+            resolverRef(outbound)?.let { ref ->
+                if (ref !in dnsTags) problems += "outbound[$tag].domain_resolver[$ref] not found"
+            }
+            detourOf(outbound)?.let { ref ->
+                if (ref !in outbounds) problems += "outbound[$tag].detour[$ref] not found"
+            }
+        }
+        val settledOutbounds = HashSet<String>()
+        outbounds.keys.forEach { start ->
+            val chain = linkedSetOf<String>()
+            var cursor: String? = start
+            while (cursor != null && cursor !in settledOutbounds && cursor in outbounds) {
+                if (!chain.add(cursor)) {
+                    problems += "outbound detour cycle[$cursor]"
+                    break
+                }
+                cursor = detourOf(outbounds.getValue(cursor))
+            }
+            settledOutbounds.addAll(chain)
+        }
         problems += resolverCycles(servers)
         dns["final"]?.jsonPrimitive?.contentOrNull?.let { finalTag ->
             if (finalTag.isNotBlank() && finalTag !in dnsTags) {

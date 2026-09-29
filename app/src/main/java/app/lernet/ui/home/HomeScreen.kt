@@ -143,7 +143,7 @@ private fun HomeBody(
     val context = LocalContext.current
     val shareFailed = stringResource(R.string.logs_share_failed)
     val metrics = rememberCompactMetrics()
-    val liveMode = if (isSessionActive(snapshot.state)) snapshot.mode else state.settings.mode
+    val liveMode = if (isSessionActive(snapshot.state)) snapshot.mode else state.effectiveMode
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -174,7 +174,7 @@ private fun HomeBody(
                 onOpenDrawer = onOpenDrawer,
             )
         }
-        HomeModeSelector(mode = state.settings.mode, onSelect = { onIntent(HomeIntent.SetMode(it)) })
+        HomeModeSelector(mode = state.effectiveMode, onSelect = { onIntent(HomeIntent.SetMode(it)) })
         if (snapshot.state == ConnectionState.FAILED) {
             FailedCard(
                 cause = snapshot.cause,
