@@ -52,7 +52,7 @@ class SfaOpenTunGateTest {
         assertThat(hijacks[1].containsKey("port")).isFalse()
         assertThat(hijacks[1].containsKey("type")).isFalse()
 
-        val tun = root["inbounds"]!!.jsonArray.single().jsonObject
+        val tun = root["inbounds"]!!.jsonArray.first().jsonObject
         assertThat(tun["stack"]?.jsonPrimitive?.content).isEqualTo("gvisor")
         assertThat(tun["stack"]?.jsonPrimitive?.content).isNotEqualTo("mixed")
         assertThat(tun["stack"]?.jsonPrimitive?.content).isNotEqualTo("system")

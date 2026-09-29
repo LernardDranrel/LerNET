@@ -109,7 +109,11 @@ class DesktopController(
                         val ticket = connectGeneration.get()
                         val health = WindowsTunnelHealth.check(saved.healthUrl, effectiveMode(profile))
                         if (ticket == connectGeneration.get() && tunnel.state.value.status == TunnelStatus.RUNNING) {
-                            if (health.latencyMs != null) {
+                            if (health.routeConflict) {
+                                failedChecks = 0
+                                mutable.update { it.copy(healthMessage = health.error, healthFailures = 2,
+                                    healthVerified = false, tunnelLatencyMs = null) }
+                            } else if (health.latencyMs != null) {
                                 failedChecks = 0
                                 mutable.update { it.copy(healthMessage = "VPN отвечает · ${health.latencyMs} мс", healthFailures = 0,
                                     healthVerified = true, tunnelLatencyMs = health.latencyMs) }
@@ -274,6 +278,10 @@ class DesktopController(
         if (text.isBlank()) return
         if (loaded.isFailure) {
             mutable.update { it.copy(message = "Файл профилей повреждён. Импорт не сохранён.") }
+            return
+        }
+        if (app.lernet.config.transfer.TransferCodec.isTransfer(text)) {
+            importBundle(text)
             return
         }
         mutable.update { it.copy(busy = true, message = "Загружаем конфигурацию") }
@@ -524,12 +532,6 @@ class DesktopController(
         val outbound = profile.selectedOutbound
             ?: return AssembledConfig("", "", listOf("В профиле нет рабочего outbound"))
         val activeRules = routingRules(saved, profile)
-        if (activeRules.any { rule ->
-                rule.enabled && (rule.apps.isNotEmpty() ||
-                    ConditionCodec.decode(rule.blocksJson, ruleMatch(rule)).blocks.any { it.kind == ConditionKind.APP })
-            }) {
-            return AssembledConfig("", "", listOf("Правила Android-приложений нельзя применить в Windows. Откройте редактор маршрутов и замените их условиями Windows-процессов."))
-        }
         val rules = activeRules.map { rule ->
             val match = ruleMatch(rule)
             RuleNode(

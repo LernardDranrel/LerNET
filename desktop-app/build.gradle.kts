@@ -58,6 +58,9 @@ compose.desktop {
             windows {
                 console = providers.gradleProperty("lernet.debugLauncher").orNull == "true"
                 iconFile.set(project.file("src/main/resources/lernet.ico"))
+                menu = true
+                menuGroup = "LerNET"
+                shortcut = true
             }
         }
     }

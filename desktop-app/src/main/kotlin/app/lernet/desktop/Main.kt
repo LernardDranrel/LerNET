@@ -271,7 +271,7 @@ private fun DesktopScreen(controller: DesktopController, onRequestElevation: () 
                     }
                 }
             }
-            if (tunnel.status != TunnelStatus.RUNNING && ui.message.isNotBlank() && ui.message != statusLine)
+            if (ui.message.isNotBlank() && ui.message != statusLine)
                 Text(ui.message, color = muted, maxLines = 2)
             Spacer(Modifier.height(18.dp))
             when (tab) {
@@ -1497,7 +1497,7 @@ private fun ImportDialog(groupName: String?, onDismiss: () -> Unit, onImport: (S
         title = { Text(if (groupName == null) "Импорт профиля" else "Импорт в папку «$groupName»") },
         text = {
             Column {
-                Text("VLESS-ссылка, sing-box JSON или URL подписки", color = muted)
+                Text("VLESS-ссылка, sing-box JSON, LerNET-архив или URL подписки", color = muted)
                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     TextButton(onClick = {
                         value = runCatching { Toolkit.getDefaultToolkit().systemClipboard.getData(DataFlavor.stringFlavor) as String }
@@ -1509,7 +1509,7 @@ private fun ImportDialog(groupName: String?, onDismiss: () -> Unit, onImport: (S
                         picker.file?.let { name ->
                             val file = Path.of(picker.directory, name)
                             runCatching {
-                                check(Files.size(file) <= 5_000_000) { "Файл больше 5 МБ" }
+                                check(Files.size(file) <= 20_000_000) { "Файл больше 20 МБ" }
                                 Files.readString(file)
                             }.onSuccess { value = it; error = "" }
                                 .onFailure { error = it.message ?: "Не удалось прочитать файл" }

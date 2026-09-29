@@ -81,6 +81,10 @@ object TransferCodec {
     private const val MAX_CHARS = 20_000_000
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = true; encodeDefaults = true }
 
+    fun isTransfer(raw: String): Boolean = raw.length <= MAX_CHARS && runCatching {
+        json.parseToJsonElement(raw).jsonObject["format"]?.jsonPrimitive?.content == TransferBundle.FORMAT
+    }.getOrDefault(false)
+
     fun encode(bundle: TransferBundle): String {
         validate(bundle)
         val encoded = json.encodeToString(bundle)

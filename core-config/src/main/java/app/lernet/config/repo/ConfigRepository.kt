@@ -172,7 +172,7 @@ class ConfigRepository(
                     apps = rule.apps, domains = rule.domains, domainSuffixes = rule.domainSuffixes,
                     processes = rule.processes,
                     ipCidrs = rule.ipCidrs, geoip = rule.geoip, pipeName = rule.pipeName,
-                    blocksJson = rule.blocksJson, title = rule.title,
+                    blocksJson = rule.androidConditionsJson(), title = rule.title,
                 )
             }
             remappedRules.groupBy { it.profileId }.forEach { (owner, nodes) -> replaceRuleNodes(owner, nodes) }

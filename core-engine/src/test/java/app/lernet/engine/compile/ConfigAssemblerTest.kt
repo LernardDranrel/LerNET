@@ -32,7 +32,7 @@ class ConfigAssemblerTest {
         )
         assertThat(assembled.isValid).isTrue()
         val root = json.parseToJsonElement(assembled.json).jsonObject
-        assertThat(root["inbounds"]!!.jsonArray.single().jsonObject["mtu"]!!.jsonPrimitive.content)
+        assertThat(root["inbounds"]!!.jsonArray.first().jsonObject["mtu"]!!.jsonPrimitive.content)
             .isEqualTo("1400")
         val mux = root["outbounds"]!!.jsonArray.first().jsonObject["transport"]!!.jsonObject["xmux"]!!.jsonObject
         assertThat(mux["max_concurrency"]!!.jsonPrimitive.content).isEqualTo("8-8")
@@ -45,7 +45,7 @@ class ConfigAssemblerTest {
         val assembled = ConfigAssembler.assemble(sampleOutbound(), catchAllProxy(), RunMode.FULL_VPN, "warn")
         assertThat(assembled.isValid).isTrue()
         val root = json.parseToJsonElement(assembled.json).jsonObject
-        val inbound = root["inbounds"]!!.jsonArray.single().jsonObject
+        val inbound = root["inbounds"]!!.jsonArray.first().jsonObject
         assertThat(inbound["type"]?.jsonPrimitive?.content).isEqualTo("tun")
         assertThat(root["dns"]!!.jsonObject["servers"]!!.jsonArray).isNotEmpty()
         assertNoLegacyDns(assembled.json)
@@ -103,7 +103,7 @@ class ConfigAssemblerTest {
             "info",
         )
         val root = json.parseToJsonElement(assembled.json).jsonObject
-        val inbound = root["inbounds"]!!.jsonArray.single().jsonObject
+        val inbound = root["inbounds"]!!.jsonArray.first().jsonObject
         assertThat(inbound["type"]?.jsonPrimitive?.content).isEqualTo("mixed")
         assertThat(inbound["listen"]?.jsonPrimitive?.content).isEqualTo("127.0.0.1")
         assertThat(inbound["listen_port"]?.jsonPrimitive?.content).isEqualTo("2080")
@@ -121,7 +121,7 @@ class ConfigAssemblerTest {
         val vpn = ConfigAssembler.assemble(sampleOutbound(), catchAllProxy(), RunMode.FULL_VPN, "warn")
         val proxy = ConfigAssembler.assemble(sampleOutbound(), catchAllProxy(), RunMode.PROXY, "warn")
         listOf(vpn, proxy).forEach { assembled ->
-            val inbound = json.parseToJsonElement(assembled.json).jsonObject["inbounds"]!!.jsonArray.single().jsonObject
+            val inbound = json.parseToJsonElement(assembled.json).jsonObject["inbounds"]!!.jsonArray.first().jsonObject
             assertThat(inbound.containsKey("sniff")).isFalse()
             assertThat(inbound.containsKey("sniff_timeout")).isFalse()
             assertThat(inbound.containsKey("domain_strategy")).isFalse()
@@ -170,7 +170,7 @@ class ConfigAssemblerTest {
         assertThat(dnsTypes).containsAtLeast("local", "udp")
         assertThat(dnsTypes).doesNotContain("https")
         assertUnderlayDns(assembled.json, assembled.notes)
-        val inbound = compiled["inbounds"]!!.jsonArray.single().jsonObject
+        val inbound = compiled["inbounds"]!!.jsonArray.first().jsonObject
         assertThat(inbound["address"]).isNotNull()
         assertThat(inbound.containsKey("inet4_address")).isFalse()
         val actions = compiled["route"]!!.jsonObject["rules"]!!.jsonArray.mapNotNull {
@@ -396,7 +396,7 @@ class ConfigAssemblerTest {
         assertUnderlayDns(assembled.json, assembled.notes)
         assertThat(assembled.notes.filter { it.startsWith("dns added") }.joinToString()).doesNotContain("detour=")
         assertThat(dns["strategy"]?.jsonPrimitive?.content).isEqualTo("ipv4_only")
-        val tunAddrs = root["inbounds"]!!.jsonArray.single().jsonObject["address"]!!.jsonArray.map {
+        val tunAddrs = root["inbounds"]!!.jsonArray.first().jsonObject["address"]!!.jsonArray.map {
             it.jsonPrimitive.content
         }
         assertThat(tunAddrs).containsExactly("172.19.0.1/30")

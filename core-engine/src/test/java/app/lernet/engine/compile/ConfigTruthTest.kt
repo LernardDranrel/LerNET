@@ -24,7 +24,7 @@ class ConfigTruthTest {
         )
         val full = json.parseToJsonElement(preview.fullEngineJson).jsonObject
         assertThat(full["log"]!!.jsonObject["level"]!!.jsonPrimitive.content).isEqualTo("info")
-        assertThat(full["inbounds"]!!.jsonArray.single().jsonObject["mtu"]!!.jsonPrimitive.content)
+        assertThat(full["inbounds"]!!.jsonArray.first().jsonObject["mtu"]!!.jsonPrimitive.content)
             .isEqualTo("1400")
         assertThat(preview.fullEngineJson).contains("uuid")
         val dns = preview.fields.single { it.id == TruthFieldId.DNS }

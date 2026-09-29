@@ -36,6 +36,7 @@ kotlin {
 
 dependencies {
     api(project(":core-config-shared"))
+    implementation(project(":core-routing"))
     implementation(libs.androidx.core.ktx)
     api(libs.room.runtime)
     api(libs.room.ktx)

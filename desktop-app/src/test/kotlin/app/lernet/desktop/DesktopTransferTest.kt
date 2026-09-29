@@ -33,7 +33,10 @@ class DesktopTransferTest {
     }
 
     @Test fun `import adds copies without replacing existing profiles or rules`() {
-        val merged = DesktopTransfer.merge(saved, DesktopTransfer.export(saved, group.id))
+        val archive = DesktopTransfer.export(saved, group.id)
+        assertTrue(TransferCodec.isTransfer(archive))
+        assertTrue(!TransferCodec.isTransfer("""{"outbounds":[]}"""))
+        val merged = DesktopTransfer.merge(saved, archive)
         assertEquals(2, merged.groups.size)
         assertEquals(2, merged.profiles.size)
         assertEquals(4, merged.rules.size)

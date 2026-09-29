@@ -56,6 +56,14 @@ object ConfigAssembler {
                 errors = compiledRoute.errors.map { "${it.field}: ${it.message}" },
             )
         }
+        val unsupportedRule = when {
+            platform == EnginePlatform.ANDROID && compiledRoute.rules.any { it.match.processes.isNotEmpty() } ->
+                "Правила Windows-процессов не работают на Android. Замените их условиями Android-приложений."
+            platform == EnginePlatform.WINDOWS && compiledRoute.rules.any { it.match.apps.isNotEmpty() } ->
+                "Правила Android-приложений не работают в Windows. Замените их условиями Windows-процессов."
+            else -> null
+        }
+        if (unsupportedRule != null) return AssembledConfig("", outbound.tag, listOf(unsupportedRule))
         val ruleSets = ruleSetEntries(compiledRoute, ruleSetDirectory)
         val ruleSetError = ruleSets.error
         if (ruleSetError != null) {
@@ -232,6 +240,7 @@ object ConfigAssembler {
                     "address",
                     buildJsonArray {
                         add(JsonPrimitive(TUN_ADDRESS))
+                        if (platform == EnginePlatform.WINDOWS) add(JsonPrimitive("fdfe:dcba:9876::1/126"))
                     },
                 )
                 put("mtu", defaults.tunMtu.coerceIn(1280, 9000))

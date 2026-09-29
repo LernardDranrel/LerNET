@@ -68,11 +68,22 @@ class WindowsConfigTest {
         server.start()
         val url = "http://127.0.0.1:${server.address.port}/health"
         try {
-            assertThat(WindowsTunnelHealth.check(url, RunMode.FULL_VPN).latencyMs).isNotNull()
+            assertThat(WindowsTunnelHealth.check(url, RunMode.FULL_VPN, routeCheck = { null }).latencyMs).isNotNull()
         } finally {
             server.stop(0)
         }
-        assertThat(WindowsTunnelHealth.check(url, RunMode.FULL_VPN, 1_000).latencyMs).isNull()
+        assertThat(WindowsTunnelHealth.check(url, RunMode.FULL_VPN, 1_000, routeCheck = { null }).latencyMs).isNull()
+    }
+
+    @Test
+    fun competingVpnRouteCannotPassTheWindowsHealthCheck() {
+        val result = WindowsTunnelHealth.check("https://example.com", RunMode.FULL_VPN,
+            routeCheck = { "Маршрут Windows идёт через другой VPN" })
+        assertThat(result.latencyMs).isNull()
+        assertThat(result.routeConflict).isTrue()
+        assertThat(result.error).contains("другой VPN")
+        assertThat(WindowsRouteInspector.isLerNetInterface("Ethernet", "LerNET")).isTrue()
+        assertThat(WindowsRouteInspector.isLerNetInterface("Ethernet", "TampleVPN")).isFalse()
     }
 
     @Test
@@ -233,6 +244,8 @@ class WindowsConfigTest {
         val root = Json.parseToJsonElement(config.json).jsonObject
         val inbound = root.getValue("inbounds").jsonArray.first().jsonObject
         assertThat(inbound.getValue("interface_name").toString()).isEqualTo("\"LerNET\"")
+        assertThat(inbound.getValue("address").jsonArray.map { it.toString() })
+            .contains("\"fdfe:dcba:9876::1/126\"")
         assertThat(config.json).contains("process_name")
         assertThat(config.json).contains("browser.exe")
 

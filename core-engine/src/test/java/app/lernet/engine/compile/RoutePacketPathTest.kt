@@ -39,6 +39,7 @@ class RoutePacketPathTest {
         assertThat(dns["servers"]!!.jsonArray.any { it.jsonObject["tag"]?.jsonPrimitive?.content == "local" }).isTrue()
 
         val rules = root["route"]!!.jsonObject["rules"]!!.jsonArray.map { it.jsonObject }
+            .filter { it["inbound"] == null }
         assertThat(root["route"]!!.jsonObject["final"]?.jsonPrimitive?.content).isEqualTo("proxy")
 
         val sniff = rules[0]
@@ -58,7 +59,7 @@ class RoutePacketPathTest {
         assertThat(protocolHijack.containsKey("type")).isFalse()
         assertThat(protocolHijack.containsKey("port")).isFalse()
 
-        val inbound = root["inbounds"]!!.jsonArray.single().jsonObject
+        val inbound = root["inbounds"]!!.jsonArray.first().jsonObject
         assertThat(inbound["stack"]?.jsonPrimitive?.content).isEqualTo("gvisor")
         assertThat(inbound.containsKey("dns_mode")).isFalse()
         assertThat(inbound["mtu"]?.jsonPrimitive?.content).isEqualTo("1500")
