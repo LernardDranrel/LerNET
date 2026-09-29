@@ -30,6 +30,18 @@ internal object WindowsProcessIdentity {
         }
     }
 
+    fun resolveObservation(path: String): ProcessIdentity? {
+        if (!System.getProperty("os.name").startsWith("Windows")) return null
+        val allowed = app.lernet.desktop.observation.ObservationIconPolicy.allows(path,
+            isFixedDrive = { root -> Kernel32.INSTANCE.GetDriveType(root) == 3 },
+            isPlainLocalEntry = { entry ->
+                val attributes = Kernel32.INSTANCE.GetFileAttributes(entry)
+                attributes != -1 && attributes and 0x400 == 0
+            })
+        if (!allowed) return null
+        return cache.computeIfAbsent("observation:$path") { ProcessIdentity(File(path).nameWithoutExtension, readIcon(File(path))) }
+    }
+
     fun resolve(pathOrName: String): ProcessIdentity {
         if (pathOrName.isBlank()) return ProcessIdentity("Процесс не определён ядром", null)
         return cache.computeIfAbsent(pathOrName) { source -> resolveUncached(source) }

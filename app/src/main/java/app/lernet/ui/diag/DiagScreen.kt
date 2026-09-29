@@ -79,6 +79,7 @@ fun DiagScreen(
     onIntent: (DiagIntent) -> Unit,
     onBack: () -> Unit,
     events: Flow<DiagEvent>,
+    onOpenNetwork: () -> Unit = {},
 ) {
     val metrics = rememberCompactMetrics()
     var actionsOpen by remember { mutableStateOf(false) }
@@ -93,6 +94,9 @@ fun DiagScreen(
                     IconButton(onClick = onBack) {
                         Icon(LerNetSymbols.arrowBack(), contentDescription = stringResource(R.string.back))
                     }
+                },
+                actions = {
+                    TextButton(onClick = onOpenNetwork) { Text("Сеть устройства") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )

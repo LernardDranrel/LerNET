@@ -1,5 +1,8 @@
 package app.lernet.desktop
 
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
@@ -127,6 +130,7 @@ fun main(args: Array<String>) {
 private fun desktopApplication(startupCheck: String?, startupFallbackMessage: String?) = application {
     val controller = remember { DesktopController().also { startupFallbackMessage?.let(it::showMessage) } }
     var visible by remember { mutableStateOf(true) }
+    var networkWindowOpen by remember { mutableStateOf(false) }
     val windowState = rememberWindowState(size = DpSize(1180.dp, 760.dp))
     val tunnel by controller.tunnel.state.collectAsState()
     val ui by controller.state.collectAsState()
@@ -147,6 +151,7 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
         onAction = { visible = true },
         menu = {
             Item("Открыть", onClick = { visible = true })
+            Item("Сеть устройства", onClick = { networkWindowOpen = true })
             Item("Отключить VPN", onClick = controller::disconnect)
             Separator()
             Item("Выход", onClick = { controller.close(); exitApplication() })
@@ -175,7 +180,7 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
         MaterialTheme(colorScheme = desktopColors, typography = desktopTypography,
             shapes = Shapes(small = RoundedCornerShape(10.dp), medium = RoundedCornerShape(14.dp), large = RoundedCornerShape(18.dp))) {
             Surface(color = background, contentColor = desktopColors.onBackground) {
-                DesktopScreen(controller, onRequestElevation = {
+                DesktopScreen(controller, onOpenNetwork = { networkWindowOpen = true }, onRequestElevation = {
                     WindowsElevation.relaunchAsAdministrator()
                         .onSuccess { controller.close(); exitApplication() }
                         .onFailure { controller.showMessage(it.message ?: "Не удалось запросить права администратора") }
@@ -183,6 +188,22 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
             }
         }
     }
+    if (networkWindowOpen) DesktopNetworkWindow(
+        onClose = { networkWindowOpen = false },
+        useLerNetProxy = {
+            val saved = controller.state.value.saved
+            val profile = saved.profiles.firstOrNull { it.id == saved.selectedProfileId }
+            controller.tunnel.state.value.status == TunnelStatus.RUNNING &&
+                DesktopRunMode.effective(profile?.modeOverride ?: saved.mode, WindowsElevation.isElevated) == app.lernet.engine.RunMode.PROXY
+        },
+        readClientContext = {
+            val saved = controller.state.value.saved
+            val profile = saved.profiles.firstOrNull { it.id == saved.selectedProfileId }
+            val outbound = profile?.outbounds?.firstOrNull { it.id == profile.selectedOutboundId }
+            val endpoint = runCatching { outbound?.singBoxJson?.let { kotlinx.serialization.json.Json.parseToJsonElement(it).jsonObject["server"]?.jsonPrimitive?.content } }.getOrNull().orEmpty()
+            app.lernet.desktop.observation.ClientObservationContext(profile?.name.orEmpty(), endpoint, outbound?.type.orEmpty(), profile?.modeOverride ?: saved.mode)
+        },
+    )
 }
 
 private enum class Tab(val label: String) {
@@ -191,7 +212,7 @@ private enum class Tab(val label: String) {
 private data class ExportSelection(val groupId: String?, val suggestedName: String)
 
 @Composable
-private fun DesktopScreen(controller: DesktopController, onRequestElevation: () -> Unit) {
+private fun DesktopScreen(controller: DesktopController, onRequestElevation: () -> Unit, onOpenNetwork: () -> Unit) {
     val ui by controller.state.collectAsState()
     val tunnel by controller.tunnel.state.collectAsState()
     val diagnostics by controller.diagnostics.collectAsState()
@@ -235,6 +256,8 @@ private fun DesktopScreen(controller: DesktopController, onRequestElevation: () 
                 Spacer(Modifier.height(4.dp))
             }
             Spacer(Modifier.weight(1f))
+            OutlinedButton(onClick = onOpenNetwork, modifier = Modifier.fillMaxWidth()) { Text("Сеть устройства ↗", fontSize = 12.sp) }
+            Spacer(Modifier.height(12.dp))
             HorizontalDivider(color = desktopColors.outlineVariant)
             Spacer(Modifier.height(12.dp))
             Text("LerNET v$APP_VERSION", color = muted, fontSize = 11.sp)

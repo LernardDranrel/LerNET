@@ -55,6 +55,7 @@ import app.lernet.log.LogShare
 import app.lernet.ui.config.ConfigEditorScreen
 import app.lernet.ui.config.ConfigEditorViewModel
 import app.lernet.ui.diag.DiagScreen
+import app.lernet.ui.network.NetworkObservationRoute
 import app.lernet.ui.diag.DiagViewModel
 import app.lernet.ui.groups.GroupsScreen
 import app.lernet.ui.groups.GroupsViewModel
@@ -443,7 +444,11 @@ private fun NavGraphBuilder.secondaryDestinations(
             onIntent = vm::onIntent,
             onBack = { navController.popBackStack() },
             events = vm.events,
+            onOpenNetwork = { navController.navigate(Dest.Network.route) },
         )
+    }
+    composable(Dest.Network.route) {
+        NetworkObservationRoute(onBack = { navController.popBackStack() })
     }
     composable(Dest.Groups.route) {
         val vm: GroupsViewModel = hiltViewModel()
