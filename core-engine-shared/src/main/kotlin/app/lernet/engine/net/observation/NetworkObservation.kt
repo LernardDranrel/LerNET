@@ -45,6 +45,8 @@ enum class FindingKind { FACT, POTENTIAL_CONFLICT, INSUFFICIENT_DATA }
 data class NetworkFinding(
     val code: String, val title: String, val explanation: String, val kind: FindingKind,
     val sourceIds: List<String>, val evidence: List<String> = emptyList(),
+    val reason: String = "", val impact: String = "", val nextSteps: List<String> = emptyList(),
+    val relatedItems: List<EvidenceRow> = emptyList(),
 )
 
 @Serializable
@@ -100,10 +102,15 @@ object NetworkObservationAnalysis {
             FindingKind.FACT, blockedEvents.map { it.first }.distinct(), blockedEvents.take(8).map { (_, row) ->
                 row.fields.filterKeys { it in setOf("Время UTC", "Application", "ProcessId", "DestAddress", "DestPort", "FilterRTID") }.entries.joinToString(" · ") { "${it.key}: ${it.value}" }
             }))
-        val inactive = snapshot.routes.filter { route -> snapshot.adapters.any { it.id == route.adapterId && !it.up } }
+        val inactive = snapshot.routes.filter { route -> snapshot.adapters.any {
+            it.id == route.adapterId && !it.up && !ObservationGuide.isServiceRoute(route, it)
+        } }
         if (inactive.isNotEmpty()) add(NetworkFinding("inactive-route", "Есть маршруты через отключённый адаптер",
-            "Сохранённая запись не доказывает сбой. Проверьте, используется ли этот путь для нужного адреса.",
-            FindingKind.POTENTIAL_CONFLICT, listOf("routes", "adapters"), inactive.map { "${it.prefix} → ${it.nextHop}" }))
+            "В таблице есть общие или целевые пути через интерфейс, который сейчас отключён. Наличие записи не доказывает, что система выбирает этот путь.",
+            FindingKind.POTENTIAL_CONFLICT, listOf("routes", "adapters"), inactive.map { route ->
+                val adapter = snapshot.adapters.first { it.id == route.adapterId }
+                "${adapter.name} · отключён · ${route.prefix} → ${route.nextHop}"
+            }))
         val splitDefaults = snapshot.routes.filter {
             it.store.equals("ActiveStore", ignoreCase = true) &&
                 it.prefix in setOf("0.0.0.0/1", "128.0.0.0/1", "::/1", "8000::/1")
@@ -121,7 +128,7 @@ object NetworkObservationAnalysis {
                 "Выводы относятся только к прочитанным источникам. Пустой журнал или отсутствие прав не подтверждают отсутствие проблем.",
                 FindingKind.INSUFFICIENT_DATA, missing.map { it.id }, missing.map { "${it.title}: ${it.availabilityDescription()}" }))
         }
-    }
+    }.map { ObservationFindingGuide.explain(snapshot, it) }
 
     private fun configuredLoopbackProxy(value: String): Pair<String, Int>? {
         val match = Regex("^(?:https?://)?(127\\.0\\.0\\.1|localhost|\\[::1\\]):([0-9]{1,5})/?$", RegexOption.IGNORE_CASE)

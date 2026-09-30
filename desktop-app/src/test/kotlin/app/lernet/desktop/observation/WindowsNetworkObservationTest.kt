@@ -5,6 +5,13 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
 class WindowsNetworkObservationTest {
+    @org.junit.Test fun `every Windows source has a reading guide`() {
+        val missing = WindowsNetworkObservation.definitions.map { it.id }.filterNot {
+            it in app.lernet.engine.net.observation.ObservationGuide.sourceIds
+        }
+        org.junit.Assert.assertEquals(emptyList<String>(), missing)
+    }
+
     private val definition = WindowsObservationDefinition("adapters", "Адаптеры", "Пояснение")
 
     @Test fun parsesUnicodeAndStableAdapterGuid() {

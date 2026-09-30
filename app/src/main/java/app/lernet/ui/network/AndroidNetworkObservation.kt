@@ -115,6 +115,7 @@ internal class AndroidNetworkCollector(private val reader: AndroidNetworkReader)
                     "Путь приложений" to if (r.active) "Сеть по умолчанию для LerNET" else "Дополнительная видимая сеть",
                     "Адреса устройства" to r.addresses.joinToString().ifBlank { "Не переданы системой" },
                     "MTU" to if (r.mtu > 0) "${r.mtu} байт" else "Не передан",
+                    "Системная проверка интернета" to if (!r.capabilitiesAvailable) "Свойства недоступны" else if (r.validated) "Android подтвердил доступ" else "Android не подтвердил доступ",
                     "Доступ к данным" to if (r.propertiesAvailable && r.capabilitiesAvailable) "Свойства получены" else "Часть свойств недоступна",
                 )) }, detail = failure?.let { if (it is SecurityException) "Android запретил чтение сведений сети" else "Не удалось прочитать согласованный снимок; обновите данные" }.orEmpty(), capturedAt = started, complete = linksComplete && capsComplete),
             ObservationSource("routes", "Маршруты", "Пути из LinkProperties. Android не раскрывает полную таблицу и метрики ОС.", state,
@@ -138,6 +139,6 @@ internal class AndroidNetworkCollector(private val reader: AndroidNetworkReader)
                 "Это сеть по умолчанию именно для LerNET на момент снимка. Отдельные приложения могут иметь другой путь.", FindingKind.FACT, listOf("adapters"), listOf(r.name))) }
             records.filter { it.active && it.capabilitiesAvailable && !it.validated }.forEach { r -> add(NetworkFinding("android-unvalidated", "Android не подтвердил интернет",
                 "Системная проверка для ${r.name} не подтвердила доступ. Это повод проверить соединение, а не доказательство мёртвого туннеля.", FindingKind.INSUFFICIENT_DATA, listOf("adapters"))) }
-        })
+        }.map { ObservationFindingGuide.explain(snapshot, it) })
     }
 }

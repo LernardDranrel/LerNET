@@ -1,6 +1,5 @@
 package app.lernet.desktop
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -12,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -74,9 +74,11 @@ internal fun DesktopNetworkObservation(
     comparisonSnapshot: NetworkSnapshot? = snapshot,
 ) {
     var page by remember { mutableStateOf(ObservationPage.OVERVIEW) }
+    val sectionListState = remember(page) { LazyListState() }
     var query by remember { mutableStateOf("") }
     var reducedMotion by remember { mutableStateOf(false) }
     var confirmProbe by remember { mutableStateOf(false) }
+    var findingFilter by remember { mutableStateOf<FindingKind?>(null) }
     var confirmTrace by remember { mutableStateOf(false) }
     val sources = snapshot?.sources.orEmpty()
     val changes = remember(previous, comparisonSnapshot) {
@@ -175,7 +177,8 @@ internal fun DesktopNetworkObservation(
                         }
                         if (snapshot.findings.isEmpty()) item { Notice("Из доступных данных конфликт не найден",
                             "Это не проверка работоспособности VPN. Маршрут и ответ сервера проверяются отдельно.", observationMint) }
-                        items(snapshot.findings, key = { it.code }) { finding -> FindingDetail(finding, reducedMotion) { sourceId ->
+                        item { FindingFilters(snapshot.findings, findingFilter) { findingFilter = it } }
+                        items(snapshot.findings.filter { findingFilter == null || it.kind == findingFilter }, key = { it.code }) { finding -> FindingDetail(ObservationFindingGuide.explain(snapshot, finding), reducedMotion, sources.associate { it.id to it.title }) { sourceId ->
                             page = ObservationPage.ALL; query = sourceId
                         } }
                         item {
@@ -189,21 +192,14 @@ internal fun DesktopNetworkObservation(
                     ObservationPage.CHANGES -> {
                         if (previous == null) Notice("Нужен второй снимок", "Нажмите «Обновить» после изменения сети. Здесь появится сравнение с предыдущим снимком.")
                         else if (changes.isEmpty()) Notice("Настройки совпадают", "В прочитанных источниках изменений не найдено. Состояние самого канала могло измениться без изменения настроек.", observationMint)
-                        else LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        else LazyColumn(state = sectionListState, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            item { PageReadingGuide(page.title, pageReadingPlan(page), reducedMotion) }
                             item { Text("${observationTime(previous.finishedAt)} → ${observationTime(snapshot.finishedAt)} · ${changes.size} изменений",
                                 fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                             items(changes) { change -> ChangeDetail(change) }
                         }
                     }
                     else -> {
-                        if (page == ObservationPage.ROUTES) {
-                            RoutePlayground(snapshot)
-                            Spacer(Modifier.height(14.dp))
-                        }
-                        if (page == ObservationPage.EVENTS) {
-                            TraceControls(traceRunning, traceStatus, onStart = { confirmTrace = true }, onStopTrace)
-                            Spacer(Modifier.height(14.dp))
-                        }
                         OutlinedTextField(query, { query = it }, singleLine = true, label = { Text("Найти в этом разделе") },
                             modifier = Modifier.fillMaxWidth(), trailingIcon = { if (query.isNotEmpty()) TextButton({ query = "" }) { Text("Сбросить") } })
                         Spacer(Modifier.height(12.dp))
@@ -213,8 +209,11 @@ internal fun DesktopNetworkObservation(
                         }
                         if (selected.isEmpty()) Notice(if (query.isBlank()) "Нет источников в этом разделе" else "Совпадений не найдено",
                             if (query.isBlank()) "Посмотрите «Все источники»: доступность зависит от версии Windows и прав." else "Попробуйте имя адаптера, адрес, процесс или название правила.")
-                        else LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            items(selected, key = { it.id }) { source -> SourceDetail(source, query, reducedMotion) }
+                        else LazyColumn(state = sectionListState, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            item { PageReadingGuide(page.title, pageReadingPlan(page), reducedMotion) }
+                            if (page == ObservationPage.ROUTES) item { RoutePlayground(snapshot) }
+                            if (page == ObservationPage.EVENTS) item { TraceControls(traceRunning, traceStatus, onStart = { confirmTrace = true }, onStopTrace) }
+                            items(selected, key = { it.id }) { source -> SourceDetail(source, query, reducedMotion, snapshot) }
                         }
                     }
                 }
@@ -343,7 +342,7 @@ private fun NetworkSettingsExplorer(snapshot: NetworkSnapshot, compact: Boolean,
 }
 
 @Composable
-private fun FindingDetail(finding: NetworkFinding, reducedMotion: Boolean, onSource: (String) -> Unit) {
+private fun FindingDetail(finding: NetworkFinding, reducedMotion: Boolean, sourceTitles: Map<String, String>, onSource: (String) -> Unit) {
     var expanded by remember(finding.code) { mutableStateOf(false) }
     val tint = when (finding.kind) {
         FindingKind.FACT -> observationMint
@@ -354,7 +353,7 @@ private fun FindingDetail(finding: NetworkFinding, reducedMotion: Boolean, onSou
     Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface, border = BorderStroke(1.dp, tint.copy(alpha = .28f))) {
         Column(Modifier.padding(16.dp)) {
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) { expanded = !expanded }
-                .semantics { stateDescription = if (expanded) "Доказательства раскрыты" else "Показать доказательства" }.heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
+                .testTag("network-finding-${finding.code}").semantics { stateDescription = if (expanded) "Доказательства раскрыты" else "Показать доказательства" }.heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(7.dp).background(tint, CircleShape))
                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                     Text(label, color = tint, fontSize = 11.sp)
@@ -363,48 +362,78 @@ private fun FindingDetail(finding: NetworkFinding, reducedMotion: Boolean, onSou
                 Text(if (expanded) "−" else "+", color = tint, fontSize = 22.sp)
             }
             Text(finding.explanation, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
-            if (reducedMotion) { if (expanded) FindingEvidence(finding, onSource) }
-            else AnimatedVisibility(expanded) { FindingEvidence(finding, onSource) }
+            if (finding.relatedItems.isNotEmpty()) Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                finding.relatedItems.take(3).forEach { item ->
+                    Surface(color = tint.copy(alpha = .08f), shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, tint.copy(alpha = .2f))) {
+                        Text(item.title, color = tint, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                    }
+                }
+                if (finding.relatedItems.size > 3) Text("+${finding.relatedItems.size - 3}", color = tint, modifier = Modifier.padding(6.dp), fontSize = 11.sp)
+            }
+            ReadingDisclosure(expanded, reducedMotion) { FindingEvidence(finding, sourceTitles, onSource) }
         }
     }
 }
 
 @Composable
-private fun FindingEvidence(finding: NetworkFinding, onSource: (String) -> Unit) {
-    Column(Modifier.padding(top = 12.dp)) {
+private fun FindingEvidence(finding: NetworkFinding, sourceTitles: Map<String, String>, onSource: (String) -> Unit) {
+    var count by remember(finding.code) { mutableStateOf(4) }
+    Column(Modifier.padding(top = 14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         HorizontalDivider()
-        SelectionContainer { Column(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            finding.evidence.forEach { Text(it, fontSize = 12.sp) }
-        } }
+        ReadingBlock("Как мы это определили", finding.reason)
+        ReadingBlock("На что это может повлиять", finding.impact)
+        ReadingSteps(finding.nextSteps)
+        if (finding.relatedItems.isNotEmpty()) {
+            Text("Конкретные объекты · ${finding.relatedItems.size}", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            finding.relatedItems.take(count).forEach { item ->
+                Surface(modifier = Modifier.fillMaxWidth(), color = observationInk, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(item.title, fontWeight = FontWeight.SemiBold)
+                        SelectionContainer { Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                            item.fields.forEach { (key, value) ->
+                                Text(key, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                                Text(value, fontSize = 12.sp)
+                            }
+                        } }
+                    }
+                }
+            }
+            if (count < finding.relatedItems.size) TextButton({ count += 8 }) { Text("Показать ещё ${minOf(8, finding.relatedItems.size - count)} объектов") }
+        } else if (finding.evidence.isNotEmpty()) {
+            Text("Основания из снимка", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            SelectionContainer { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { finding.evidence.take(count).forEach { Text(it, fontSize = 12.sp) } } }
+            if (count < finding.evidence.size) TextButton({ count += 8 }) { Text("Показать ещё основания") }
+        }
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            finding.sourceIds.forEach { source -> TextButton({ onSource(source) }) { Text("Источник: $source", fontSize = 11.sp) } }
+            finding.sourceIds.forEach { source -> TextButton({ onSource(source) }) { Text("Открыть: ${sourceTitles[source] ?: source}", fontSize = 11.sp) } }
         }
     }
 }
 
 @Composable
-private fun SourceDetail(source: ObservationSource, query: String, reducedMotion: Boolean) {
+private fun SourceDetail(source: ObservationSource, query: String, reducedMotion: Boolean, snapshot: NetworkSnapshot) {
     var expanded by remember(source.id) { mutableStateOf(false) }
-    var displayCount by remember(source.id) { mutableStateOf(40) }
-    val stateColor = when (source.state) { SourceState.AVAILABLE -> observationMint; SourceState.EMPTY -> MaterialTheme.colorScheme.onSurfaceVariant; else -> observationAmber }
+    var displayCount by remember(source.id, query) { mutableStateOf(12) }
+    val stateColor = when (source.state) { SourceState.AVAILABLE -> observationMint; SourceState.EMPTY, SourceState.UNSUPPORTED -> MaterialTheme.colorScheme.onSurfaceVariant; else -> observationAmber }
     val rows = remember(source, query) {
         if (query.isBlank() || source.id.contains(query, true) || source.title.contains(query, true)) source.rows
         else source.rows.filter { it.title.contains(query, true) || it.fields.any { (k, v) -> k.contains(query, true) || v.contains(query, true) } }
     }
     val body: @Composable () -> Unit = {
         Column(Modifier.padding(top = 12.dp)) {
-            if (source.detail.isNotBlank()) Text(source.detail, color = stateColor, fontSize = 12.sp, modifier = Modifier.padding(bottom = 10.dp))
+            SourceReadingGuide(source, reducedMotion)
+            Spacer(Modifier.height(12.dp))
             if (rows.isEmpty()) Text(if (source.state == SourceState.EMPTY) "Источник прочитан; записей нет." else "Нет записей для отображения.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             rows.take(displayCount).forEach { row ->
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .6f))
-                EvidenceDetail(row)
+                EvidenceDetail(row, source.id, snapshot, reducedMotion)
             }
-            if (rows.size > displayCount) TextButton({ displayCount += 40 }) { Text("Ещё ${minOf(40, rows.size - displayCount)} из ${rows.size - displayCount}") }
+            if (rows.size > displayCount) TextButton({ displayCount += 12 }) { Text("Ещё ${minOf(12, rows.size - displayCount)} из ${rows.size - displayCount}") }
         }
     }
     Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
         Column(Modifier.padding(16.dp)) {
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) { expanded = !expanded }
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).testTag("network-source-${source.id}").clickable(role = Role.Button) { expanded = !expanded }
                 .semantics { stateDescription = if (expanded) "Источник раскрыт" else "Показать записи источника" }.heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(source.title, fontWeight = FontWeight.SemiBold)
@@ -412,16 +441,16 @@ private fun SourceDetail(source: ObservationSource, query: String, reducedMotion
                 }
                 Text(if (expanded) "−" else "+", fontSize = 22.sp, color = MaterialTheme.colorScheme.primary)
             }
-            Text(source.explanation, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
-            if (reducedMotion) { if (expanded || query.isNotBlank()) body() }
-            else AnimatedVisibility(expanded || query.isNotBlank()) { body() }
+            Text(ObservationGuide.source(source.id).meaning, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+            ReadingDisclosure(expanded || query.isNotBlank(), reducedMotion) { body() }
         }
     }
 }
 
 @Composable
-private fun EvidenceDetail(row: EvidenceRow) {
+private fun EvidenceDetail(row: EvidenceRow, sourceId: String, snapshot: NetworkSnapshot, reducedMotion: Boolean) {
     var expanded by remember(row.id) { mutableStateOf(false) }
+    val reading = remember(sourceId, row, snapshot) { ObservationGuide.row(sourceId, row, snapshot) }
     val executable = row.fields["ExecutablePath"].orEmpty()
     val identity by produceState<ProcessIdentity?>(null, executable) {
         value = null
@@ -429,28 +458,26 @@ private fun EvidenceDetail(row: EvidenceRow) {
             runCatching { WindowsProcessIdentity.resolveObservation(executable) }.getOrNull()
         }
     }
-    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(7.dp)).clickable(role = Role.Button) { expanded = !expanded }
-            .semantics { stateDescription = if (expanded) "Детали раскрыты" else "Показать детали" }.heightIn(min = 44.dp).padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).clickable(role = Role.Button) { expanded = !expanded }
+            .testTag("network-row-${row.id}")
+            .semantics { stateDescription = if (expanded) "Пояснения раскрыты" else "Показать пояснения" }
+            .heightIn(min = 48.dp).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (executable.isNotBlank()) {
                 val icon = identity?.icon
                 if (icon != null) Image(icon, contentDescription = null, modifier = Modifier.size(28.dp))
-                else Box(Modifier.size(28.dp).clip(RoundedCornerShape(7.dp)).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
-                    Text("◈", color = MaterialTheme.colorScheme.primary, fontSize = 16.sp)
-                }
+                else ReadingMark("◈", MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(10.dp))
             }
-            Text(row.title, fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = if (expanded) 5 else 2, overflow = TextOverflow.Ellipsis)
-            Text(if (expanded) "Свернуть" else "Детали", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 10.dp))
+            Text(reading.summary, fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = if (expanded) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis)
+            Text(if (expanded) "Свернуть ↑" else "Разобраться ↓", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 12.dp))
         }
-        if (!expanded && row.fields.isNotEmpty()) Text(row.fields.entries.take(3).joinToString(" · ") { "${fieldLabel(it.key)}: ${it.value}" },
-            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        if (expanded) SelectionContainer { Column(Modifier.padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            row.fields.forEach { (key, value) -> Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(fieldLabel(key), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(.32f))
-                Text(value.ifBlank { "Не указано" }, fontSize = 12.sp, modifier = Modifier.weight(.68f))
-            } }
-        } }
+        ReadingDisclosure(expanded, reducedMotion) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ReadingBlock("Что означает эта запись", reading.interpretation)
+                ExplainedFields(row.fields)
+            }
+        }
     }
 }
 
@@ -459,7 +486,8 @@ private fun ChangeDetail(change: SnapshotChange) {
     Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
         Column(Modifier.padding(16.dp)) {
             Text(change.title, fontWeight = FontWeight.SemiBold)
-            Text(change.sourceId, color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp))
+            Text(ObservationGuide.source(change.sourceId).meaning, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            ReadingBlock("Как понимать изменение", "Мы сравнили два снимка одного источника. Это изменение настройки или доступности данных; оно не показывает, кто его сделал и стало ли соединение работать.")
             SelectionContainer { Column(Modifier.padding(top = 12.dp)) {
                 Text("Было", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(change.before, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp))
@@ -510,6 +538,17 @@ private fun sourceMatches(page: ObservationPage, id: String): Boolean {
     }
 }
 
+private fun pageReadingPlan(page: ObservationPage): List<String> = when (page) {
+    ObservationPage.ADAPTERS -> listOf("Найдите Wi-Fi, кабель или туннель, который должен обслуживать ваш запрос.", "Сопоставьте состояние и адреса с маршрутом нужного ресурса.", "Виртуальный интерфейс и WAN Miniport сами по себе не означают подключённый VPN.")
+    ObservationPage.APPS -> listOf("Начните с нужной программы и её пути EXE.", "Сопоставьте PID с родителем, службой, портами и соединениями.", "Установленный профиль, запущенная служба и работающий туннель — разные факты.")
+    ObservationPage.ROUTES -> listOf("Введите IP проблемного ресурса в расчёт пути.", "Посмотрите найденный адаптер, префикс и следующий узел; служебные маршруты смотрите отдельно от интернет-пути.", "Расчёт по таблице не подтверждает ответ сервера и не учитывает собственный прокси приложения.")
+    ObservationPage.DNS -> listOf("Если имя не открывается, проверьте DNS используемого интерфейса.", "Если приложения ведут себя по-разному, сравните пользовательский прокси, WinHTTP и окружение.", "Локальный прокси должен иметь работающий порт; внутреннему DNS нужен доступный путь.")
+    ObservationPage.FILTERS -> listOf("Начните с категории сети и действия брандмауэра по умолчанию.", "Для правила сопоставьте программу, направление, адреса, порты и протокол одновременно.", "Подтверждение блокировки ищите в событии нужного процесса в момент сбоя; отсутствие в выборке не означает отсутствие фильтра.")
+    ObservationPage.SYSTEM -> listOf("Исследуйте компоненты, связанные с используемым адаптером.", "Сравните драйверы, привязки и счётчики до и после сбоя.", "Отсутствие необязательного Hyper-V/NAT и наличие штатных компонентов — не повод менять настройки.")
+    ObservationPage.EVENTS -> listOf("Сопоставьте время события со временем проблемы.", "Ищите нужную программу и адрес, затем сопоставьте номер фильтра с WFP.", "Если журнал не прочитан или отключён, отсутствие событий не доказывает исправность соединения.")
+    else -> listOf("Начните с наблюдения, относящегося к вашему сбою.", "Раскройте источник: рядом с каждой записью есть объяснение, поля и их смысл.", "Сравнивайте два снимка. Факт изменения не устанавливает виновника и не подтверждает работу сети.")
+}
+
 private fun sourceStateLabel(state: SourceState): String = when (state) {
     SourceState.AVAILABLE -> "Прочитан"
     SourceState.EMPTY -> "Прочитан, пусто"
@@ -520,46 +559,3 @@ private fun sourceStateLabel(state: SourceState): String = when (state) {
 }
 
 private fun observationTime(time: Long): String = SimpleDateFormat("HH:mm:ss · d MMM", Locale.forLanguageTag("ru")).format(Date(time))
-
-private fun fieldLabel(key: String): String = when (key) {
-    "InterfaceAlias", "Name" -> "Название"
-    "InterfaceDescription", "Description" -> "Описание"
-    "InterfaceIndex", "ifIndex" -> "Номер интерфейса"
-    "InterfaceGuid" -> "Идентификатор адаптера"
-    "Status", "ConnectionStatus", "State" -> "Состояние"
-    "IPAddress", "LocalAddress" -> "Локальный адрес"
-    "RemoteAddress" -> "Удалённый адрес"
-    "LocalPort" -> "Локальный порт"
-    "RemotePort" -> "Удалённый порт"
-    "DestinationPrefix" -> "Адреса назначения"
-    "NextHop" -> "Следующий шлюз"
-    "RouteMetric" -> "Метрика маршрута"
-    "InterfaceMetric" -> "Метрика интерфейса"
-    "CompartmentId" -> "Сетевой контекст"
-    "PolicyStore" -> "Хранилище правил"
-    "AddressFamily" -> "Семейство IP"
-    "ServerAddresses" -> "DNS-серверы"
-    "ProcessId", "OwningProcess" -> "PID процесса"
-    "ParentProcessId" -> "PID родителя"
-    "ExecutablePath" -> "Исполняемый файл"
-    "DisplayName" -> "Название правила"
-    "Enabled" -> "Включено"
-    "Action" -> "Действие"
-    "Direction" -> "Направление"
-    "Protocol" -> "Протокол"
-    "ServerAddress" -> "Сервер"
-    "TunnelType" -> "Протокол VPN"
-    "SplitTunneling" -> "Разделение трафика"
-    "ProviderName" -> "Поставщик"
-    "DriverVersion" -> "Версия драйвера"
-    "DriverDate" -> "Дата драйвера"
-    "IsSigned" -> "Есть цифровая подпись"
-    "UserSID" -> "Пользователь Windows (SID)"
-    "ProxyServer" -> "Адрес прокси"
-    "ProxyEnable" -> "Прокси включён"
-    "AutoConfigURL" -> "Адрес сценария PAC"
-    "FilterId" -> "Номер фильтра (этот запуск Windows)"
-    "TimeCreated" -> "Время события"
-    "Message" -> "Описание события"
-    else -> key
-}

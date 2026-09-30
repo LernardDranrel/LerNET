@@ -5,17 +5,20 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
@@ -27,6 +30,7 @@ import app.lernet.engine.net.observation.*
 import app.lernet.ui.icons.LerNetSymbols
 import app.lernet.ui.motion.motionTween
 import app.lernet.ui.motion.rememberReduceMotion
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -45,7 +49,7 @@ fun NetworkObservationRoute(onBack: () -> Unit) {
         onExport = { export.launch("LerNET-network-${state.snapshot?.finishedAt ?: System.currentTimeMillis()}.json") })
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 internal fun NetworkObservationScreen(
     state: NetworkObservationUiState,
@@ -62,6 +66,12 @@ internal fun NetworkObservationScreen(
     var confirmIp by remember { mutableStateOf(false) }
     var expandedFinding by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    fun selectTab(index: Int) {
+        tab = index
+        scope.launch { if (reduceMotion) listState.scrollToItem(1) else listState.animateScrollToItem(1) }
+    }
     val snapshot = state.snapshot
     val changes = remember(state.previous, snapshot) { observationChanges(state.previous, snapshot) }
     val sources = snapshot?.sources.orEmpty()
@@ -76,7 +86,7 @@ internal fun NetworkObservationScreen(
             })
         },
     ) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+        LazyColumn(Modifier.fillMaxSize().padding(padding), state = listState, contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             item {
                 Text("Разберём, куда идёт интернет", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
@@ -96,10 +106,10 @@ internal fun NetworkObservationScreen(
                         modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall)
                 }
             }
-            item {
-                SecondaryTabRow(selectedTabIndex = tab) {
+            stickyHeader {
+                SecondaryTabRow(selectedTabIndex = tab, containerColor = MaterialTheme.colorScheme.background) {
                     listOf("Обзор", "Данные", "Изменения").forEachIndexed { index, title ->
-                        Tab(selected = tab == index, onClick = { tab = index }, text = { Text(title) })
+                        Tab(selected = tab == index, onClick = { selectTab(index) }, text = { Text(title) })
                     }
                 }
             }
@@ -132,7 +142,7 @@ internal fun NetworkObservationScreen(
                             FilterChip(selected = false, onClick = { selectedSource = "routes" }, label = { Text("Маршруты") })
                             FilterChip(selected = true, onClick = { selectedSource = "vpn" }, label = { Text("VPN") })
                         }
-                        SourcePanel(detail, reduceMotion)
+                        SourcePanel(detail, reduceMotion, snapshot = snapshot)
                     }
                     item {
                         OutlinedCard(Modifier.fillMaxWidth(), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
@@ -155,26 +165,41 @@ internal fun NetworkObservationScreen(
                         }
                     }
                     item { Text("Что видно в снимке", style = MaterialTheme.typography.titleLarge) }
-                    items(snapshot?.findings.orEmpty(), key = { it.code + it.evidence.joinToString() }) { finding ->
+                    items(snapshot?.findings.orEmpty(), key = { it.code }) { original ->
+                        val finding = snapshot?.let { ObservationFindingGuide.explain(it, original) } ?: original
                         val expanded = expandedFinding == finding.code
-                        OutlinedCard(Modifier.fillMaxWidth().animateContentSize(motionTween(reduceMotion, 220))
-                            .semantics { stateDescription = if (expanded) "Основания раскрыты" else "Основания скрыты" }
-                            .clickable { expandedFinding = if (expanded) null else finding.code }) {
-                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(when (finding.kind) { FindingKind.FACT -> "Факт"; FindingKind.POTENTIAL_CONFLICT -> "Возможный конфликт"; FindingKind.INSUFFICIENT_DATA -> "Не хватает данных" },
-                                    style = MaterialTheme.typography.labelMedium, color = if (finding.kind == FindingKind.POTENTIAL_CONFLICT) Amber else MaterialTheme.colorScheme.primary)
-                                Text(finding.title, style = MaterialTheme.typography.titleMedium)
-                                Text(finding.explanation, style = MaterialTheme.typography.bodySmall)
-                                Text(if (expanded) "Скрыть основания ↑" else "Показать основания ↓", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+                        OutlinedCard(Modifier.fillMaxWidth().animateContentSize(motionTween(reduceMotion, 220))) {
+                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button) { expandedFinding = if (expanded) null else finding.code }
+                                    .semantics { stateDescription = if (expanded) "Разбор раскрыт" else "Разобраться в наблюдении" },
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(if (finding.kind == FindingKind.POTENTIAL_CONFLICT) LerNetSymbols.help() else LerNetSymbols.route(), null,
+                                        tint = if (finding.kind == FindingKind.POTENTIAL_CONFLICT) Amber else MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(when (finding.kind) { FindingKind.FACT -> "Факт"; FindingKind.POTENTIAL_CONFLICT -> "Стоит проверить"; FindingKind.INSUFFICIENT_DATA -> "Пробелы данных" },
+                                            style = MaterialTheme.typography.labelMedium, color = if (finding.kind == FindingKind.POTENTIAL_CONFLICT) Amber else MaterialTheme.colorScheme.primary)
+                                        Text(finding.title, style = MaterialTheme.typography.titleMedium)
+                                    }
+                                    Text(if (expanded) "↑" else "↓", color = MaterialTheme.colorScheme.primary)
+                                }
+                                Text(finding.explanation, style = MaterialTheme.typography.bodyMedium)
                                 AnimatedVisibility(expanded, enter = androidx.compose.animation.fadeIn(motionTween(reduceMotion, 160)), exit = androidx.compose.animation.fadeOut(motionTween(reduceMotion, 100))) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Text("Источники: ${finding.sourceIds.map { id -> sources.firstOrNull { it.id == id }?.title ?: id }.joinToString()}", style = MaterialTheme.typography.bodySmall)
-                                        finding.evidence.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                        MobileReadingBlock("Как мы это определили", finding.reason)
+                                        MobileReadingBlock("На что это может повлиять", finding.impact)
+                                        MobileReadingBlock("Что проверить дальше", finding.nextSteps.mapIndexed { i, step -> "${i + 1}. $step" }.joinToString("\n\n"))
+                                        MobileFindingObjects(finding)
+                                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            finding.sourceIds.forEach { id -> TextButton(onClick = { selectedSource = id; selectTab(1) }) {
+                                                Text(sources.firstOrNull { it.id == id }?.title ?: id)
+                                            } }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+
                 }
                 1 -> {
                     item {
@@ -184,7 +209,7 @@ internal fun NetworkObservationScreen(
                         }
                         OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("Найти в выбранном источнике") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                     }
-                    detail?.let { source -> item { SourcePanel(source, reduceMotion, query) } }
+                    detail?.let { source -> item { SourcePanel(source, reduceMotion, query, snapshot) } }
                 }
                 2 -> {
                     item {
@@ -198,6 +223,8 @@ internal fun NetworkObservationScreen(
                         OutlinedCard(Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(change.title, style = MaterialTheme.typography.titleMedium)
+                                MobileReadingBlock("Что описывает источник", ObservationGuide.source(change.sourceId, "Android").meaning)
+                                MobileReadingBlock("Как понимать изменение", "Сравниваем два снимка. Изменение настройки или доступности данных не показывает, кто его сделал и работает ли соединение.")
                                 SelectionContainer { Column { Text("Было · ${change.before}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Spacer(Modifier.height(8.dp)); Text("Стало · ${change.after}", style = MaterialTheme.typography.bodySmall, color = Mint) } }
                             }
@@ -246,28 +273,90 @@ private fun PathConnector() {
 }
 
 @Composable
-private fun SourcePanel(source: ObservationSource, reduceMotion: Boolean, query: String = "") {
+private fun SourcePanel(source: ObservationSource, reduceMotion: Boolean, query: String = "", snapshot: NetworkSnapshot? = null) {
     val rows = remember(source, query) { source.rows.filter { row -> query.isBlank() || "${row.title} ${row.fields}".contains(query, ignoreCase = true) } }
+    var count by remember(source.id, query) { mutableStateOf(8) }
+    var help by remember(source.id) { mutableStateOf(false) }
+    val guide = ObservationGuide.source(source.id, "Android")
     Column(Modifier.fillMaxWidth().animateContentSize(motionTween(reduceMotion, 220)), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(source.title, style = MaterialTheme.typography.titleLarge)
-        Text(source.explanation, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(guide.meaning, style = MaterialTheme.typography.bodyMedium)
         Text("${sourceStateLabel(source.state)}${if (!source.complete) " · неполные данные" else ""} · ${time(source.capturedAt)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-        if (source.detail.isNotBlank()) Text(source.detail, style = MaterialTheme.typography.bodySmall)
+        MobileReadingBlock("Результат чтения", ObservationGuide.availability(source))
+        if (source.detail.isNotBlank()) MobileReadingBlock("Причина, указанная источником", source.detail)
+        TextButton(onClick = { help = !help }) { Text(if (help) "Скрыть инструкцию ↑" else "Как читать эти данные ↓") }
+        AnimatedVisibility(help, enter = androidx.compose.animation.fadeIn(motionTween(reduceMotion, 160)), exit = androidx.compose.animation.fadeOut(motionTween(reduceMotion, 100))) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                MobileReadingBlock("На что смотрим", guide.inspect)
+                MobileReadingBlock("Когда стоит проверить", guide.attention)
+                MobileReadingBlock("Чего данные не доказывают", guide.limits)
+            }
+        }
         if (rows.isEmpty()) Text(if (query.isNotBlank()) "Ничего не найдено по этому запросу." else if (source.state == SourceState.EMPTY) "Android не передал записей в доступной области." else "Нет доступных записей.",
             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        rows.forEach { row ->
-            OutlinedCard(Modifier.fillMaxWidth()) {
-                SelectionContainer {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(row.title, style = MaterialTheme.typography.titleMedium)
-                        row.fields.forEach { (label, value) ->
-                            Column { Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(value, style = MaterialTheme.typography.bodyMedium) }
+        rows.take(count).forEach { row -> MobileEvidenceRow(row, source.id, snapshot, reduceMotion) }
+        if (rows.size > count) TextButton(onClick = { count += 8 }) { Text("Показать ещё ${minOf(8, rows.size - count)} записей") }
+    }
+}
+
+@Composable
+private fun MobileEvidenceRow(row: EvidenceRow, sourceId: String, snapshot: NetworkSnapshot?, reduceMotion: Boolean) {
+    var expanded by remember(row.id) { mutableStateOf(false) }
+    var fields by remember(row.id) { mutableStateOf(false) }
+    val guide = ObservationGuide.row(sourceId, row, snapshot)
+    OutlinedCard(Modifier.fillMaxWidth().animateContentSize(motionTween(reduceMotion, 180))) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button) { expanded = !expanded }
+                .semantics { stateDescription = if (expanded) "Запись раскрыта" else "Показать пояснение записи" }, verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(row.title, style = MaterialTheme.typography.titleMedium)
+                    if (guide.summary != row.title) Text(guide.summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(if (expanded) "↑" else "↓", color = MaterialTheme.colorScheme.primary)
+            }
+            if (expanded) {
+                MobileReadingBlock("Что означает эта запись", guide.interpretation)
+                TextButton(onClick = { fields = !fields }) { Text(if (fields) "Скрыть поля ↑" else "Поля и их смысл · ${row.fields.size} ↓") }
+                if (fields) row.fields.forEach { (key, value) ->
+                    val field = ObservationGuide.field(key)
+                    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.medium) {
+                        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(field.label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                            SelectionContainer { Text(ObservationGuide.fieldValue(key, value), style = MaterialTheme.typography.bodyLarge) }
+                            Text(field.meaning, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            SelectionContainer { Text("Поле ОС: $key${if (ObservationGuide.fieldValue(key, value) != value) " · исходное: $value" else ""}", style = MaterialTheme.typography.labelSmall) }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MobileReadingBlock(title: String, text: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        Text(text, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
+private fun MobileFindingObjects(finding: NetworkFinding) {
+    var count by remember(finding.code) { mutableStateOf(3) }
+    if (finding.relatedItems.isNotEmpty()) {
+        finding.relatedItems.take(count).forEach { row ->
+            Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.medium) {
+                SelectionContainer { Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text(row.title, style = MaterialTheme.typography.titleSmall)
+                    row.fields.forEach { (key, value) -> MobileReadingBlock(key, value) }
+                } }
+            }
+        }
+        if (count < finding.relatedItems.size) TextButton(onClick = { count += 6 }) { Text("Ещё объекты") }
+    } else {
+        finding.evidence.take(count).forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+        if (count < finding.evidence.size) TextButton(onClick = { count += 6 }) { Text("Ещё основания") }
     }
 }
 

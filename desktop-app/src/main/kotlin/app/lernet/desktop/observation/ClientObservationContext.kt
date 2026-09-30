@@ -39,5 +39,6 @@ internal fun withClientContext(snapshot: NetworkSnapshot, context: ClientObserva
             }
         }
     }
-    return snapshot.copy(sources = snapshot.sources + source, findings = snapshot.findings + additional)
+    val withContext = snapshot.copy(sources = snapshot.sources + source)
+    return withContext.copy(findings = (snapshot.findings + additional).map { ObservationFindingGuide.explain(withContext, it) })
 }
