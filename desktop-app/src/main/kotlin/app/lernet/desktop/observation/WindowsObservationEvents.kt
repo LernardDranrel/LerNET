@@ -42,8 +42,8 @@ internal class WindowsObservationEvents(
         }
         if (result.timedOut) return ObservationSource(id, title, explanation, SourceState.TIMEOUT,
             detail = "Чтение журнала заняло больше 35 секунд.", capturedAt = now)
-        if (result.exitCode != 0) return ObservationSource(id, title, explanation, SourceState.ERROR,
-            detail = "Windows не вернула журнал (код ${result.exitCode ?: "неизвестен"}).", capturedAt = now)
+        observationOutputProblem(result)?.let { return ObservationSource(id, title, explanation, SourceState.ERROR,
+            detail = it, capturedAt = now, complete = false) }
         return parse(result.output, id, title, explanation, now)
     }
 
@@ -73,9 +73,9 @@ internal class WindowsObservationEvents(
             val channelRows = statuses.map { channel -> EvidenceRow("channel:${channel.string("name")}", channel.string("name"),
                 mapOf("Статус источника" to channel.string("state"), "Описание" to channel.string("detail"))) }
             ObservationSource(id, title, explanation, status, rows + channelRows, detail, now, complete = complete)
-        } catch (_: Exception) {
+        } catch (error: Exception) {
             ObservationSource(id, title, explanation, SourceState.ERROR,
-                detail = "Windows вернула журнал в неожиданном формате.", capturedAt = now)
+                detail = observationJsonProblem(error), capturedAt = now, complete = false)
         }
     }
 
@@ -86,6 +86,8 @@ internal class WindowsObservationEvents(
         private val COMMON_SCRIPT = """
             [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
             ${'$'}ErrorActionPreference = 'Stop'
+            ${'$'}ProgressPreference = 'SilentlyContinue'
+            ${'$'}WarningPreference = 'SilentlyContinue'
             ${'$'}rows = [Collections.Generic.List[object]]::new()
             ${'$'}channels = [Collections.Generic.List[object]]::new()
             ${'$'}allowFields = @('ProcessId','ProcessID','Application','SourceAddress','SourcePort','DestAddress','DestPort',
@@ -110,6 +112,16 @@ internal class WindowsObservationEvents(
             function Failure-State(${ '$' }errorRecord) {
                 if (${ '$' }errorRecord.Exception -is [UnauthorizedAccessException] -or ${ '$' }errorRecord.FullyQualifiedErrorId -match 'Unauthorized|AccessDenied') { return 'ACCESS_DENIED' }
                 return 'ERROR'
+            }
+            function Failure-Detail(${ '$' }errorRecord) {
+                # Exception text can embed full event/XML data. Keep stable failure identifiers instead.
+                ${'$'}failure = ${'$'}errorRecord.Exception
+                while (${ '$' }failure.InnerException) { ${ '$' }failure = ${ '$' }failure.InnerException }
+                ${'$'}type = ${'$'}failure.GetType().FullName
+                ${'$'}code = [string]${'$'}errorRecord.FullyQualifiedErrorId
+                # Throw can put arbitrary exception text into FullyQualifiedErrorId too.
+                if (${ '$' }code -notmatch '^(NoMatchingEventsFound|NoMatchingLogsFound|System\.[A-Za-z0-9_.]+|MethodInvocationException|Parameter[A-Za-z]+|UnauthorizedAccessException|AccessDenied)(,[A-Za-z0-9_.]+)?${ '$' }') { ${ '$' }code = 'UnclassifiedFailure' }
+                return (${ '$' }type + '; ' + ${ '$' }code + '; HRESULT=' + ${ '$' }failure.HResult)
             }
         """.trimIndent()
 
@@ -145,10 +157,10 @@ internal class WindowsObservationEvents(
                 } catch {
                     ${'$'}state = Failure-State ${'$'}_
                     if (${ '$' }_.FullyQualifiedErrorId -match 'NoMatchingLogsFound') { ${ '$' }state = 'UNSUPPORTED' }
-                    ${'$'}channels.Add(@{name=${'$'}spec.name;state=${'$'}state;detail=$(if(${ '$' }state -eq 'ACCESS_DENIED'){'Не хватает прав для чтения.'}elseif(${ '$' }state -eq 'UNSUPPORTED'){'Журнал отсутствует.'}else{'Windows не предоставила журнал.'})})
+                    ${'$'}channels.Add(@{name=${'$'}spec.name;state=${'$'}state;detail=($(if(${ '$' }state -eq 'ACCESS_DENIED'){'Не хватает прав для чтения.'}elseif(${ '$' }state -eq 'UNSUPPORTED'){'Журнал отсутствует.'}else{'Windows не предоставила журнал.'}) + ' ' + (Failure-Detail ${ '$' }_));complete=${ '$' }false})
                 }
             }
-            [ordered]@{channels=@(${ '$' }channels); rows=@(${ '$' }rows | Sort-Object { ${ '$' }_.fields['Время UTC'] } -Descending | Select-Object -First 250)} | ConvertTo-Json -Depth 8 -Compress
+            [ordered]@{channels=${ '$' }channels.ToArray(); rows=@(${ '$' }rows.ToArray() | Sort-Object { ${ '$' }_.fields['Время UTC'] } -Descending | Select-Object -First 250)} | ConvertTo-Json -Depth 8 -Compress
         """.trimIndent()
 
         private val TRACE_SCRIPT = """
@@ -159,9 +171,9 @@ internal class WindowsObservationEvents(
             } catch {
                 ${'$'}state = Failure-State ${'$'}_
                 if (${ '$' }_.FullyQualifiedErrorId -match 'NoMatchingEventsFound') { ${ '$' }state = 'EMPTY' }
-                ${'$'}channels.Add(@{name='ETL TCP/IP';state=${'$'}state;detail='Windows не декодировала события; исходный ETL сохранён.'})
+                ${'$'}channels.Add(@{name='ETL TCP/IP';state=${'$'}state;detail=('Windows не декодировала события; исходный ETL сохранён. ' + (Failure-Detail ${ '$' }_));complete=(${ '$' }state -eq 'EMPTY')})
             }
-            [ordered]@{channels=@(${ '$' }channels);rows=@(${ '$' }rows)} | ConvertTo-Json -Depth 8 -Compress
+            [ordered]@{channels=${ '$' }channels.ToArray();rows=${ '$' }rows.ToArray()} | ConvertTo-Json -Depth 8 -Compress
         """.trimIndent()
     }
 }

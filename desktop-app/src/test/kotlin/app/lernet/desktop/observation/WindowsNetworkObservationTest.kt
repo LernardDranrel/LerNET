@@ -23,6 +23,19 @@ class WindowsNetworkObservationTest {
         assertThat(source.rows.single().fields["Virtual"]).isEqualTo("false")
     }
 
+    @Test fun brokenOrClippedJsonIsExplicitFailureWithoutPrivateBody() {
+        val clipped = WindowsNetworkObservation.parseSource(definition,
+            ObservationCommandResult(0, "{}", outputTruncated = true))
+        assertThat(clipped.state).isEqualTo(SourceState.ERROR)
+        assertThat(clipped.complete).isFalse()
+        assertThat(clipped.detail).contains("4 МБ")
+        val malformed = WindowsNetworkObservation.parseSource(definition,
+            ObservationCommandResult(0, "{\"private\":\"fixture-private-marker"))
+        assertThat(malformed.state).isEqualTo(SourceState.ERROR)
+        assertThat(malformed.detail).contains("JSON")
+        assertThat(malformed.detail).doesNotContain("fixture-private-marker")
+    }
+
     @Test fun timeoutAndDeniedAreDistinctFromEmpty() {
         assertThat(WindowsNetworkObservation.parseSource(definition, ObservationCommandResult(null, "", true)).state).isEqualTo(SourceState.TIMEOUT)
         assertThat(WindowsNetworkObservation.parseSource(definition, ObservationCommandResult(0,

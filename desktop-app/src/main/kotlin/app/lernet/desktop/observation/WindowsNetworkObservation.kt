@@ -22,7 +22,9 @@ internal class WindowsNetworkObservation(private val runner: ObservationCommandR
         val wfpPath = Files.createTempFile("lernet-wfp-state-", ".xml")
         val pool = Executors.newFixedThreadPool(4) { runnable -> Thread(runnable, "LerNET-observation-source").apply { isDaemon = true } }
         try {
-            Files.write(scriptPath, script)
+            // Windows PowerShell 5.1 reads -File without a BOM using the legacy ANSI code page.
+            val utf8Bom = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte())
+            Files.write(scriptPath, if (script.take(3) == utf8Bom.toList()) script else utf8Bom + script)
             val futures = definitions.map { definition ->
                 pool.submit<ObservationSource> {
                     runCatching {
@@ -99,8 +101,9 @@ internal class WindowsNetworkObservation(private val runner: ObservationCommandR
 
         internal fun parseSource(definition: WindowsObservationDefinition, result: ObservationCommandResult): ObservationSource {
             if (result.timedOut) return source(definition, SourceState.TIMEOUT, detail = "Чтение превысило 15 секунд")
-            if (result.exitCode != 0) return source(definition, SourceState.ERROR, detail = result.output.take(1200).ifBlank { "Код завершения ${result.exitCode}" })
-            val value = Json.parseToJsonElement(result.output).jsonObject
+            observationOutputProblem(result)?.let { return source(definition, SourceState.ERROR, detail = it).copy(complete = false) }
+            val value = try { Json.parseToJsonElement(result.output.trim().removePrefix("\uFEFF")).jsonObject }
+            catch (error: Exception) { return source(definition, SourceState.ERROR, detail = observationJsonProblem(error)).copy(complete = false) }
             val state = runCatching { SourceState.valueOf(value["state"]?.jsonPrimitive?.content ?: "ERROR") }.getOrDefault(SourceState.ERROR)
             val rows = (value["rows"] as? JsonArray).orEmpty().mapIndexed { index, item ->
                 val fields = item.jsonObject.mapValues { (_, field) -> when (field) {

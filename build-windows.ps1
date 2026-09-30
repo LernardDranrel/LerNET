@@ -7,9 +7,9 @@ $versionLine = Get-Content -LiteralPath (Join-Path $root 'gradle.properties') |
 if (-not $versionLine) { throw 'lernetVersion is missing from gradle.properties' }
 $appVersion = $versionLine.Substring('lernetVersion='.Length).Trim()
 $tasks = if ($PackageOnly) {
-    @(':desktop-app:createDistributable', ':desktop-app:packageExe', '--offline', '--no-daemon')
+    @(':desktop-app:createDistributable', '--offline', '--no-daemon')
 } else {
-    @(':desktop-app:test', ':desktop-app:createDistributable', ':desktop-app:packageExe', '--no-daemon')
+    @(':desktop-app:test', ':desktop-app:createDistributable', '--no-daemon')
 }
 & (Join-Path $root 'build-local.ps1') @tasks
 if ($LASTEXITCODE -ne 0) { throw "Windows build failed: $LASTEXITCODE" }
@@ -24,9 +24,13 @@ Copy-Item -LiteralPath (Join-Path $root 'packaging\windows\README-Windows.txt') 
 if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
 Compress-Archive -LiteralPath $image -DestinationPath $archive -CompressionLevel Optimal
 
-$installerCandidates = @(Get-ChildItem -LiteralPath (Join-Path $root 'desktop-app\build\compose\binaries\main\exe') -Filter '*.exe' -File)
-if ($installerCandidates.Count -ne 1) { throw "Expected one Windows installer; found $($installerCandidates.Count)" }
-Copy-Item -LiteralPath $installerCandidates[0].FullName -Destination $installer -Force
+$compilerCandidates = @($env:LERNET_ISCC,
+    (Join-Path $root 'agent-tools\inno\compiler\ISCC.exe'),
+    (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'))
+$compiler = $compilerCandidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+if (-not $compiler) { throw 'Install Inno Setup 6.7.3 or set LERNET_ISCC to ISCC.exe. See packaging/windows/README.md' }
+& $compiler "/DAppVersion=$appVersion" "/DImageDir=$image" "/DOutputDir=$artifactDirectory" (Join-Path $root 'packaging\windows\LerNET.iss')
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $installer)) { throw 'Inno Setup compilation failed' }
 if (-not $PackageOnly) {
     & (Join-Path $root 'smoke-test-windows.ps1') -Archive $archive
     if ($LASTEXITCODE -ne 0) { throw "Windows smoke test failed: $LASTEXITCODE" }

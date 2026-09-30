@@ -134,6 +134,7 @@ private fun SettingsColumn(
             Text(stringResource(R.string.log_redact_hint), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         DebugPipeCard(onIntent)
+        UpdatesCard()
         AboutCard(state, snackbar)
     }
 }

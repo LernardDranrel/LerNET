@@ -82,6 +82,7 @@ private data class ExportRequest(val groupId: String?, val fileName: String)
 
 @Composable
 fun LerNetAppRoot() {
+    app.lernet.ui.settings.AndroidUpdatePrompt()
     val navController = rememberNavController()
     val homeViewModel: HomeViewModel = hiltViewModel()
     val homeState by homeViewModel.state.collectAsStateWithLifecycle()

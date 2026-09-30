@@ -129,6 +129,20 @@ fun main(args: Array<String>) {
 
 private fun desktopApplication(startupCheck: String?, startupFallbackMessage: String?) = application {
     val controller = remember { DesktopController().also { startupFallbackMessage?.let(it::showMessage) } }
+    DisposableEffect(controller) {
+        val closed = java.util.concurrent.atomic.AtomicBoolean(false)
+        val closeController = { if (closed.compareAndSet(false, true)) controller.close() }
+        val hook = Thread({ closeController() }, "LerNET-shutdown")
+        Runtime.getRuntime().addShutdownHook(hook)
+        val listener = if (startupCheck == null) WindowsUpdateShutdown.listen {
+            javax.swing.SwingUtilities.invokeLater { closeController(); exitApplication() }
+        } else null
+        onDispose {
+            listener?.close()
+            runCatching { Runtime.getRuntime().removeShutdownHook(hook) }
+            closeController()
+        }
+    }
     var visible by remember { mutableStateOf(true) }
     var networkWindowOpen by remember { mutableStateOf(false) }
     val windowState = rememberWindowState(size = DpSize(1180.dp, 760.dp))
@@ -180,6 +194,7 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
         MaterialTheme(colorScheme = desktopColors, typography = desktopTypography,
             shapes = Shapes(small = RoundedCornerShape(10.dp), medium = RoundedCornerShape(14.dp), large = RoundedCornerShape(18.dp))) {
             Surface(color = background, contentColor = desktopColors.onBackground) {
+                if (startupCheck == null) DesktopUpdatePrompt()
                 DesktopScreen(controller, onOpenNetwork = { networkWindowOpen = true }, onRequestElevation = {
                     WindowsElevation.relaunchAsAdministrator()
                         .onSuccess { controller.close(); exitApplication() }
@@ -1395,6 +1410,7 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
         directDns.trim() != saved.directDnsServer || dnsPolicy != saved.defaultDnsPolicy || logLevel != saved.logLevel
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Panel { DesktopUpdateCard() }
         Panel {
             SettingHeading("ЗАПУСК", "Режим по умолчанию",
                 "VPN направляет трафик устройства через туннель. Прокси работает только для приложений, настроенных на 127.0.0.1:2080.")

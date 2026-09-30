@@ -23,6 +23,59 @@ function Rows($items) {
         $_
     })
 }
+function Xml-Field($node, [string]$name) {
+    $child = $node.SelectSingleNode("*[local-name()='$name']")
+    if ($null -eq $child) { return '' }
+    $value = $child.InnerText
+    if ($value.Length -gt 4096) { $script:wfpPartial = $true; return $value.Substring(0,4096) }
+    return $value
+}
+# Pure file parser: the XML declaration/BOM decides encoding, not the console code page.
+function Read-WfpState([string]$file) {
+    $script:wfpPartial = $false
+    if ((Get-Item -LiteralPath $file).Length -gt 32MB) { throw 'WFP state exceeds the 32 MB inspection limit' }
+    $settings = [System.Xml.XmlReaderSettings]::new()
+    $settings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+    $settings.XmlResolver = $null
+    $settings.MaxCharactersInDocument = 32MB
+    $reader = [System.Xml.XmlReader]::Create($file, $settings)
+    try {
+        $document = [System.Xml.XmlDocument]::new()
+        $document.XmlResolver = $null
+        $document.Load($reader)
+        if ($null -eq $document.SelectSingleNode("//*[local-name()='filters']")) { throw 'WFP XML has no filters collection' }
+        $providers = @{}
+        foreach ($provider in $document.SelectNodes("//*[local-name()='providers']/*[local-name()='item']")) {
+            $display = $provider.SelectSingleNode("*[local-name()='displayData']")
+            $providers[(Xml-Field $provider 'providerKey')] = $(if ($display) { Xml-Field $display 'name' } else { '' })
+        }
+        Rows ($document.SelectNodes("//*[local-name()='filters']/*[local-name()='item']") | Select-Object -First 1000 | ForEach-Object {
+            $filter = $_
+            $display = $filter.SelectSingleNode("*[local-name()='displayData']")
+            $action = $filter.SelectSingleNode("*[local-name()='action']")
+            $key = Xml-Field $filter 'providerKey'
+            if ($filter.SelectNodes("*[local-name()='filterCondition']/*[local-name()='item']").Count -gt 32) { $script:wfpPartial = $true }
+            @{FilterId=(Xml-Field $filter 'filterId');FilterKey=(Xml-Field $filter 'filterKey');
+              Name=$(if ($display) { Xml-Field $display 'name' } else { '' });ProviderKey=$key;ProviderName=$providers[$key];
+              Layer=(Xml-Field $filter 'layerKey');SubLayer=(Xml-Field $filter 'subLayerKey');Weight=(Xml-Field $filter 'weight');
+              Action=$(if ($action) { Xml-Field $action 'type' } else { '' });Callout=$(if ($action) { Xml-Field $action 'calloutKey' } else { '' });
+              Conditions=@($filter.SelectNodes("*[local-name()='filterCondition']/*[local-name()='item']") | Select-Object -First 32 | ForEach-Object {
+                  "$(Xml-Field $_ 'fieldKey') $(Xml-Field $_ 'matchType') $(Xml-Field $_ 'conditionValue')"
+              })}
+        })
+    } finally { $reader.Dispose() }
+}
+function Read-FailureDetail($record) {
+    $failure = $record.Exception
+    while ($failure.InnerException) { $failure = $failure.InnerException }
+    $code = [string]$record.FullyQualifiedErrorId
+    if ($code -notmatch '^(System\.[A-Za-z0-9_.]+|MethodInvocationException|InvalidCastToXml|Parameter[A-Za-z]+|UnauthorizedAccessException|AccessDenied)(,[A-Za-z0-9_.]+)?$') { $code = 'UnclassifiedFailure' }
+    $detail = $failure.GetType().FullName + '; HRESULT=' + $failure.HResult + '; ' + $code
+    if ($failure -is [System.Xml.XmlException]) { $detail += '; line=' + $failure.LineNumber + '; position=' + $failure.LinePosition }
+    if ($detail.Length -gt 1024) { $detail = $detail.Substring(0,1024) }
+    return $detail
+}
+# Collect allowlisted sources only. Tests load the pure functions above without running this section.
 try {
     $partialDetail = ''
     $data = switch ($Source) {
@@ -103,13 +156,8 @@ try {
             try {
                 $text = & "$env:SystemRoot\System32\netsh.exe" wfp show state "file=$file"
                 if ($LASTEXITCODE -ne 0) { throw "WFP state exit $LASTEXITCODE (requires read permission)" }
-                if ((Get-Item -LiteralPath $file).Length -gt 32MB) { throw 'WFP state exceeds the 32 MB inspection limit' }
-                [xml]$state = Get-Content -LiteralPath $file -Raw
-                $providers=@{}
-                foreach($p in $state.SelectNodes('//providers/item')) { $providers[[string]$p.providerKey]=[string]$p.displayData.name }
-                Rows ($state.SelectNodes('//filters/item') | ForEach-Object {
-                    @{FilterId=[string]$_.filterId;FilterKey=[string]$_.filterKey;Name=[string]$_.displayData.name;ProviderKey=[string]$_.providerKey;ProviderName=$providers[[string]$_.providerKey];Layer=[string]$_.layerKey;SubLayer=[string]$_.subLayerKey;Action=[string]$_.action.type;Callout=[string]$_.action.calloutKey;Weight=[string]$_.weight;Conditions=@($_.filterCondition.item | ForEach-Object {"$($_.fieldKey) $($_.matchType) $($_.conditionValue.InnerText)"})}
-                })
+                Read-WfpState $file
+                if ($script:wfpPartial) { $partialDetail = 'WFP: часть длинных полей или условий сокращена; выборка неполная.' }
             } finally { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }
         }
         default { throw 'Unknown allowlisted source' }
@@ -120,5 +168,7 @@ try {
     $state='ERROR'
     if($_.Exception -is [System.UnauthorizedAccessException] -or $_.CategoryInfo.Category -eq 'PermissionDenied') {$state='ACCESS_DENIED'}
     elseif($_.CategoryInfo.Category -eq 'ObjectNotFound' -or $_.Exception -is [System.Management.Automation.CommandNotFoundException]) {$state='UNSUPPORTED'}
-    @{id=$Source;state=$state;rows=@();detail=$_.Exception.Message} | ConvertTo-Json -Depth 4 -Compress
+    # Conversion exceptions used to include the entire WFP XML, exceeding the JSON output limit.
+    $detail = Read-FailureDetail $_
+    @{id=$Source;state=$state;rows=@();detail=$detail;complete=$false} | ConvertTo-Json -Depth 4 -Compress
 }

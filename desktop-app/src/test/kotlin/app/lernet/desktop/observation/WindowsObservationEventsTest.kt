@@ -39,6 +39,17 @@ class WindowsObservationEventsTest {
         assertThat(timeout.read().state).isEqualTo(SourceState.TIMEOUT)
         val malformed = WindowsObservationEvents(ObservationCommandRunner { _, _ -> ObservationCommandResult(0, "not JSON") })
         assertThat(malformed.read().state).isEqualTo(SourceState.ERROR)
+        assertThat(malformed.read().detail).contains("JSON")
+    }
+
+    @Test fun `truncated and malformed responses explain failure without copying private payload`() {
+        val reader = WindowsObservationEvents(ObservationCommandRunner { _, _ -> ObservationCommandResult(0, "{}", outputTruncated = true) })
+        assertThat(reader.read().detail).contains("4 МБ")
+        assertThat(reader.read().complete).isFalse()
+        val malformed = WindowsObservationEvents().parse("""{"channels":[],"rows":["fixture-private-marker"""")
+        assertThat(malformed.detail).contains("JSON")
+        assertThat(malformed.detail).doesNotContain("fixture-private-marker")
+        assertThat(malformed.complete).isFalse()
     }
 
     @Test fun `journal command never enables auditing or collects arbitrary messages`() {
