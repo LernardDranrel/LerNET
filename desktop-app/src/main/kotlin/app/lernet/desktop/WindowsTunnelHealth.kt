@@ -1,10 +1,13 @@
 package app.lernet.desktop
 
 import app.lernet.engine.RunMode
+import app.lernet.engine.compile.ConfigAssembler
 import com.sun.jna.Memory
 import com.sun.jna.Native
 import com.sun.jna.Pointer
 import com.sun.jna.ptr.IntByReference
+import com.sun.jna.ptr.LongByReference
+import com.sun.jna.platform.win32.BaseTSD.SIZE_T
 import com.sun.jna.win32.StdCallLibrary
 import java.net.HttpURLConnection
 import java.net.Inet4Address
@@ -25,6 +28,8 @@ internal data class TunnelHealthResult(
 internal object WindowsRouteInspector {
     private interface IpHelper : StdCallLibrary {
         fun GetBestInterfaceEx(destination: Pointer, interfaceIndex: IntByReference): Int
+        fun ConvertInterfaceIndexToLuid(interfaceIndex: Int, luid: LongByReference): Int
+        fun ConvertInterfaceLuidToAlias(luid: LongByReference, alias: Pointer, length: SIZE_T): Int
     }
 
     private val api: IpHelper by lazy { Native.load("iphlpapi", IpHelper::class.java) }
@@ -33,17 +38,37 @@ internal object WindowsRouteInspector {
         val host = URI(url).host ?: error("У адреса проверки нет имени сервера")
         val destinations = InetAddress.getAllByName(host)
         check(destinations.isNotEmpty()) { "Не удалось определить адрес сервера проверки" }
-        destinations.firstNotNullOfOrNull { address ->
-            val index = bestInterface(address)
-            val network = NetworkInterface.getByIndex(index)
-            if (network != null && isLerNetInterface(network.name, network.displayName)) null
-            else "Маршрут Windows к ${address.hostAddress} идёт через «${network?.displayName ?: "интерфейс $index"}», не через LerNET"
-        }
+        inspectRoutes(destinations.toList(), ::bestInterface, ::interfaceAlias)
     }.getOrElse { "Не удалось подтвердить маршрут Windows через LerNET: ${it.message ?: it.javaClass.simpleName}" }
 
-    internal fun isLerNetInterface(name: String?, displayName: String?): Boolean =
-        listOfNotNull(name, displayName).any { it.equals("LerNET", ignoreCase = true) ||
-            it.startsWith("LerNET ", ignoreCase = true) }
+    internal fun inspectRoutes(
+        destinations: List<InetAddress>,
+        indexFor: (InetAddress) -> Int,
+        aliasFor: (Int) -> String,
+    ): String? = destinations.firstNotNullOfOrNull { address ->
+        val alias = aliasFor(indexFor(address))
+        check(alias.isNotBlank()) { "Не удалось определить имя сетевого интерфейса" }
+        if (isLerNetInterface(alias)) null
+        else "Маршрут Windows к ${address.hostAddress} идёт через «$alias», не через LerNET"
+    }
+
+    // Java exposes the driver description (e.g. "sing-tun Tunnel"), not the
+    // Windows alias requested in our TUN configuration. Other clients can use
+    // the same driver, so its description cannot identify our interface.
+    internal fun isLerNetInterface(alias: String?): Boolean =
+        alias.equals(ConfigAssembler.WINDOWS_TUN_INTERFACE, ignoreCase = true)
+
+    internal fun interfaceAlias(index: Int): String {
+        val luid = LongByReference()
+        val luidResult = api.ConvertInterfaceIndexToLuid(index, luid)
+        check(luidResult == 0) { "ConvertInterfaceIndexToLuid($index): $luidResult" }
+        // NDIS_IF_MAX_STRING_SIZE is 256; Windows WCHAR is UTF-16.
+        val characters = 257L
+        val buffer = Memory(characters * 2).apply { clear() }
+        val aliasResult = api.ConvertInterfaceLuidToAlias(luid, buffer, SIZE_T(characters))
+        check(aliasResult == 0) { "ConvertInterfaceLuidToAlias($index): $aliasResult" }
+        return buffer.getWideString(0).also { check(it.isNotBlank()) { "Empty interface alias: $index" } }
+    }
 
     private fun bestInterface(address: InetAddress): Int {
         val family = when (address) {
@@ -93,7 +118,9 @@ internal object WindowsTunnelHealth {
     fun networkSignature(): String = NetworkInterface.getNetworkInterfaces().toList()
         .filter { iface ->
             runCatching { iface.isUp && !iface.isLoopback && !iface.isVirtual &&
-                !iface.displayName.contains("LerNET", ignoreCase = true) }.getOrDefault(false)
+                !WindowsRouteInspector.isLerNetInterface(
+                    runCatching { WindowsRouteInspector.interfaceAlias(iface.index) }.getOrNull()
+                ) }.getOrDefault(false)
         }
         .map { iface ->
             iface.name + ":" + iface.inetAddresses.toList()

@@ -82,8 +82,8 @@ class WindowsConfigTest {
         assertThat(result.latencyMs).isNull()
         assertThat(result.routeConflict).isTrue()
         assertThat(result.error).contains("другой VPN")
-        assertThat(WindowsRouteInspector.isLerNetInterface("Ethernet", "LerNET")).isTrue()
-        assertThat(WindowsRouteInspector.isLerNetInterface("Ethernet", "TampleVPN")).isFalse()
+        assertThat(WindowsRouteInspector.isLerNetInterface("LerNET")).isTrue()
+        assertThat(WindowsRouteInspector.isLerNetInterface("TampleVPN")).isFalse()
     }
 
     @Test

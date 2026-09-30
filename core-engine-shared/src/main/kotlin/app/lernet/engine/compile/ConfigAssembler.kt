@@ -33,6 +33,7 @@ object ConfigAssembler {
     const val SNIFF_TIMEOUT = "300ms"
     const val TUN_MTU = 1500
     const val TUN_ADDRESS = "172.19.0.1/30"
+    const val WINDOWS_TUN_INTERFACE = "LerNET"
     const val TUN_STACK = "gvisor"
     const val ANDROID_PROBE_PORT = 2081
     const val ANDROID_PROBE_HOST = "cp.cloudflare.com"
@@ -235,7 +236,7 @@ object ConfigAssembler {
                 put("type", "tun")
                 put("tag", "tun-in")
                 // Android supplies an existing fd; Windows needs sing-box to create the adapter.
-                if (platform == EnginePlatform.WINDOWS) put("interface_name", "LerNET")
+                if (platform == EnginePlatform.WINDOWS) put("interface_name", WINDOWS_TUN_INTERFACE)
                 put(
                     "address",
                     buildJsonArray {
