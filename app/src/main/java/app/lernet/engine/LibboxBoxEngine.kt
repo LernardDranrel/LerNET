@@ -316,14 +316,7 @@ class LibboxBoxEngine @Inject constructor(
         }
         CrashTrail.mark("after newStandaloneCommandClient")
         try {
-            CrashTrail.mark("before L7 client.connect")
-            try {
-                client.connect()
-            } catch (error: Throwable) {
-                CrashTrail.recordFailure("L7 client.connect", error)
-                throw error
-            }
-            CrashTrail.mark("after L7 client.connect")
+            // Standalone unary calls manage their own RPC connection; connect() requires a stream handler.
             return urlTestOrGet(client, tag, url, timeoutMs)
         } finally {
             CrashTrail.mark("before L7 client.disconnect")

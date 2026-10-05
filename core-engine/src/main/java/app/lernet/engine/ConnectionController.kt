@@ -650,7 +650,7 @@ class ConnectionController(
                 return@launch
             }
             if (!l7UrlTestEnabled) {
-                CrashTrail.mark("L7 URLTest skipped: gate off (standalone CommandClient.connect SIGSEGV on lx.8)")
+                CrashTrail.mark("L7 initial URLTest disabled; startup readiness uses CommandServer.ready and TCP")
                 LerNetLog.i(TAG, "L7 URLTest skipped; Connected = CommandServer.ready + TCP")
                 dispatch(PolicyEvent.OutboundReady)
                 cancelConnectTimeout()
