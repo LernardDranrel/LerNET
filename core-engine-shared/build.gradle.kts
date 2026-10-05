@@ -18,6 +18,8 @@ dependencies {
     api(project(":core-config-shared"))
     api(project(":core-routing"))
     api(libs.kotlinx.serialization.json)
+    api(libs.kotlinx.coroutines.core)
     testImplementation(libs.junit)
     testImplementation(libs.truth)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

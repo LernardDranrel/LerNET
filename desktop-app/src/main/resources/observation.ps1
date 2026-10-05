@@ -30,26 +30,54 @@ function Xml-Field($node, [string]$name) {
     if ($value.Length -gt 4096) { $script:wfpPartial = $true; return $value.Substring(0,4096) }
     return $value
 }
-# Pure file parser: the XML declaration/BOM decides encoding, not the console code page.
+# Parse complete provider/filter entries independently. A malformed later section must not
+# erase the filters already read; a partial result is explicitly marked and never proves absence.
 function Read-WfpState([string]$file) {
     $script:wfpPartial = $false
+    $script:wfpDetail = ''
     if ((Get-Item -LiteralPath $file).Length -gt 32MB) { throw 'WFP state exceeds the 32 MB inspection limit' }
     $settings = [System.Xml.XmlReaderSettings]::new()
     $settings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
     $settings.XmlResolver = $null
     $settings.MaxCharactersInDocument = 32MB
     $reader = [System.Xml.XmlReader]::Create($file, $settings)
+    $providers = @{}
+    $filters = [Collections.Generic.List[object]]::new()
+    $collection = ''
+    $collectionDepth = -1
+    $seenFilters = $false
     try {
-        $document = [System.Xml.XmlDocument]::new()
-        $document.XmlResolver = $null
-        $document.Load($reader)
-        if ($null -eq $document.SelectSingleNode("//*[local-name()='filters']")) { throw 'WFP XML has no filters collection' }
-        $providers = @{}
-        foreach ($provider in $document.SelectNodes("//*[local-name()='providers']/*[local-name()='item']")) {
-            $display = $provider.SelectSingleNode("*[local-name()='displayData']")
-            $providers[(Xml-Field $provider 'providerKey')] = $(if ($display) { Xml-Field $display 'name' } else { '' })
+        try {
+            while ($reader.Read()) {
+                if ($reader.NodeType -eq [Xml.XmlNodeType]::Element -and $reader.LocalName -in @('providers','filters')) {
+                    $collection = $reader.LocalName
+                    $collectionDepth = $reader.Depth
+                    if ($collection -eq 'filters') { $seenFilters = $true }
+                } elseif ($reader.NodeType -eq [Xml.XmlNodeType]::EndElement -and $reader.Depth -eq $collectionDepth) {
+                    $collection = ''
+                } elseif ($reader.NodeType -eq [Xml.XmlNodeType]::Element -and $reader.LocalName -eq 'item' -and $reader.Depth -eq ($collectionDepth + 1) -and $collection) {
+                    $subtree = $reader.ReadSubtree()
+                    try {
+                        $document = [Xml.XmlDocument]::new()
+                        $document.XmlResolver = $null
+                        $document.Load($subtree)
+                        $item = $document.DocumentElement
+                        if ($collection -eq 'providers') {
+                            $display = $item.SelectSingleNode("*[local-name()='displayData']")
+                            $providers[(Xml-Field $item 'providerKey')] = $(if ($display) { Xml-Field $display 'name' } else { '' })
+                        } elseif ($filters.Count -lt 1000) { $filters.Add($item) }
+                        else { $script:wfpPartial = $true }
+                    } finally { $subtree.Dispose() }
+                }
+            }
+            if (-not $seenFilters) { throw 'WFP XML has no filters collection' }
+        } catch {
+            # No complete filters: retain the failure rather than presenting an empty success.
+            if ($filters.Count -eq 0) { throw }
+            $script:wfpPartial = $true
+            $script:wfpDetail = 'WFP XML прочитан частично: ' + (Read-FailureDetail $_) + '. Сохранены только полностью прочитанные фильтры; отсутствие фильтра не доказывает, что его нет.'
         }
-        Rows ($document.SelectNodes("//*[local-name()='filters']/*[local-name()='item']") | Select-Object -First 1000 | ForEach-Object {
+        Rows ($filters | ForEach-Object {
             $filter = $_
             $display = $filter.SelectSingleNode("*[local-name()='displayData']")
             $action = $filter.SelectSingleNode("*[local-name()='action']")
@@ -71,7 +99,7 @@ function Read-FailureDetail($record) {
     $code = [string]$record.FullyQualifiedErrorId
     if ($code -notmatch '^(System\.[A-Za-z0-9_.]+|MethodInvocationException|InvalidCastToXml|Parameter[A-Za-z]+|UnauthorizedAccessException|AccessDenied)(,[A-Za-z0-9_.]+)?$') { $code = 'UnclassifiedFailure' }
     $detail = $failure.GetType().FullName + '; HRESULT=' + $failure.HResult + '; ' + $code
-    if ($failure -is [System.Xml.XmlException]) { $detail += '; line=' + $failure.LineNumber + '; position=' + $failure.LinePosition }
+    if ($failure -is [System.Xml.XmlException]) { $detail += '; line=' + $failure.LineNumber + '; position=' + $failure.LinePosition; if ($failure.Message -match '0x([0-9A-Fa-f]{1,6})') { $detail += '; character=U+' + $Matches[1].ToUpperInvariant() } }
     if ($detail.Length -gt 1024) { $detail = $detail.Substring(0,1024) }
     return $detail
 }
@@ -129,13 +157,13 @@ try {
         'compartments' { Rows (Get-NetCompartment | Select-Object CompartmentId,CompartmentDescription) }
         'firewall-profiles' { Rows (Get-NetFirewallProfile -PolicyStore ActiveStore | Select-Object Name,Enabled,DefaultInboundAction,DefaultOutboundAction,AllowLocalFirewallRules,AllowLocalIPsecRules,PolicyStoreSourceType) }
         'firewall-rules' {
-            Rows (Get-NetFirewallRule -PolicyStore ActiveStore -TracePolicyStore -Enabled True | Select-Object -First 200 | ForEach-Object {
-                $rule=$_; $app=Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $rule
-                $port=Get-NetFirewallPortFilter -AssociatedNetFirewallRule $rule
-                $addr=Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $rule
-                @{Name=$rule.Name;DisplayName=$rule.DisplayName;Direction=[string]$rule.Direction;Action=[string]$rule.Action;Profile=[string]$rule.Profile;PolicyStoreSource=$rule.PolicyStoreSource;PolicyStoreSourceType=[string]$rule.PolicyStoreSourceType;Program=$app.Program;Protocol=$port.Protocol;LocalPort=$port.LocalPort;RemotePort=$port.RemotePort;LocalAddress=$addr.LocalAddress;RemoteAddress=$addr.RemoteAddress}
-            })
+            # Read rule metadata once. Slow per-rule association queries previously discarded
+            # this entire source on timeout. Filter collections are independent sources below.
+            Rows (Get-NetFirewallRule -PolicyStore ActiveStore -TracePolicyStore -Enabled True | Sort-Object @{Expression={if ([string]$_.Action -eq 'Block') {0} else {1}}},Name | Select-Object Name,InstanceID,DisplayName,Direction,Action,Profile,PolicyStoreSource,PolicyStoreSourceType)
         }
+        'firewall-applications' { Rows (Get-NetFirewallApplicationFilter -PolicyStore ActiveStore | Select-Object InstanceID,Program,Package) }
+        'firewall-ports' { Rows (Get-NetFirewallPortFilter -PolicyStore ActiveStore | Select-Object InstanceID,Protocol,LocalPort,RemotePort) }
+        'firewall-addresses' { Rows (Get-NetFirewallAddressFilter -PolicyStore ActiveStore | Select-Object InstanceID,LocalAddress,RemoteAddress) }
         'ipsec' { Rows (Get-NetIPsecQuickModeSA | Select-Object Name,LocalEndpoint,RemoteEndpoint,LocalPort,RemotePort,IpProtocol,EncapsulationMode,Direction,FirstTransformType,FirstCipherAlgorithm,FirstIntegrityAlgorithm,SecondTransformType,SecondCipherAlgorithm,SecondIntegrityAlgorithm,TransportLayerFilterName) }
         'nat' { Rows (Get-NetNat | Select-Object Name,InternalIPInterfaceAddressPrefix,ExternalIPInterfaceAddressPrefix,Active) }
         'nat-mappings' { Rows (Get-NetNatStaticMapping | Select-Object NatName,Protocol,ExternalIPAddress,ExternalPort,InternalIPAddress,InternalPort,Active) }
@@ -157,13 +185,13 @@ try {
                 $text = & "$env:SystemRoot\System32\netsh.exe" wfp show state "file=$file"
                 if ($LASTEXITCODE -ne 0) { throw "WFP state exit $LASTEXITCODE (requires read permission)" }
                 Read-WfpState $file
-                if ($script:wfpPartial) { $partialDetail = 'WFP: часть длинных полей или условий сокращена; выборка неполная.' }
+                if ($script:wfpPartial) { $partialDetail = if ($script:wfpDetail) { $script:wfpDetail } else { 'WFP: часть фильтров, длинных полей или условий сокращена; выборка неполная.' } }
             } finally { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }
         }
         default { throw 'Unknown allowlisted source' }
     }
     $rows=@($data)
-    @{id=$Source;complete=($partialDetail -eq '' -and $rows.Count -lt 1000 -and -not($Source -eq 'firewall-rules' -and $rows.Count -ge 200));state=$(if($rows.Count -eq 0){'EMPTY'}else{'AVAILABLE'});rows=$rows;detail=$(if($partialDetail){$partialDetail}elseif($Source -eq 'firewall-rules' -and $rows.Count -ge 200){'Показаны первые 200 активных правил; отсутствие правила в этой выборке не означает, что его нет.'}elseif($rows.Count -ge 1000){'Показаны первые 1000 записей; источник может содержать больше.'}else{''})} | ConvertTo-Json -Depth 6 -Compress
+    @{id=$Source;complete=($partialDetail -eq '' -and $rows.Count -lt 1000);state=$(if($rows.Count -eq 0){'EMPTY'}else{'AVAILABLE'});rows=$rows;detail=$(if($partialDetail){$partialDetail}elseif($rows.Count -ge 1000){'Показаны первые 1000 записей; источник может содержать больше.'}else{''})} | ConvertTo-Json -Depth 6 -Compress
 } catch {
     $state='ERROR'
     if($_.Exception -is [System.UnauthorizedAccessException] -or $_.CategoryInfo.Category -eq 'PermissionDenied') {$state='ACCESS_DENIED'}

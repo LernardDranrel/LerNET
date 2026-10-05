@@ -37,6 +37,8 @@ object OutboundProbe {
 
     fun check(profile: StoredProfile, saved: StoredState, executable: Path, workDirectory: Path,
         timeoutMs: Int = 30_000): OutboundProbeResult {
+        val started = System.nanoTime()
+        var stage = "подготовка конфигурации"
         val outbound = profile.selectedOutbound ?: return OutboundProbeResult(message = "Нет выбранного сервера")
         val compiled = RouteCompiler.compile(listOf(
             RuleNode("probe-else", null, true, 0, RuleMatch(), RouteAction.PROXY),
@@ -48,7 +50,7 @@ object OutboundProbe {
             outbound = outbound,
             compiledRoute = compiled,
             mode = RunMode.PROXY,
-            logLevel = "info",
+            logLevel = "debug",
             dnsJson = profile.dnsJson,
             dnsPolicy = policy,
             defaults = EngineDefaults(saved.tunMtu, saved.xmuxConcurrency, saved.directDnsServer),
@@ -65,8 +67,10 @@ object OutboundProbe {
         val configFile = directory.resolve("probe.json")
         val logFile = directory.resolve("probe.log")
         var process: Process? = null
+        var delayFailed = false
         return try {
             Files.writeString(configFile, config)
+            stage = "запуск временного ядра"
             val running = ProcessBuilder(executable.toAbsolutePath().toString(), "run", "-c", configFile.toString())
                 .directory(directory.toFile())
                 .redirectErrorStream(true)
@@ -74,7 +78,11 @@ object OutboundProbe {
                 .start()
             process = running
             awaitReady(running, api.port, timeoutMs.coerceAtMost(5_000))
-            val latency = api.delay(assembled.proxyTag, saved.healthUrl, timeoutMs)
+            stage = "HTTP-проверка через локальный delay API ядра"
+            val remaining = (timeoutMs - TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)).toInt()
+            check(remaining > 0) { "Бюджет проверки исчерпан при запуске ядра" }
+            val latency = try { api.delay(assembled.proxyTag, saved.healthUrl, remaining) }
+                catch (error: Exception) { delayFailed = true; throw error }
             OutboundProbeResult(latencyMs = latency, message = "HTTP через выбранный узел")
         } catch (error: Exception) {
             val message = when (error) {
@@ -82,12 +90,17 @@ object OutboundProbe {
                 is java.nio.file.FileSystemException -> "Нет доступа к файлам временной проверки"
                 else -> error.message?.take(180) ?: "Узел не ответил через VPN"
             }
-            val coreLines = runCatching { Files.readAllLines(logFile).filter(String::isNotBlank).takeLast(12) }
+            val elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+            val httpDetail = if (delayFailed && error !is InterruptedException && !Thread.currentThread().isInterrupted)
+                ProbeDiagnostics.httpDetail(saved.healthUrl, inboundPort, (timeoutMs - elapsed).toInt()) else ""
+            val coreLines = runCatching { Files.readAllLines(logFile).filter(String::isNotBlank).takeLast(40) }
                 .getOrDefault(emptyList())
-                .map { it.take(500) }
+                .map(ProbeDiagnostics::clean)
             OutboundProbeResult(
-                message = message,
-                diagnostics = listOf("Временное ядро: ${error.javaClass.simpleName}; лимит $timeoutMs мс") + coreLines,
+                message = ProbeDiagnostics.clean(message),
+                diagnostics = listOf("Этап: $stage; до отказа $elapsed мс; общий лимит $timeoutMs мс",
+                    "Локальный API ядра сообщает результат проверки; его HTTP-код не является доказанным ответом проверяемого сайта.",
+                    "Причина: ${ProbeDiagnostics.cause(error)}", httpDetail).filter(String::isNotBlank) + coreLines,
             )
         } finally {
             process?.let { running ->

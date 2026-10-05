@@ -1,0 +1,26 @@
+{
+  "format": "lernet-transfer",
+  "version": 1,
+  "scope": "all",
+  "groups": [
+    {"id": "europe", "name": "Europe", "profileIds": ["de", "nl"], "autoSwap": true}
+  ],
+  "profiles": [
+    {
+      "id": "de", "name": "Germany", "source": "JSON",
+      "outbounds": [{"id": "de-out", "tag": "proxy", "type": "socks", "singBoxJson": "{\"type\":\"socks\",\"server\":\"de.example.invalid\",\"server_port\":1080}"}],
+      "selectedOutboundId": "de-out"
+    },
+    {
+      "id": "nl", "name": "Netherlands", "source": "JSON",
+      "outbounds": [{"id": "nl-out", "tag": "proxy", "type": "socks", "singBoxJson": "{\"type\":\"socks\",\"server\":\"nl.example.invalid\",\"server_port\":1080}"}],
+      "selectedOutboundId": "nl-out"
+    }
+  ],
+  "rules": [
+    {"id": "android-app", "ownerId": "grp_europe", "sortIndex": 0, "action": "PROXY", "pipeName": "Messenger", "apps": ["org.telegram.messenger"]},
+    {"id": "windows-process", "ownerId": "grp_europe", "sortIndex": 1, "action": "PROXY", "pipeName": "Messenger", "processes": ["Telegram.exe"]},
+    {"id": "otherwise", "ownerId": "grp_europe", "sortIndex": 2, "action": "PROXY"}
+  ],
+  "selectedProfileId": "de"
+}

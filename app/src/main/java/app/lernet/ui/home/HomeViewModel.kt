@@ -6,12 +6,19 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import java.util.concurrent.atomic.AtomicLong
 import app.lernet.LerNetApp
+import app.lernet.R
 import app.lernet.config.model.Group
 import app.lernet.config.model.GroupLayout
 import app.lernet.config.model.Profile
 import app.lernet.config.repo.ConfigRepository
 import app.lernet.config.repo.RuleNodeRecord
 import app.lernet.engine.ConnectionController
+import app.lernet.ui.expert.ExpertCoordinator
+import app.lernet.config.policy.PolicyWorkspace
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import app.lernet.engine.ConnectionSnapshot
 import app.lernet.engine.ConnectionState
 import app.lernet.engine.RunMode
@@ -149,6 +156,7 @@ class HomeViewModel @Inject constructor(
     private val repository: ConfigRepository,
     private val settingsStore: SettingsStore,
     private val controller: ConnectionController,
+    private val expertCoordinator: ExpertCoordinator,
 ) : ViewModel() {
     val events = MutableSharedFlow<HomeEvent>(extraBufferCapacity = 4)
     val transferMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
@@ -157,7 +165,8 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    val raw = repository.exportTransfer(groupId, state.value.activeProfile?.id)
+                    val raw = if (groupId == null) expertCoordinator.exportArchiveRaw()
+                    else repository.exportTransfer(groupId, state.value.activeProfile?.id)
                     val stream = appContext.contentResolver.openOutputStream(uri, "wt") ?: error("Нет доступа к файлу")
                     stream.bufferedWriter(Charsets.UTF_8).use { it.write(raw) }
                 }
@@ -182,11 +191,22 @@ class HomeViewModel @Inject constructor(
                         }
                         output.toByteArray()
                     }
-                    repository.importTransfer(bytes.toString(Charsets.UTF_8), settingsStore.settings.first().defaultDnsPolicy)
+                    val raw = bytes.toString(Charsets.UTF_8)
+                    val format = runCatching { (Json.parseToJsonElement(raw) as? JsonObject)?.get("format")?.jsonPrimitive?.content }.getOrNull()
+                    if (format == PolicyWorkspace.FORMAT) {
+                        expertCoordinator.importArchive(raw)
+                        null
+                    } else {
+                        repository.importTransfer(raw, settingsStore.settings.first().defaultDnsPolicy)
+                    }
                 }
             }.onSuccess { bundle ->
-                transferMessages.emit("Добавлено папок: ${bundle.groups.size}, профилей: ${bundle.profiles.size}, правил: ${bundle.rules.size}")
-            }.onFailure { transferMessages.emit("Импорт не выполнен: ${it.message}") }
+                if (bundle == null) transferMessages.emit(appContext.getString(R.string.expert_import_saved))
+                else transferMessages.emit("Добавлено папок: ${bundle.groups.size}, профилей: ${bundle.profiles.size}, правил: ${bundle.rules.size}")
+            }.onFailure {
+                if (it is SerializationException) transferMessages.emit(appContext.getString(R.string.expert_import_invalid))
+                else transferMessages.emit("Импорт не выполнен: ${it.message}")
+            }
         }
     }
 
@@ -294,6 +314,9 @@ class HomeViewModel @Inject constructor(
     }
 
     fun onIntent(intent: HomeIntent) {
+        if (intent is HomeIntent.SetMode || intent is HomeIntent.SelectProfile || intent in setOf(
+                HomeIntent.ToggleConnect, HomeIntent.ConfirmSwitch, HomeIntent.ConfirmModeSwitch, HomeIntent.ConfirmApplyRoutes,
+            )) expertCoordinator.noteSimpleModeIntent()
         viewModelScope.launch {
             when (intent) {
                 HomeIntent.ToggleConnect -> toggleConnect()
@@ -555,6 +578,7 @@ class HomeViewModel @Inject constructor(
     }
 
     private suspend fun startEngine(profileId: String? = null) {
+        expertCoordinator.noteSimpleModeIntent()
         val request = readConnectionRequest(profileId) ?: return
         val profile = request.profile
         val settings = request.settings

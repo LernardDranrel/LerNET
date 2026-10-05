@@ -5,6 +5,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ObservationSnapshotHistoryTest {
+    @Test fun pinnedBaselineAndLogAreExportedTogetherWithoutNestedHistory() {
+        val first = snapshot(1)
+        val history = ObservationSnapshotHistory().refreshed(first).pinBaseline().refreshed(snapshot(2)).refreshed(snapshot(3))
+        assertEquals(first, history.comparisonBaseline)
+        assertEquals(snapshot(2), history.previous)
+        val report = history.exportReport(listOf("password=fixture-secret"))!!
+        assertEquals(first, report.baseline)
+        assertNull(report.baseline!!.baseline)
+        assertFalse(report.diagnosticLog.single().contains("fixture-secret"))
+        val json = kotlinx.serialization.json.Json
+        val encoded = json.encodeToString(NetworkSnapshot.serializer(), report)
+        assertEquals(report, json.decodeFromString(NetworkSnapshot.serializer(), encoded))
+    }
     private fun snapshot(time: Long) = NetworkSnapshot(id = "$time", platform = "Windows", startedAt = time)
     private fun recording(time: Long) = ObservationSource("trace-events", "Запись", "События", capturedAt = time)
 

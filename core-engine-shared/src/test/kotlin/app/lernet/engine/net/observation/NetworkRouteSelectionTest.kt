@@ -6,7 +6,7 @@ import org.junit.Test
 class NetworkRouteSelectionTest {
     @Test fun `more specific route wins even with a higher metric`() {
         val routes = listOf(route("0.0.0.0/0", "physical", 1), route("128.0.0.0/1", "vpn", 500))
-        assertThat(select(routes, "151.244.246.33").selected?.adapterId).isEqualTo("vpn")
+        assertThat(select(routes, "198.51.100.33").selected?.adapterId).isEqualTo("vpn")
         assertThat(select(routes, "8.8.8.8").selected?.adapterId).isEqualTo("physical")
     }
 

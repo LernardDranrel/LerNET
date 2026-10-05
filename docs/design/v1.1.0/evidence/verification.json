@@ -1,0 +1,841 @@
+{
+  "date": "2026-10-02",
+  "scope": "Offline HTML prototypes only. No VPN app or network configuration was exercised.",
+  "screenCount": 42,
+  "results": [
+    {
+      "platform": "windows",
+      "screen": "welcome",
+      "title": "Первое знакомство",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "permission",
+      "title": "Разрешения",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "conflict",
+      "title": "Конфликт сети",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "vpn",
+      "title": "Подключение",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "profiles",
+      "title": "Профили и папки",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "profile",
+      "title": "Профиль",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "profile-edit",
+      "title": "Редактор профиля",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "folder",
+      "title": "Папка",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "import",
+      "title": "Импорт",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "import-review",
+      "title": "Проверка импорта",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "expert",
+      "title": "Обзор управления",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "schema",
+      "title": "Схема маршрутов",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "routes-list",
+      "title": "Маршруты списком",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "rule",
+      "title": "Редактор правила",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "application-picker",
+      "title": "Выбор приложений",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "target-picker",
+      "title": "Выбор выхода",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "external-exit",
+      "title": "Внешний и корпоративный выход",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "folder-policy",
+      "title": "Политика папки",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "lifecycle",
+      "title": "Запуск и сон",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "exits",
+      "title": "Сетевые выходы",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "exit-detail",
+      "title": "Состояние выхода",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "redirect",
+      "title": "Перенаправление",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "test-route",
+      "title": "Проверка пути",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "traffic",
+      "title": "Трафик приложений",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "connection",
+      "title": "Путь соединения",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "events",
+      "title": "События LerNET",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "logs",
+      "title": "Журнал",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "network",
+      "title": "Обзор сети",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "adapters",
+      "title": "Адаптеры",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "programs",
+      "title": "Программы и VPN",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "system-routes",
+      "title": "Маршруты ОС",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "dns",
+      "title": "DNS и прокси",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "filters",
+      "title": "Фильтры",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "device",
+      "title": "Устройство",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "system-events",
+      "title": "События ОС",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "changes",
+      "title": "Что изменилось",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "sources",
+      "title": "Источники данных",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "report",
+      "title": "Отчёт и приватность",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "settings",
+      "title": "Настройки клиента",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "protection",
+      "title": "Защита при сбое",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "updates",
+      "title": "Обновления",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "screen": "update-progress",
+      "title": "Установка обновления",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "windows",
+      "scenario": "ready",
+      "rendered": true
+    },
+    {
+      "platform": "windows",
+      "scenario": "off",
+      "rendered": true
+    },
+    {
+      "platform": "windows",
+      "scenario": "loading",
+      "rendered": true
+    },
+    {
+      "platform": "windows",
+      "scenario": "empty",
+      "rendered": true
+    },
+    {
+      "platform": "windows",
+      "scenario": "blocked",
+      "rendered": true
+    },
+    {
+      "platform": "windows",
+      "scenario": "waking",
+      "rendered": true
+    },
+    {
+      "platform": "windows",
+      "scenario": "failover",
+      "rendered": true
+    },
+    {
+      "platform": "windows",
+      "scenario": "permission",
+      "rendered": true
+    },
+    {
+      "platform": "windows",
+      "scenario": "stale",
+      "rendered": true
+    },
+    {
+      "platform": "windows",
+      "scenario": "partial",
+      "rendered": true
+    },
+    {
+      "platform": "windows",
+      "scenario": "error",
+      "rendered": true
+    },
+    {
+      "platform": "windows",
+      "scenario": "draft",
+      "rendered": true
+    },
+    {
+      "platform": "windows",
+      "scenario": "incompatible",
+      "rendered": true
+    },
+    {
+      "platform": "windows",
+      "flows": [
+        "import-validation",
+        "pattern-commit",
+        "dialog-escape-enter",
+        "drag-anchor"
+      ],
+      "passed": true
+    },
+    {
+      "platform": "windows",
+      "width": 640,
+      "flow": "compact-navigation",
+      "passed": true
+    },
+    {
+      "platform": "android",
+      "screen": "welcome",
+      "title": "Первое знакомство",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "permission",
+      "title": "Разрешения",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "conflict",
+      "title": "Конфликт сети",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "vpn",
+      "title": "Подключение",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "profiles",
+      "title": "Профили и папки",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "profile",
+      "title": "Профиль",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "profile-edit",
+      "title": "Редактор профиля",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "folder",
+      "title": "Папка",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "import",
+      "title": "Импорт",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "import-review",
+      "title": "Проверка импорта",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "expert",
+      "title": "Обзор управления",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "schema",
+      "title": "Схема маршрутов",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "routes-list",
+      "title": "Маршруты списком",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "rule",
+      "title": "Редактор правила",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "application-picker",
+      "title": "Выбор приложений",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "target-picker",
+      "title": "Выбор выхода",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "external-exit",
+      "title": "Внешний и корпоративный выход",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "folder-policy",
+      "title": "Политика папки",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "lifecycle",
+      "title": "Запуск и сон",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "exits",
+      "title": "Сетевые выходы",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "exit-detail",
+      "title": "Состояние выхода",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "redirect",
+      "title": "Перенаправление",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "test-route",
+      "title": "Проверка пути",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "traffic",
+      "title": "Трафик приложений",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "connection",
+      "title": "Путь соединения",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "events",
+      "title": "События LerNET",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "logs",
+      "title": "Журнал",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "network",
+      "title": "Обзор сети",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "adapters",
+      "title": "Адаптеры",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "programs",
+      "title": "Программы и VPN",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "system-routes",
+      "title": "Маршруты ОС",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "dns",
+      "title": "DNS и прокси",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "filters",
+      "title": "Фильтры",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "device",
+      "title": "Устройство",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "system-events",
+      "title": "События ОС",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "changes",
+      "title": "Что изменилось",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "sources",
+      "title": "Источники данных",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "report",
+      "title": "Отчёт и приватность",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "settings",
+      "title": "Настройки клиента",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "protection",
+      "title": "Защита при сбое",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "updates",
+      "title": "Обновления",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "screen": "update-progress",
+      "title": "Установка обновления",
+      "overflow": false,
+      "raw": false,
+      "brokenImages": 0
+    },
+    {
+      "platform": "android",
+      "scenario": "ready",
+      "rendered": true
+    },
+    {
+      "platform": "android",
+      "scenario": "off",
+      "rendered": true
+    },
+    {
+      "platform": "android",
+      "scenario": "loading",
+      "rendered": true
+    },
+    {
+      "platform": "android",
+      "scenario": "empty",
+      "rendered": true
+    },
+    {
+      "platform": "android",
+      "scenario": "blocked",
+      "rendered": true
+    },
+    {
+      "platform": "android",
+      "scenario": "waking",
+      "rendered": true
+    },
+    {
+      "platform": "android",
+      "scenario": "failover",
+      "rendered": true
+    },
+    {
+      "platform": "android",
+      "scenario": "permission",
+      "rendered": true
+    },
+    {
+      "platform": "android",
+      "scenario": "stale",
+      "rendered": true
+    },
+    {
+      "platform": "android",
+      "scenario": "partial",
+      "rendered": true
+    },
+    {
+      "platform": "android",
+      "scenario": "error",
+      "rendered": true
+    },
+    {
+      "platform": "android",
+      "scenario": "draft",
+      "rendered": true
+    },
+    {
+      "platform": "android",
+      "scenario": "incompatible",
+      "rendered": true
+    },
+    {
+      "platform": "android",
+      "flows": [
+        "import-validation",
+        "pattern-commit",
+        "dialog-escape-enter",
+        "drag-anchor"
+      ],
+      "passed": true
+    },
+    {
+      "platform": "android",
+      "flow": "touch-drag-anchor",
+      "passed": true
+    }
+  ],
+  "errors": []
+}

@@ -16,6 +16,8 @@ import app.lernet.config.model.Group
 import app.lernet.config.model.NormalizedOutbound
 import app.lernet.config.model.Profile
 import app.lernet.config.model.ProfileSource
+import app.lernet.config.policy.ExternalExitProfiles
+import app.lernet.config.policy.ExternalExitRequest
 import app.lernet.config.transfer.TransferBundle
 import app.lernet.config.transfer.TransferCodec
 import app.lernet.config.transfer.TransferGroup
@@ -95,14 +97,23 @@ class ConfigRepository(
     }
 
     suspend fun exportTransfer(groupId: String? = null, selectedProfileId: String? = null): String {
-        val allProfiles = profiles.first()
-        val allGroups = groups.first()
+        return if (database != null) database.withTransaction { exportTransferSnapshot(groupId, selectedProfileId) }
+        else exportTransferSnapshot(groupId, selectedProfileId)
+    }
+
+    private suspend fun exportTransferSnapshot(groupId: String?, selectedProfileId: String?): String {
+        val allProfiles = profileDao.listProfiles().map { profile -> profile.toModel(outboundDao.listForProfile(profile.id)) }
+        val allRules = ruleNodeDao.listAll().map { it.toRecord() }
+        val allGroups = groupDao.listGroups().sortedWith(compareBy<GroupEntity> { it.sortIndex }.thenBy { it.name }).map { group ->
+            Group(group.id, group.name, groupMemberDao.listForGroup(group.id).map { it.profileId },
+                group.canvasLayout, allRules.any { it.profileId == RouteOwners.group(group.id) }, group.autoFailover)
+        }
         val chosenGroups = if (groupId == null) allGroups else listOf(allGroups.firstOrNull { it.id == groupId }
             ?: error("Папка не найдена"))
         val chosenProfiles = if (groupId == null) allProfiles else allProfiles.filter { it.id in chosenGroups.single().profileIds }
         val ids = chosenProfiles.mapTo(HashSet()) { it.id }
         val owners = ids + chosenGroups.map { RouteOwners.group(it.id) }.toSet()
-        val chosenRules = ruleNodes.first().filter { it.profileId in owners }
+        val chosenRules = allRules.filter { it.profileId in owners }
         val layouts = chosenProfiles.associate { it.id to it.canvasLayout } +
             chosenGroups.associate { RouteOwners.group(it.id) to it.canvasLayout }
         return TransferCodec.encode(TransferBundle(
@@ -127,6 +138,90 @@ class ConfigRepository(
             ) },
             selectedProfileId = selectedProfileId?.takeIf(ids::contains),
         ))
+    }
+
+    /** Commits one external exit atomically, retaining its stable references and rejecting stale editor data. */
+    suspend fun saveExternalExit(request: ExternalExitRequest, expected: TransferProfile? = null): TransferProfile {
+        val validation = ExternalExitProfiles.validate(request)
+        require(validation.isEmpty()) { validation.joinToString("; ") }
+        val db = requireNotNull(database) { "External exits require a Room transaction" }
+        return db.withTransaction {
+            val current = expected?.let { item ->
+                val row = profileDao.getProfile(item.id) ?: error("External profile was removed")
+                val model = row.toModel(outboundDao.listForProfile(item.id))
+                val snapshot = TransferProfile(
+                    model.id, model.name, model.source.name,
+                    model.outbounds.map { TransferOutbound(it.id, it.tag, it.type, it.singBoxJson) },
+                    model.selectedOutboundId, dnsJson = model.dnsJson, dnsPolicy = model.dnsPolicy.name,
+                    modeOverride = model.modeOverride, subscriptionUrl = model.subscriptionUrl, canvasLayout = model.canvasLayout,
+                )
+                check(snapshot == item) { "External profile changed while editing" }
+                val description = ExternalExitProfiles.describe(item) ?: error("Profile is not an editable external exit")
+                check(description.kind == request.kind) { "External profile transport must remain unchanged" }
+                row
+            }
+            val prepared = if (expected == null) ExternalExitProfiles.build(request)
+            else ExternalExitProfiles.build(request, expected.id, expected.selectedOutboundId, expected)
+            val entity = current?.copy(
+                name = prepared.name, source = prepared.source, selectedOutboundId = prepared.selectedOutboundId,
+                subscriptionUrl = prepared.subscriptionUrl, dnsJson = prepared.dnsJson, dnsPolicy = prepared.dnsPolicy,
+                updatedAtEpochMs = nowMs(),
+            ) ?: ProfileEntity(
+                id = prepared.id, name = prepared.name, source = prepared.source,
+                selectedOutboundId = prepared.selectedOutboundId, createdAtEpochMs = nowMs(), updatedAtEpochMs = nowMs(),
+                subscriptionUrl = prepared.subscriptionUrl, lastRefreshEpochMs = null,
+                dnsJson = prepared.dnsJson, dnsPolicy = prepared.dnsPolicy,
+                sortIndex = (profileDao.listProfiles().maxOfOrNull { it.sortIndex } ?: -1) + 1,
+            )
+            profileDao.upsertProfile(entity)
+            outboundDao.upsertAll(prepared.outbounds.map {
+                OutboundEntity(it.id, prepared.id, it.tag, it.type, it.singBoxJson)
+            })
+            prepared
+        }
+    }
+
+    /** A prepared shared workspace already owns IDs. Replace it atomically without remapping or inventing rules. */
+    suspend fun restoreTransferExact(bundle: TransferBundle) {
+        TransferCodec.validate(bundle)
+        require(bundle.scope == "all") { "Exact workspace restoration requires a complete inventory" }
+        val outboundIds = bundle.profiles.flatMap { profile -> profile.outbounds.map { it.id } }
+        require(outboundIds.size == outboundIds.distinct().size) { "Prepared workspace has duplicate outbound identities" }
+        require(bundle.profiles.all { profile -> ProfileSource.entries.any { it.name == profile.source } }) {
+            "Prepared workspace has a noncanonical profile source"
+        }
+        val db = requireNotNull(database) { "Exact workspace restoration requires a Room transaction" }
+        db.withTransaction {
+            val previous = profileDao.listProfiles().associateBy { it.id }
+            groupDao.listGroups().forEach { deleteGroup(it.id) }
+            previous.keys.forEach { deleteProfile(it) }
+            bundle.profiles.forEachIndexed { index, item ->
+                profileDao.upsertProfile(ProfileEntity(
+                    id = item.id, name = item.name, source = item.source,
+                    selectedOutboundId = item.selectedOutboundId,
+                    createdAtEpochMs = previous[item.id]?.createdAtEpochMs ?: nowMs(), updatedAtEpochMs = nowMs(),
+                    subscriptionUrl = item.subscriptionUrl, lastRefreshEpochMs = null,
+                    dnsJson = item.dnsJson, dnsPolicy = item.dnsPolicy, modeOverride = item.modeOverride,
+                    canvasLayout = item.canvasLayout, sortIndex = index,
+                ))
+                outboundDao.upsertAll(item.outbounds.map { outbound ->
+                    OutboundEntity(outbound.id, item.id, outbound.tag, outbound.type, outbound.singBoxJson)
+                })
+            }
+            bundle.groups.forEachIndexed { index, item ->
+                groupDao.upsertGroup(GroupEntity(item.id, item.name, index, item.canvasLayout, item.autoSwap))
+                groupMemberDao.upsertAll(item.profileIds.mapIndexed { position, id -> GroupMemberEntity(item.id, id, position) })
+            }
+            ruleNodeDao.upsertAll(bundle.rules.map { item ->
+                RuleNodeRecord(
+                    id = item.id, profileId = item.ownerId, parentId = item.parentId,
+                    enabled = item.enabled, sortIndex = item.sortIndex, action = item.action,
+                    apps = item.apps, domains = item.domains, domainSuffixes = item.domainSuffixes,
+                    ipCidrs = item.ipCidrs, geoip = item.geoip, pipeName = item.pipeName,
+                    title = item.title, processes = item.processes, blocksJson = item.blocksJson,
+                ).toEntity()
+            })
+        }
     }
 
     /** Validates first, then imports a copy in one Room transaction. Existing data is untouched. */

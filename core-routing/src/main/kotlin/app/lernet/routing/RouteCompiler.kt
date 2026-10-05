@@ -194,6 +194,15 @@ object RouteCompiler {
 
     fun prefixLength(cidr: String): Int = cidr.substringAfterLast("/", "0").toIntOrNull() ?: 0
 
+    /** Field validation shared with the device policy; it does not require a legacy otherwise sibling. */
+    fun validateConditions(nodeId: String, conditions: RuleConditions): List<FieldError> {
+        val match = ConditionCodec.project(conditions)
+        val node = RuleNode(nodeId, null, true, 0, match, RouteAction.PROXY, conditions = conditions)
+        val emptyBlock = conditions.blocks.any { block -> block.values.none { PatternSign.body(it).isNotBlank() } }
+        val required = if (emptyBlock) listOf(FieldError(nodeId, "match", "Заполните все блоки условий правила")) else emptyList()
+        return (validate(node) + required).distinct()
+    }
+
     fun assignTreeOrder(nodes: List<RuleNode>): Map<String, Int> {
         val byParent = nodes.groupBy { it.parentId }.mapValues { (_, children) ->
             children.sortedWith(compareBy<RuleNode> { it.sortIndex }.thenBy { it.id })
@@ -219,9 +228,11 @@ object RouteCompiler {
 
     private fun validate(node: RuleNode): List<FieldError> {
         val errors = mutableListOf<FieldError>()
-        if (!node.match.isCatchAll() && node.conditions?.blocks?.any { block ->
+        if (!node.match.isCatchAll() &&
+            node.conditions?.blocks?.any { block ->
                 block.values.none { PatternSign.body(it).isNotBlank() }
-            } == true) {
+            } == true
+        ) {
             errors += FieldError(node.id, "match", "Заполните все блоки условий правила")
         }
         node.match.domains.forEach { value ->
@@ -268,7 +279,8 @@ object RouteCompiler {
             val prefix = prefixLength(value)
             val address = value.substringBefore('/')
             // Only numeric IPv6 text reaches the parser; never resolve a hostname here.
-            return prefix in 0..128 && ':' in address &&
+            return prefix in 0..128 &&
+                ':' in address &&
                 runCatching { InetAddress.getByName(address) is Inet6Address }.getOrDefault(false)
         }
         return false

@@ -94,6 +94,8 @@ fun HomeScreen(
     onOpenDiag: () -> Unit,
     onOpenRoutes: (String) -> Unit,
     onRefreshHop: () -> Unit,
+    onOpenExpert: (() -> Unit)? = null,
+    expertActive: Boolean = false,
     showCrashBanner: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
@@ -115,7 +117,15 @@ fun HomeScreen(
         modifier = modifier,
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Vertical),
-        topBar = { HomeTopBar(onOpenDrawer, onOpenSettings, onOpenDiag) },
+        topBar = {
+            Column {
+                HomeTopBar(onOpenDrawer, onOpenSettings, onOpenDiag)
+                onOpenExpert?.let { app.lernet.ui.expert.AppModeTabs(false, {}, it) }
+                if (expertActive && onOpenExpert != null) TextButton(onClick = onOpenExpert, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.expert_active_on_simple))
+                }
+            }
+        },
     ) { padding ->
         HomeBody(
             state = state,

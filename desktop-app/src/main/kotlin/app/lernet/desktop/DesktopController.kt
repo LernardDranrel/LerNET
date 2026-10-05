@@ -2,6 +2,8 @@ package app.lernet.desktop
 
 import app.lernet.config.net.OkHttpTextFetcher
 import app.lernet.config.model.DnsPolicy
+import app.lernet.config.transfer.TransferBundle
+import app.lernet.config.transfer.TransferCodec
 import app.lernet.config.parse.GuessedMode
 import app.lernet.config.parse.ImportCoordinator
 import app.lernet.config.parse.ImportHint
@@ -40,11 +42,38 @@ import kotlinx.coroutines.flow.update
 
 data class ConnectionError(val message: String, val routeOwnerId: String? = null)
 
+/** The applied Simple launch, rather than a later selection or edited profile. Never serialize this object. */
+internal class WindowsSimpleConnection(
+    val launch: WindowsLaunchSnapshot,
+    val profileId: String,
+    val mode: RunMode,
+    val desiredSnapshot: StoredState,
+    val intentGeneration: Long,
+)
+
+internal class WindowsSimpleRestoreLease private constructor(
+    val connection: WindowsSimpleConnection,
+    private val reservationGeneration: Long,
+) {
+    fun permitsRestore(generation: Long, saved: StoredState, ownedProcessAlive: Boolean): Boolean =
+        generation == reservationGeneration && saved == connection.desiredSnapshot && !ownedProcessAlive
+
+    companion object {
+        fun capture(connection: WindowsSimpleConnection?, running: WindowsLaunchSnapshot?, desired: Boolean,
+                    generation: Long, reservationGeneration: Long, saved: StoredState): WindowsSimpleRestoreLease? =
+            connection?.takeIf {
+                desired && running === it.launch && generation == it.intentGeneration && saved == it.desiredSnapshot &&
+                    saved.selectedProfileId == it.profileId
+            }?.let { WindowsSimpleRestoreLease(it, reservationGeneration) }
+    }
+}
+
 data class DesktopUiState(
     val saved: StoredState = StoredState(),
     val busy: Boolean = false,
     val message: String = "",
     val connectionError: ConnectionError? = null,
+    val networkWarning: String = "",
     val probes: Map<String, ProbeResult> = emptyMap(),
     val healthMessage: String = "",
     val healthFailures: Int = 0,
@@ -56,6 +85,13 @@ data class DesktopUiState(
 class DesktopController(
     private val store: DesktopStore = DesktopStore(),
 ) : AutoCloseable {
+    @Volatile internal var simpleModeRestriction: (() -> String?)? = null
+
+    private fun simpleRestriction(): String? = try {
+        simpleModeRestriction?.invoke()
+    } catch (_: Exception) {
+        "Не удалось проверить системную защиту. Откройте экспертный режим и проверьте раздел «Защита»."
+    }
     private val loaded = runCatching { store.load() }
     private val mutable = MutableStateFlow(
         DesktopUiState(
@@ -75,6 +111,9 @@ class DesktopController(
     val connectionHistory: StateFlow<List<LiveConnection>> = mutableHistory
     private val failedInGroup = mutableSetOf<String>()
     @Volatile private var desiredConnection = false
+    private val expertReserved = AtomicBoolean(false)
+    private var activeSimpleConnection: WindowsSimpleConnection? = null
+    private var simpleRestoreLease: WindowsSimpleRestoreLease? = null
     @Volatile private var monitorOpen = true
     private val monitorThread = thread(name = "lernet-windows-diagnostics", isDaemon = true) {
         var lastStatus = TunnelStatus.STOPPED
@@ -224,6 +263,7 @@ class DesktopController(
     }
 
     private fun checkOutbound(profile: StoredProfile, saved: StoredState): OutboundProbeResult {
+        observeEndpointRoute(profile)
         val result = runCatching {
             val executable = saved.corePath.takeIf { it.isNotBlank() }?.let(Path::of)
                 ?: synchronized(coreInstallLock) { BundledCore.install(store.workDirectory()) }
@@ -234,6 +274,15 @@ class DesktopController(
             result.diagnostics.forEach(tunnel::logDiagnostic)
         }
         return result
+    }
+
+    private fun observeEndpointRoute(profile: StoredProfile?) {
+        val endpoint = runCatching { profile?.selectedOutbound?.singBoxJson?.let { OutboundPatch.read(it).server } }.getOrNull().orEmpty()
+        val route = EndpointRouteObservation.read(endpoint)
+        if (route.detail.isNotBlank()) tunnel.logDiagnostic(route.detail)
+        mutable.update { current ->
+            if (current.saved.selectedProfileId == profile?.id) current.copy(networkWarning = route.warning) else current
+        }
     }
 
     fun exportBundle(groupId: String? = null): String = DesktopTransfer.export(state.value.saved, groupId)
@@ -332,8 +381,10 @@ class DesktopController(
     }
 
     /** Persist the requested VPN mode before UAC starts a second process. */
-    fun prepareVpnElevation(profile: StoredProfile?): Boolean =
+    fun prepareVpnElevation(profile: StoredProfile?): Boolean = synchronized(connectLock) {
+        connectGeneration.incrementAndGet()
         change { it.withMode(profile, RunMode.FULL_VPN) }
+    }
 
     private fun StoredState.withMode(profile: StoredProfile?, mode: RunMode): StoredState =
         if (profile?.modeOverride != null) copy(profiles = profiles.map {
@@ -348,9 +399,13 @@ class DesktopController(
 
     private fun reconfigureConnection(update: (StoredState) -> StoredState) {
         if (!switchBusy.compareAndSet(false, true)) return
-        val restart = tunnel.state.value.status in setOf(TunnelStatus.STARTING, TunnelStatus.RUNNING, TunnelStatus.RECONNECTING)
+        val restart = synchronized(connectLock) {
+            connectGeneration.incrementAndGet()
+            !expertReserved.get() && tunnel.state.value.status in
+                setOf(TunnelStatus.STARTING, TunnelStatus.RUNNING, TunnelStatus.RECONNECTING)
+        }
         if (!restart) {
-            try { change(update) } finally { switchBusy.set(false) }
+            try { synchronized(connectLock) { change(update) } } finally { switchBusy.set(false) }
             return
         }
         mutable.update { it.copy(busy = true, message = "Переключаем подключение") }
@@ -359,10 +414,13 @@ class DesktopController(
                 synchronized(connectLock) {
                     desiredConnection = false
                     connectGeneration.incrementAndGet()
-                    tunnel.stop(waitForExit = true)
+                    check(tunnel.stop(waitForExit = true)) { "Не удалось остановить предыдущее подключение" }
                 }
                 change(update)
                 connectInternal(resetFailover = true)
+            } catch (error: Exception) {
+                desiredConnection = false
+                reportConnectionError(error.message ?: "Не удалось переключить подключение")
             } finally {
                 switchBusy.set(false)
                 if (!connectBusy.get()) mutable.update { it.copy(busy = false) }
@@ -437,7 +495,7 @@ class DesktopController(
     }
 
     fun setCorePath(path: String) = change { it.copy(corePath = path.trim()) }
-    fun setMode(mode: RunMode) = change { it.copy(mode = mode.name) }
+    fun setMode(mode: RunMode) = switchMode(null, mode)
     fun effectiveMode(profile: StoredProfile? = null): RunMode = DesktopRunMode.effective(
         profile?.modeOverride ?: state.value.saved.mode, WindowsElevation.isElevated,
     )
@@ -529,8 +587,11 @@ class DesktopController(
     }
 
     fun preview(profileId: String? = state.value.saved.selectedProfileId, draftProfile: StoredProfile? = null,
-                draftRules: List<StoredRule>? = null, draftOwnerId: String? = null): AssembledConfig {
-        val source = state.value.saved
+                draftRules: List<StoredRule>? = null, draftOwnerId: String? = null): AssembledConfig =
+        previewSaved(state.value.saved, profileId, draftProfile, draftRules, draftOwnerId)
+
+    private fun previewSaved(source: StoredState, profileId: String?, draftProfile: StoredProfile? = null,
+                             draftRules: List<StoredRule>? = null, draftOwnerId: String? = null): AssembledConfig {
         val saved = if (draftRules != null && draftOwnerId != null) source.copy(
             rules = source.rules.filterNot { it.profileId == draftOwnerId } + draftRules
         ) else source
@@ -573,7 +634,7 @@ class DesktopController(
         val assembled = ConfigAssembler.assemble(
             outbound = outbound,
             compiledRoute = compiled,
-            mode = effectiveMode(profile),
+            mode = DesktopRunMode.effective(profile.modeOverride ?: saved.mode, WindowsElevation.isElevated),
             logLevel = saved.logLevel,
             dnsJson = profile.dnsJson,
             dnsPolicy = runCatching {
@@ -600,9 +661,19 @@ class DesktopController(
         return saved.rules.filter { it.profileId == (groupOwner ?: profile.id) }
     }
 
-    fun connect() = connectInternal(resetFailover = true)
+    fun connect() {
+        synchronized(connectLock) {
+            if (expertReserved.get()) connectGeneration.incrementAndGet()
+        }
+        connectInternal(resetFailover = true)
+    }
 
     private fun connectInternal(resetFailover: Boolean) {
+        simpleRestriction()?.let { reportConnectionError(it); return }
+        if (expertReserved.get()) {
+            reportConnectionError("Устройством управляет экспертный режим. Остановите его перед включением обычного VPN.")
+            return
+        }
         if (loaded.isFailure) {
             reportConnectionError("Файл профилей повреждён. Сохранение отключено до восстановления данных.")
             return
@@ -613,28 +684,46 @@ class DesktopController(
             return
         }
         if (resetFailover) synchronized(failedInGroup) { failedInGroup.clear() }
-        desiredConnection = true
-        val ticket = connectGeneration.incrementAndGet()
+        val ticket = synchronized(connectLock) {
+            if (expertReserved.get()) {
+                connectBusy.set(false)
+                reportConnectionError("Устройством управляет экспертный режим. Остановите его перед включением обычного VPN.")
+                return
+            }
+            desiredConnection = true
+            connectGeneration.incrementAndGet()
+        }
+        val savedAtStart = state.value.saved
+        val profileAtStart = savedAtStart.profiles.firstOrNull { it.id == savedAtStart.selectedProfileId }
         mutable.update { it.copy(busy = true, message = "Подготовка Windows-ядра", connectionError = null) }
         thread(name = "lernet-windows-connect", isDaemon = true) {
             var routeErrorOwner: String? = null
             try {
-                val assembled = preview()
+                val assembled = previewSaved(savedAtStart, profileAtStart?.id)
                 if (!assembled.isValid) {
-                    val profile = state.value.saved.profiles.firstOrNull { it.id == state.value.saved.selectedProfileId }
-                    routeErrorOwner = profile?.groupId?.let { "grp_$it" } ?: profile?.id
+                    routeErrorOwner = profileAtStart?.groupId?.let { "grp_$it" } ?: profileAtStart?.id
                 }
                 check(assembled.isValid) { assembled.errors.joinToString("; ") }
                 assembled.notes.forEach(tunnel::logDiagnostic)
+                observeEndpointRoute(profileAtStart)
                 traceSelected()
                 prepareRuleSets()
-                tunnel.journalMaxMb = state.value.saved.journalMaxMb
-                val path = state.value.saved.corePath.takeIf { it.isNotBlank() }?.let(Path::of)
+                tunnel.journalMaxMb = savedAtStart.journalMaxMb
+                val path = savedAtStart.corePath.takeIf { it.isNotBlank() }?.let(Path::of)
                     ?: synchronized(coreInstallLock) { BundledCore.install(store.workDirectory()) }
                 synchronized(connectLock) {
-                    if (connectGeneration.get() != ticket) return@thread
-                    tunnel.stop(waitForExit = true)
-                    tunnel.start(path, assembled.json)
+                    synchronized(this) {
+                        if (connectGeneration.get() != ticket || expertReserved.get()) return@thread
+                        simpleRestriction()?.let { error(it) }
+                        check(state.value.saved == savedAtStart) { "Настройки изменились во время подготовки. Повторите подключение." }
+                        check(tunnel.stop(waitForExit = true)) { "Не удалось остановить предыдущее подключение" }
+                        val launch = WindowsLaunchSnapshot(path, assembled.json)
+                        val profile = checkNotNull(profileAtStart)
+                        activeSimpleConnection = WindowsSimpleConnection(launch, profile.id,
+                            DesktopRunMode.effective(profile.modeOverride ?: savedAtStart.mode, WindowsElevation.isElevated),
+                            savedAtStart, ticket)
+                        tunnel.start(launch)
+                    }
                 }
                 mutable.update { it.copy(message = "Запускаем ядро") }
             } catch (error: Exception) {
@@ -714,6 +803,75 @@ class DesktopController(
         mutable.update { it.copy(message = "Отключено") }
     }
 
+    /** Cancels pending Simple starts before the Expert host is allowed to acquire TUN. */
+    fun reserveExpertMode() {
+        synchronized(connectLock) {
+            check(expertReserved.compareAndSet(false, true)) { "Экспертный режим уже запускается" }
+            val oldGeneration = connectGeneration.get()
+            val nextGeneration = connectGeneration.incrementAndGet()
+            simpleRestoreLease = WindowsSimpleRestoreLease.capture(activeSimpleConnection, tunnel.captureRunningLaunch(),
+                desiredConnection, oldGeneration, nextGeneration, state.value.saved)
+            desiredConnection = false
+            try {
+                check(tunnel.stop(waitForExit = true)) {
+                    "Предыдущее подключение ещё работает. Экспертный туннель не запущен."
+                }
+            } catch (error: Exception) {
+                simpleRestoreLease = null
+                expertReserved.set(false)
+                throw error
+            }
+        }
+    }
+
+    /** Only call after the Expert host confirms shutdown or its owned process has exited. */
+    fun releaseExpertMode(restorePrevious: Boolean = false) {
+        synchronized(connectLock) {
+            if (!expertReserved.getAndSet(false)) return
+            val lease = simpleRestoreLease
+            simpleRestoreLease = null
+            synchronized(this) restore@ {
+                if (restorePrevious && lease?.permitsRestore(connectGeneration.get(), state.value.saved,
+                        tunnel.hasOwnedProcess()) == true) {
+                    simpleRestriction()?.let { restriction ->
+                        desiredConnection = false
+                        reportConnectionError(restriction)
+                        return@restore
+                    }
+                    val previous = lease.connection
+                    val ticket = connectGeneration.incrementAndGet()
+                    desiredConnection = true
+                    activeSimpleConnection = WindowsSimpleConnection(previous.launch, previous.profileId, previous.mode,
+                        previous.desiredSnapshot, ticket)
+                    try {
+                        tunnel.start(previous.launch)
+                        mutable.update { it.copy(message = "Экспертный режим не запущен · восстанавливаем предыдущее подключение") }
+                    } catch (error: Exception) {
+                        desiredConnection = false
+                        reportConnectionError("Не удалось восстановить предыдущее подключение: ${error.message}")
+                    }
+                }
+            }
+        }
+    }
+
+    fun workspaceDirectory(): Path = store.workDirectory()
+
+    /** Called inside the shared import journal transaction; IDs must remain stable. */
+    fun commitWorkspaceInventory(bundle: TransferBundle) {
+        check(change { DesktopTransfer.materializeWorkspace(it, bundle) }) { "Не удалось сохранить профили из рабочей области" }
+    }
+
+    /** A form must not overwrite a concurrent import, profile edit or selection. */
+    fun commitWorkspaceInventoryIfUnchanged(before: TransferBundle, after: TransferBundle) {
+        check(change { saved ->
+            check(TransferCodec.decode(DesktopTransfer.export(saved)) == before) {
+                "Список профилей изменился. Обновите форму перед сохранением."
+            }
+            DesktopTransfer.materializeWorkspace(saved, after)
+        }) { "Не удалось сохранить внешний выход" }
+    }
+
     private fun change(block: (StoredState) -> StoredState): Boolean {
         synchronized(this) {
             if (loaded.isFailure) {
@@ -725,7 +883,8 @@ class DesktopController(
                 mutable.update { it.copy(message = "Не удалось сохранить: ${error.message}") }
                 return false
             }
-            mutable.update { it.copy(saved = next) }
+            mutable.update { current -> current.copy(saved = next,
+                networkWarning = if (current.saved.selectedProfileId != next.selectedProfileId) "" else current.networkWarning) }
             return true
         }
     }

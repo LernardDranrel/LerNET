@@ -2,6 +2,7 @@ package app.lernet.engine.compile
 
 import app.lernet.config.model.DnsPolicy
 import app.lernet.config.model.NormalizedOutbound
+import app.lernet.config.policy.ExternalExitProfiles
 import app.lernet.engine.RunMode
 import app.lernet.routing.CompiledRoute
 import app.lernet.routing.GeoRuleSets
@@ -59,6 +60,16 @@ object ConfigAssembler {
                 errors = compiledRoute.errors.map { "${it.field}: ${it.message}" },
             )
         }
+        val outboundObj = runCatching { json.parseToJsonElement(outbound.singBoxJson).jsonObject }
+            .getOrElse {
+                return AssembledConfig("", outbound.tag, listOf("outbound: повреждённый JSON узла"))
+            }
+        if (ExternalExitProfiles.INTERFACE_FIELD in outboundObj) {
+            return AssembledConfig("", outbound.tag, listOf(
+                "Подтверждённый интерфейс Windows используется только в экспертном режиме. " +
+                    "Выберите его целью правила в «Экспертном режиме»; обычный VPN этот выход не запускает.",
+            ))
+        }
         val routingPlatform = if (platform == EnginePlatform.WINDOWS) RoutePlatform.WINDOWS else RoutePlatform.ANDROID
         // Also protect callers that supplied a route compiled without a platform.
         val unsupported = compiledRoute.rules.filter { RoutePlatformRules.unsupported(it.match, routingPlatform) }
@@ -68,10 +79,6 @@ object ConfigAssembler {
         if (ruleSetError != null) {
             return AssembledConfig("", outbound.tag, listOf(ruleSetError))
         }
-        val outboundObj = runCatching { json.parseToJsonElement(outbound.singBoxJson).jsonObject }
-            .getOrElse {
-                return AssembledConfig("", outbound.tag, listOf("outbound: повреждённый JSON узла"))
-            }
         val taggedRaw = JsonObject(outboundObj.toMutableMap().apply { put("tag", JsonPrimitive(outbound.tag)) })
         val xhttp = XhttpMode.normalize(taggedRaw, defaults.xmuxConcurrency)
         val tagged = xhttp.outbound

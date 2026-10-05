@@ -14,6 +14,42 @@ object DesktopTransfer {
     private fun newId() = UUID.randomUUID().toString()
     private fun groupOwner(id: String) = "grp_$id"
 
+    /** The shared workspace import has already remapped IDs exactly once. */
+    fun materializeWorkspace(saved: StoredState, bundle: TransferBundle): StoredState {
+        TransferCodec.validate(bundle)
+        val profileGroups = bundle.groups.flatMap { group -> group.profileIds.map { it to group.id } }.toMap()
+        val layouts = bundle.profiles.associate { it.id to it.canvasLayout } +
+            bundle.groups.associate { groupOwner(it.id) to it.canvasLayout }
+        return saved.copy(
+            groups = bundle.groups.map { StoredGroup(it.id, it.name, it.autoSwap, it.canvasLayout) },
+            profiles = bundle.profiles.map { profile ->
+                StoredProfile(
+                    id = profile.id, name = profile.name, source = profile.source,
+                    outbounds = profile.outbounds.map { StoredOutbound(it.id, it.tag, it.type, it.singBoxJson) },
+                    selectedOutboundId = profile.selectedOutboundId, dnsJson = profile.dnsJson,
+                    dnsPolicy = profile.dnsPolicy, modeOverride = profile.modeOverride,
+                    groupId = profileGroups[profile.id], subscriptionUrl = profile.subscriptionUrl,
+                    canvasLayout = profile.canvasLayout,
+                )
+            },
+            rules = bundle.rules.map { rule ->
+                StoredRule(
+                    id = rule.id, profileId = rule.ownerId, parentId = rule.parentId, enabled = rule.enabled,
+                    sortIndex = rule.sortIndex, action = rule.action.uppercase(), pipeName = rule.pipeName,
+                    title = rule.title, join = rule.join, apps = rule.apps, processes = rule.processes,
+                    domains = rule.domains, domainSuffixes = rule.domainSuffixes, cidrs = rule.ipCidrs,
+                    countries = rule.geoip, blocksJson = rule.blocksJson,
+                )
+            },
+            rulePositions = bundle.rules.mapNotNull { rule ->
+                (rule.position ?: TransferCodec.pointInLayout(layouts[rule.ownerId], rule.id))
+                    ?.let { rule.id to RulePosition(it.x, it.y) }
+            }.toMap(),
+            selectedProfileId = bundle.selectedProfileId ?: saved.selectedProfileId?.takeIf { id -> bundle.profiles.any { it.id == id } }
+                ?: bundle.profiles.firstOrNull()?.id,
+        )
+    }
+
     fun export(saved: StoredState, groupId: String? = null): String {
         val groups = if (groupId == null) saved.groups else listOf(saved.groups.firstOrNull { it.id == groupId }
             ?: error("Папка не найдена"))

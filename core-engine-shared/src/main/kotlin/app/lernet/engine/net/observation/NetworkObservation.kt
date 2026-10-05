@@ -60,6 +60,10 @@ data class NetworkSnapshot(
     val listeners: List<ObservedListener> = emptyList(),
     val sources: List<ObservationSource> = emptyList(),
     val findings: List<NetworkFinding> = emptyList(),
+    val baseline: NetworkSnapshot? = null,
+    val changes: List<SnapshotChange> = emptyList(),
+    val diagnosticLog: List<String> = emptyList(),
+    val diagnosticLogCapturedAt: Long? = null,
 )
 
 @Serializable
@@ -67,6 +71,7 @@ data class SnapshotChange(val sourceId: String, val title: String, val before: S
 
 object NetworkObservationAnalysis {
     fun analyze(snapshot: NetworkSnapshot, ownPids: Set<Long> = emptySet()): List<NetworkFinding> = buildList {
+        addAll(NetworkDependencies.localDnsFindings(snapshot))
         val occupied = snapshot.listeners.filter {
             it.port == 2080 && it.pid !in ownPids && it.address in setOf("0.0.0.0", "127.0.0.1", "::", "::1", "::ffff:127.0.0.1")
         }

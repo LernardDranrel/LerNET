@@ -26,7 +26,7 @@ android {
         applicationId = "app.lernet"
         minSdk = 26
         targetSdk = 36
-        versionCode = 113
+        versionCode = 114
         versionName = lernetVersion
         buildConfigField("String", "GIT_SHA", "\"${gitHeadSha()}\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -43,11 +43,13 @@ android {
     }
 
     signingConfigs {
-        if (signingPropertiesFile.isFile) create("lernetRelease") {
-            storeFile = rootProject.file(signingProperties.getProperty("storeFile"))
-            storePassword = signingProperties.getProperty("storePassword")
-            keyAlias = signingProperties.getProperty("keyAlias")
-            keyPassword = signingProperties.getProperty("keyPassword")
+        if (signingPropertiesFile.isFile) {
+            create("lernetRelease") {
+                storeFile = rootProject.file(signingProperties.getProperty("storeFile"))
+                storePassword = signingProperties.getProperty("storePassword")
+                keyAlias = signingProperties.getProperty("keyAlias")
+                keyPassword = signingProperties.getProperty("keyPassword")
+            }
         }
     }
 

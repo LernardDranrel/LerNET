@@ -1,5 +1,7 @@
 package app.lernet.desktop
 
+import app.lernet.config.redact.SecretRedactor
+import app.lernet.engine.policy.PolicyControlCapabilities
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -24,121 +26,213 @@ data class TunnelSnapshot(
     val failure: TunnelFailure? = null,
 )
 
+/** Exact launch inputs stay in memory; default identity-based toString never exposes the configuration. */
+internal class WindowsLaunchSnapshot(val executable: Path, val config: String)
+
 /** The Windows executable owns TUN, routes and DNS; the desktop UI never handles packets. */
-class WindowsBoxProcess(private val directory: Path) : AutoCloseable {
+class WindowsBoxProcess internal constructor(
+    private val directory: Path,
+    private val launchRun: (Path, Path) -> Process,
+    private val checkCommand: ((Path, List<String>) -> String)?,
+    private val readinessDelayMs: Long,
+) : AutoCloseable {
+    constructor(directory: Path) : this(directory, { executable, configFile ->
+        ProcessBuilder(executable.toString(), "run", "-c", configFile.toString())
+            .directory(directory.toFile()).redirectErrorStream(true).start()
+    }, null, 900)
+
+    val policyControlCapabilities = PolicyControlCapabilities.RESTART_ONLY
     private val generation = AtomicLong()
     private val mutable = MutableStateFlow(TunnelSnapshot())
     val state: StateFlow<TunnelSnapshot> = mutable
 
     @Volatile private var process: Process? = null
+
     @Volatile private var desired = false
+    private val processLock = Any()
+    private var runningLaunch: WindowsLaunchSnapshot? = null
+
     @Volatile var journalMaxMb: Int = 100
     private val journalLock = Any()
 
     fun start(executable: Path, config: String) {
-        stop()
+        start(WindowsLaunchSnapshot(executable, config))
+    }
+
+    internal fun start(launch: WindowsLaunchSnapshot) = synchronized(processLock) {
+        check(stop(waitForExit = true)) { "Предыдущее ядро ещё не завершилось. Новый туннель не запущен." }
         val ticket = generation.incrementAndGet()
         desired = true
         mutable.value = TunnelSnapshot(TunnelStatus.STARTING, "Проверяем конфигурацию")
         thread(name = "lernet-windows-engine", isDaemon = true) {
+            var configFile: Path? = null
+            var lastProcess: Process? = null
             try {
-                val version = commandOutput(executable, "version")
+                val version = commandOutput(launch.executable, "version")
                 check(version.contains(PINNED_CORE_VERSION)) {
                     "Нужно ядро $PINNED_CORE_VERSION; найдено: ${version.lineSequence().firstOrNull().orEmpty()}"
                 }
                 Files.createDirectories(directory)
-                val configFile = directory.resolve("active.json")
-                Files.writeString(configFile, config)
-                val checked = commandOutput(executable, "check", "-c", configFile.toString())
+                // Independent files prevent a cancelled preflight from overwriting a newer launch's configuration.
+                val activeFile = Files.createTempFile(directory, "active-$ticket-", ".json")
+                configFile = activeFile
+                Files.writeString(activeFile, launch.config)
+                val checked = commandOutput(launch.executable, "check", "-c", activeFile.toString())
                 check(!checked.contains("FATAL", ignoreCase = true)) { checked }
                 if (generation.get() != ticket) return@thread
                 var attempt = 0
                 while (desired && generation.get() == ticket) {
-                    mutable.update {
-                        it.copy(
-                            status = if (attempt == 0) TunnelStatus.STARTING else TunnelStatus.RECONNECTING,
-                            message = if (attempt == 0) "Запускаем туннель" else "Переподключение $attempt/3",
-                            reconnectAttempt = attempt,
-                        )
+                    // Stop invalidates the ticket under the same lock used for actual process creation.
+                    val running = synchronized(processLock) {
+                        if (!desired || generation.get() != ticket) return@thread
+                        mutable.update {
+                            it.copy(
+                                status = if (attempt == 0) TunnelStatus.STARTING else TunnelStatus.RECONNECTING,
+                                message = if (attempt == 0) "Запускаем туннель" else "Переподключение $attempt/3",
+                                reconnectAttempt = attempt
+                            )
+                        }
+                        launchRun(launch.executable, activeFile).also {
+                            process = it
+                            lastProcess = it
+                            runningLaunch = launch
+                        }
                     }
-                    val running = ProcessBuilder(executable.toString(), "run", "-c", configFile.toString())
-                        .directory(directory.toFile())
-                        .redirectErrorStream(true)
-                        .start()
-                    process = running
                     val lastFatal = AtomicReference<String?>(null)
                     if (!desired || generation.get() != ticket) {
                         running.destroy()
-                        if (process === running) process = null
+                        clearProcess(running)
                         return@thread
                     }
                     val logReader = thread(name = "lernet-windows-log", isDaemon = true) {
                         running.inputStream.bufferedReader().useLines { lines ->
                             lines.forEach { line ->
                                 if (line.contains("FATAL", ignoreCase = true)) lastFatal.set(line)
-                                mutable.update { it.copy(logs = (it.logs + line).takeLast(400)) }
-                                runCatching { appendJournal(line) }
+                                val safeLine = SecretRedactor.redact(line)
+                                mutable.update { it.copy(logs = (it.logs + safeLine).takeLast(400)) }
+                                runCatching { appendJournal(safeLine) }
                             }
                         }
                     }
-                    Thread.sleep(900)
-                    if (running.isAlive && generation.get() == ticket) {
-                        mutable.update { it.copy(status = TunnelStatus.RUNNING, message = "Ядро запущено", reconnectAttempt = attempt) }
+                    if (readinessDelayMs > 0) Thread.sleep(readinessDelayMs)
+                    synchronized(processLock) {
+                        if (running.isAlive && desired && generation.get() == ticket && process === running) {
+                            mutable.update {
+                                it.copy(status = TunnelStatus.RUNNING, message = "Ядро запущено", reconnectAttempt = attempt)
+                            }
+                        }
                     }
                     val code = running.waitFor()
                     logReader.join(1_000)
-                    if (process === running) process = null
-                    if (!desired || generation.get() != ticket) return@thread
-                    if (isTunPermissionFailure(lastFatal.get())) {
-                        mutable.update { it.copy(
-                            status = TunnelStatus.FAILED,
-                            message = "Windows запретила создание TUN. Запустите LerNET от имени администратора или выберите «Локальный прокси».",
-                            failure = TunnelFailure.TUN_PERMISSION,
-                        ) }
-                        desired = false
-                        return@thread
-                    }
-                    attempt++
-                    if (attempt > 3) {
-                        val detail = lastFatal.get()?.take(180)?.let { ": $it" }.orEmpty()
-                        mutable.update { it.copy(status = TunnelStatus.FAILED, message = "Ядро завершилось (код $code); попытки исчерпаны$detail") }
-                        desired = false
-                        return@thread
+                    synchronized(processLock) {
+                        clearProcess(running)
+                        if (!desired || generation.get() != ticket) return@thread
+                        if (isTunPermissionFailure(lastFatal.get())) {
+                            mutable.update {
+                                it.copy(
+                                    status = TunnelStatus.FAILED,
+                                    message = "Windows запретила создание TUN. Запустите LerNET от имени администратора " +
+                                        "или выберите «Локальный прокси».",
+                                    failure = TunnelFailure.TUN_PERMISSION
+                                )
+                            }
+                            desired = false
+                            return@thread
+                        }
+                        attempt++
+                        if (attempt > 3) {
+                            val detail = lastFatal.get()?.let(SecretRedactor::redact)?.take(180)?.let { ": $it" }.orEmpty()
+                            mutable.update {
+                                it.copy(status = TunnelStatus.FAILED, message = "Ядро завершилось (код $code); попытки исчерпаны$detail")
+                            }
+                            desired = false
+                            return@thread
+                        }
                     }
                     Thread.sleep((attempt * 2_000L).coerceAtMost(6_000L))
                 }
             } catch (error: Exception) {
-                if (generation.get() == ticket) {
-                    desired = false
-                    mutable.update { it.copy(status = TunnelStatus.FAILED, message = error.message ?: error.javaClass.simpleName) }
+                synchronized(processLock) {
+                    if (generation.get() == ticket) {
+                        desired = false
+                        mutable.update {
+                            it.copy(
+                                status = TunnelStatus.FAILED,
+                                message = SecretRedactor.redact(error.message ?: error.javaClass.simpleName)
+                            )
+                        }
+                    }
                 }
+            } finally {
+                if (lastProcess?.isAlive != true) configFile?.let(Files::deleteIfExists)
             }
         }
+        Unit
     }
 
-    fun stop(waitForExit: Boolean = false) {
+    /** False means shutdown is still pending or could not be confirmed; callers must not acquire another TUN. */
+    fun stop(waitForExit: Boolean = false): Boolean = synchronized(processLock) {
         desired = false
-        generation.incrementAndGet()
-        process?.let { running ->
+        val ticket = generation.incrementAndGet()
+        val running = process
+        if (running != null) {
             running.destroy()
             val finish = {
                 if (!running.waitFor(2, TimeUnit.SECONDS)) {
                     running.destroyForcibly()
                     running.waitFor(1, TimeUnit.SECONDS)
                 }
+                val stopped = !running.isAlive
+                synchronized(processLock) {
+                    if (stopped && process === running) {
+                        process = null
+                        runningLaunch = null
+                    }
+                    if (generation.get() == ticket) {
+                        mutable.update {
+                            it.copy(
+                                status = if (stopped) TunnelStatus.STOPPED else TunnelStatus.FAILED,
+                                message = if (stopped) "Отключено" else "Не удалось подтвердить остановку ядра", reconnectAttempt = 0
+                            )
+                        }
+                    }
+                }
+                stopped
             }
-            if (waitForExit) finish()
-            else thread(name = "lernet-windows-stop", isDaemon = true) { finish() }
+            if (waitForExit) {
+                return@synchronized finish()
+            } else {
+                thread(name = "lernet-windows-stop", isDaemon = true) { finish() }
+                mutable.update { it.copy(status = TunnelStatus.STOPPED, message = "Останавливаем ядро", reconnectAttempt = 0) }
+                return@synchronized false
+            }
         }
-        process = null
+        runningLaunch = null
         mutable.update { it.copy(status = TunnelStatus.STOPPED, message = "Отключено", reconnectAttempt = 0) }
+        true
     }
 
-    override fun close() = stop()
+    internal fun captureRunningLaunch(): WindowsLaunchSnapshot? = synchronized(processLock) {
+        runningLaunch.takeIf { desired && mutable.value.status == TunnelStatus.RUNNING && process?.isAlive == true }
+    }
+
+    internal fun hasOwnedProcess(): Boolean = synchronized(processLock) { process?.isAlive == true }
+
+    private fun clearProcess(running: Process) = synchronized(processLock) {
+        if (process === running && !running.isAlive) {
+            process = null
+            runningLaunch = null
+        }
+    }
+
+    override fun close() {
+        stop()
+    }
 
     /** Keep failed preflight details alongside the regular core journal and in the diagnostics tab. */
     fun logDiagnostic(message: String) {
-        val line = "${OffsetDateTime.now()} [preflight] ${message.replace('\r', ' ').replace('\n', ' ').take(2048)}"
+        val safeMessage = SecretRedactor.redact(message).replace('\r', ' ').replace('\n', ' ').take(2048)
+        val line = "${OffsetDateTime.now()} [preflight] $safeMessage"
         mutable.update { it.copy(logs = (it.logs + line).takeLast(400)) }
         runCatching { appendJournal(line) }
     }
@@ -149,7 +243,7 @@ class WindowsBoxProcess(private val directory: Path) : AutoCloseable {
         val previous = directory.resolve("session.log.1")
         val limit = journalMaxMb.coerceIn(1, 500).toLong() * 1024 * 1024
         val segmentLimit = limit / 2
-        val bytes = (line.take(8192) + "\n").toByteArray(Charsets.UTF_8)
+        val bytes = (SecretRedactor.redact(line).take(8192) + "\n").toByteArray(Charsets.UTF_8)
         retainTail(current, segmentLimit)
         retainTail(previous, segmentLimit)
         if (Files.exists(current) && Files.size(current) + bytes.size > segmentLimit) {
@@ -169,6 +263,7 @@ class WindowsBoxProcess(private val directory: Path) : AutoCloseable {
     }
 
     private fun commandOutput(executable: Path, vararg args: String): String {
+        checkCommand?.let { return it(executable, args.toList()) }
         check(Files.isRegularFile(executable)) { "Не найден sing-box.exe: $executable" }
         Files.createDirectories(directory)
         val outputFile = Files.createTempFile(directory, "core-check-", ".log")
@@ -196,8 +291,10 @@ class WindowsBoxProcess(private val directory: Path) : AutoCloseable {
 
         internal fun isTunPermissionFailure(line: String?): Boolean = line != null &&
             line.contains("configure tun interface", ignoreCase = true) &&
-            (line.contains("Access is denied", ignoreCase = true) ||
-                line.contains("permission denied", ignoreCase = true) ||
-                line.contains("Отказано в доступе", ignoreCase = true))
+            (
+                line.contains("Access is denied", ignoreCase = true) ||
+                    line.contains("permission denied", ignoreCase = true) ||
+                    line.contains("Отказано в доступе", ignoreCase = true)
+                )
     }
 }

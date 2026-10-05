@@ -21,6 +21,8 @@ $installer = Join-Path $artifactDirectory "LerNET-$appVersion-install.exe"
 New-Item -ItemType Directory -Path $artifactDirectory -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'packaging\windows\Start-LerNET.cmd') -Destination $image -Force
 Copy-Item -LiteralPath (Join-Path $root 'packaging\windows\README-Windows.txt') -Destination $image -Force
+Copy-Item -LiteralPath (Join-Path $root 'packaging\windows\UpdateProcesses.ps1') -Destination $image -Force
+Copy-Item -LiteralPath (Join-Path $root 'desktop-app\src\main\resources\runtime\lernet-protection-service.exe') -Destination $image -Force
 if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
 Compress-Archive -LiteralPath $image -DestinationPath $archive -CompressionLevel Optimal
 

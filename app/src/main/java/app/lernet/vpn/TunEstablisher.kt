@@ -28,13 +28,27 @@ import java.net.InetAddress
 object TunEstablisher {
     private const val TAG = "LerNet.Tun"
 
-    fun establish(service: VpnService, options: TunOptions, packageName: String): ParcelFileDescriptor {
+    fun establish(
+        service: VpnService,
+        options: TunOptions,
+        packageName: String,
+        captureAllApplications: Boolean = false,
+    ): ParcelFileDescriptor {
         CrashTrail.mark("TunEstablisher.establish")
         if (VpnService.prepare(service) != null) {
             throw Exception("android: missing vpn permission")
         }
         CrashTrail.mark("openTun snapshot begin autoRoute=${options.autoRoute} mtu=${options.mtu}")
         val snapshot = snapshot(options)
+        if (captureAllApplications) {
+            require(snapshot.autoRoute) { "Expert TUN must capture the device routes" }
+            require(snapshot.includePackages.isEmpty() && snapshot.excludePackages.isEmpty()) {
+                "Expert application rules belong in the policy, not Android bypass lists"
+            }
+            require(snapshot.inet4RouteExclude.isEmpty() && snapshot.inet6RouteExclude.isEmpty()) {
+                "Expert TUN must not expose routes outside the policy"
+            }
+        }
         CrashTrail.mark(
             "openTun snapshot done autoRoute=${snapshot.autoRoute} dnsMode=${snapshot.dnsMode} " +
                 "addrs=${snapshot.inet4Address.size}+${snapshot.inet6Address.size} " +
@@ -59,7 +73,7 @@ object TunEstablisher {
             ),
         )
         planned.notes.forEach { LerNetLog.w(TAG, it) }
-        return tryEstablish(service, options, packageName, snapshot, planned)
+        return tryEstablish(service, options, packageName, snapshot, planned, captureAllApplications)
     }
 
     private fun tryEstablish(
@@ -68,6 +82,7 @@ object TunEstablisher {
         packageName: String,
         snapshot: TunSnapshot,
         planned: PlannedTun,
+        captureAllApplications: Boolean,
     ): ParcelFileDescriptor {
         val mtu = options.mtu.takeIf { it > 0 } ?: snapshot.mtu
         val builder = service.Builder()
@@ -106,7 +121,7 @@ object TunEstablisher {
                     .onFailure { LerNetLog.w(TAG, "addDisallowedApplication failed: $pkg ${it.message}", it) }
                     .onSuccess { LerNetLog.i(TAG, "Builder.addDisallowedApplication $pkg") }
             }
-            if (snapshot.includePackages.isEmpty() && packageName !in excluded) {
+            if (!captureAllApplications && snapshot.includePackages.isEmpty() && packageName !in excluded) {
                 runCatching { builder.addDisallowedApplication(packageName) }
                     .onFailure { LerNetLog.w(TAG, "addDisallowedApplication failed: ${it.message}", it) }
                     .onSuccess { LerNetLog.i(TAG, "Builder.addDisallowedApplication $packageName") }

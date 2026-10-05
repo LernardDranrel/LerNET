@@ -8,6 +8,10 @@
   #error OutputDir is required
 #endif
 
+#define GuardSource SourcePath + "..\..\desktop-app\src\main\resources\runtime\lernet-protection-service.exe"
+#define GuardHash GetSHA256OfFile(GuardSource)
+#define ShutdownHash GetSHA256OfFile(SourcePath + "UpdateProcesses.ps1")
+
 [Setup]
 AppId={{F503F0CF-7CE2-4ECB-96F5-841508E0992B}
 AppName=LerNET
@@ -42,6 +46,9 @@ Name: "desktopicon"; Description: "Создать ярлык на рабочем
 [Files]
 Source: "{#ImageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "UpdateProcesses.ps1"; Flags: dontcopy
+Source: "UpdateProcesses.ps1"; DestDir: "{app}"; Flags: ignoreversion
+; This explicit uninstaller entry point never launches the Java GUI or a TUN.
+Source: "..\..\desktop-app\src\main\resources\runtime\lernet-protection-service.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\LerNET"; Filename: "{app}\LerNET.exe"
@@ -136,4 +143,33 @@ begin
     if CurPageID = wpInstalling then WizardForm.StatusLabel.Caption := 'Обновляем LerNET…';
     if CurPageID = wpFinished then WizardForm.FinishedHeadingLabel.Caption := 'LerNET обновлён до {#AppVersion}';
   end;
+end;
+
+// Execute only after the user has confirmed removal, never during an update or
+// an initial uninstaller prompt that may be cancelled. Failed recovery aborts
+// file removal so that the remaining guard still has a working recovery tool.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var Code: Integer; Helper, ShutdownScript, Params: String;
+begin
+  if CurUninstallStep <> usUninstall then exit;
+  // Copy into the elevated uninstaller's private temporary folder, then verify
+  // against checksums embedded in this installer before either helper executes.
+  Helper := ExpandConstant('{tmp}\lernet-protection-uninstall.exe');
+  ShutdownScript := ExpandConstant('{tmp}\LerNET-shutdown.ps1');
+  if not FileCopy(ExpandConstant('{app}\lernet-protection-service.exe'), Helper, False) or
+     not FileCopy(ExpandConstant('{app}\UpdateProcesses.ps1'), ShutdownScript, False) then
+    RaiseException('Не найдены компоненты восстановления LerNET. Повторно установите эту версию и повторите удаление.');
+  if (GetSHA256OfFile(Helper) <> '{#GuardHash}') or (GetSHA256OfFile(ShutdownScript) <> '{#ShutdownHash}') then
+    RaiseException('Компоненты восстановления LerNET были изменены. Приложение не удалено. Повторно установите официальную сборку.');
+  Params := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ShutdownScript +
+    '" -InstallDir "' + ExpandConstant('{app}') + '"';
+  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params, '', SW_HIDE, ewWaitUntilTerminated, Code) then
+    RaiseException('Не удалось остановить LerNET перед удалением. Закройте приложение через меню в трее и повторите.');
+  if Code <> 0 then
+    RaiseException('Не удалось подтвердить остановку LerNET. Приложение не удалено. Код: ' + IntToStr(Code));
+  if not Exec(Helper, '--uninstall', ExpandConstant('{sys}'), SW_HIDE, ewWaitUntilTerminated, Code) then
+    RaiseException('Не удалось запустить восстановление сети LerNET. Приложение не удалено.');
+  if Code <> 0 then
+    RaiseException('Windows не разрешила снять собственные фильтры защиты LerNET. Приложение не удалено, чтобы сохранить восстановление сети. Откройте LerNET от администратора, отключите защиту и повторите удаление. Код: ' + IntToStr(Code));
+  Log('LerNET owned protection removed for explicit uninstall.');
 end;

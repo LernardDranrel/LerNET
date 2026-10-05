@@ -54,6 +54,9 @@ interface RuleNodeDao {
     @Query("SELECT * FROM rule_nodes")
     fun observeAll(): Flow<List<RuleNodeEntity>>
 
+    @Query("SELECT * FROM rule_nodes")
+    suspend fun listAll(): List<RuleNodeEntity>
+
     @Query("SELECT * FROM rule_nodes WHERE profileId = :profileId ORDER BY sortIndex ASC")
     suspend fun listForProfile(profileId: String): List<RuleNodeEntity>
 

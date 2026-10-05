@@ -3,6 +3,8 @@ package app.lernet.ui.nav
 sealed class Dest(val route: String) {
     data object Home : Dest("home")
 
+    data object Expert : Dest("expert")
+
     data object Import : Dest("import")
 
     data object Settings : Dest("settings")

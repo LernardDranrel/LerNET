@@ -1,6 +1,7 @@
 package app.lernet.engine
 
 import app.lernet.engine.live.LiveConn
+import app.lernet.engine.policy.PolicyControlCapabilities
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -30,6 +31,9 @@ sealed class EngineEvent {
 }
 
 interface BoxEngine {
+    val policyControlCapabilities: PolicyControlCapabilities
+        get() = PolicyControlCapabilities.RESTART_ONLY
+
     val isNativeAvailable: Boolean
 
     val engineVersion: String

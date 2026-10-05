@@ -54,6 +54,9 @@ import app.lernet.engine.log.CrashTrail
 import app.lernet.log.LogShare
 import app.lernet.ui.config.ConfigEditorScreen
 import app.lernet.ui.config.ConfigEditorViewModel
+import app.lernet.ui.expert.ExpertRoute
+import app.lernet.ui.expert.ExpertViewModel
+import app.lernet.engine.policy.ExpertSessionPhase
 import app.lernet.ui.diag.DiagScreen
 import app.lernet.ui.network.NetworkObservationRoute
 import app.lernet.ui.diag.DiagViewModel
@@ -373,6 +376,8 @@ private fun AppNavHost(
     showCrashBanner: Boolean,
 ) {
     val reduceMotion = rememberReduceMotion()
+    val expertViewModel: ExpertViewModel = hiltViewModel()
+    val expertState by expertViewModel.state.collectAsStateWithLifecycle()
     val enter = if (reduceMotion) {
         fadeIn(motionTween(true, 0))
     } else {
@@ -394,15 +399,30 @@ private fun AppNavHost(
         popExitTransition = { popExit },
     ) {
         composable(Dest.Home.route) {
+            val expertActive = expertState.runtime?.phase in setOf(ExpertSessionPhase.RUNNING, ExpertSessionPhase.STARTING, ExpertSessionPhase.STOPPING)
             HomeScreen(
                 state = homeState,
-                onIntent = homeViewModel::onIntent,
+                onIntent = { intent ->
+                    if (expertActive && intent == HomeIntent.ToggleConnect) {
+                        navController.navigate(Dest.Expert.route) { launchSingleTop = true }
+                    } else {
+                        homeViewModel.onIntent(intent)
+                    }
+                },
                 onOpenDrawer = onOpenDrawer,
                 onOpenSettings = { navController.navigate(Dest.Settings.route) },
                 onOpenDiag = { navController.navigate(Dest.Diag.route) },
                 onOpenRoutes = { ownerId -> navController.navigate(Dest.Routes.of(ownerId)) },
                 onRefreshHop = homeViewModel::refreshHop,
+                onOpenExpert = { navController.navigate(Dest.Expert.route) { launchSingleTop = true } },
+                expertActive = expertActive,
                 showCrashBanner = showCrashBanner,
+            )
+        }
+        composable(Dest.Expert.route) {
+            ExpertRoute(
+                onVpn = { navController.navigate(Dest.Home.route) { popUpTo(Dest.Home.route) { inclusive = true }; launchSingleTop = true } },
+                simpleActive = homeState.snapshot.state in setOf(ConnectionState.CONNECTED, ConnectionState.CONNECTING, ConnectionState.RECONNECTING),
             )
         }
         secondaryDestinations(navController, onShareLogs, onImported)

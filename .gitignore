@@ -17,6 +17,7 @@ captures/
 .m2/
 .skiko/
 .tmp/
+pip-*/
 android-sdk/
 jdk/
 .idea/
@@ -43,3 +44,7 @@ state.json*
 # Native intermediate files
 .externalNativeBuild/
 .cxx/
+
+# Python helpers
+__pycache__/
+*.py[cod]

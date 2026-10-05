@@ -34,16 +34,19 @@ import app.lernet.engine.policy.PolicyCommand
 import app.lernet.engine.policy.PolicyEvent
 import app.lernet.engine.policy.ReconnectSettings
 import app.lernet.engine.redact.LerNetLog
-import app.lernet.routing.RoutePlatform
 import app.lernet.routing.RouteCompiler
+import app.lernet.routing.RoutePlatform
 import app.lernet.routing.RuleNode
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -51,6 +54,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 
 class ConnectionController(
@@ -92,6 +97,8 @@ class ConnectionController(
     private var onFailoverSelected: (suspend (String) -> Unit)? = null
     private var pendingProxyTag: String? = null
     private var pendingDnsPolicy: DnsPolicy = DnsPolicy.UNDERLAY
+    private val userIntentEpoch = AtomicLong(0)
+    private var pendingRestoreGate: (() -> Boolean)? = null
     private var loggedTunBytes: Boolean = false
     private var dnsOkInWindow: Boolean = false
     private var dnsOkSession: Boolean = false
@@ -229,6 +236,8 @@ class ConnectionController(
         logLevel: String = "warn",
         defaults: EngineDefaults = EngineDefaults(),
     ) {
+        userIntentEpoch.incrementAndGet()
+        pendingRestoreGate = null
         CrashTrail.mark("controller.connect enter profile=${profile.id} mode=$mode")
         val outbound = profile.selectedOutbound()
         if (outbound == null) {
@@ -294,7 +303,96 @@ class ConnectionController(
     }
 
     suspend fun disconnect() {
+        userIntentEpoch.incrementAndGet()
         dispatch(PolicyEvent.UserDisconnect)
+    }
+
+    /** Stops Simple after capturing its actual active rules and outbound, as one controller operation. */
+    suspend fun suspendForModeSwitch(stillDesired: () -> Boolean = { true }): SimpleModeRestorePoint? = mutex.withLock {
+        check(stillDesired()) { "Mode switch was superseded before Simple suspension" }
+        val current = machineState.snapshot
+        val epoch = userIntentEpoch.incrementAndGet()
+        val point = if (current.state == ConnectionState.CONNECTED &&
+            current.compiledJson != null &&
+            current.activeProfileId != null &&
+            current.activeOutboundId != null
+        ) {
+            SimpleModeRestorePoint(
+                current.activeProfileId, current.activeOutboundId, current.mode, current.compiledJson, epoch,
+                pendingEndpoint, pendingLogLevel, pendingDefaults, pendingProxyTag, pendingDnsPolicy,
+            )
+        } else {
+            null
+        }
+        dispatchLocked(PolicyEvent.UserDisconnect)
+        point
+    }
+
+    /** Returns true only after the exact former profile/mode is connected again. */
+    suspend fun restoreAfterModeSwitch(
+        point: SimpleModeRestorePoint,
+        stillDesired: () -> Boolean,
+        timeoutMs: Long = 45_000,
+    ): Boolean {
+        require(timeoutMs > 0)
+        var restorationEpoch: Long? = null
+        var restored = false
+        try {
+            restored = withTimeout(timeoutMs) {
+                // A queued old Stop must finish before a restored engine can be started.
+                stopJob?.join()
+                val accepted = mutex.withLock {
+                    if (!stillDesired() ||
+                        userIntentEpoch.get() != point.controllerEpoch ||
+                        machineState.snapshot.state != ConnectionState.DISCONNECTED
+                    ) {
+                        return@withLock false
+                    }
+                    val epoch = userIntentEpoch.incrementAndGet()
+                    restorationEpoch = epoch
+                    pendingRestoreGate = { userIntentEpoch.get() == epoch && stillDesired() }
+                    pendingEndpoint = point.endpoint
+                    pendingOutboundId = point.outboundId
+                    pendingLogLevel = point.logLevel
+                    pendingDefaults = point.defaults
+                    pendingProxyTag = point.proxyTag
+                    pendingDnsPolicy = point.dnsPolicy
+                    resetConnectMarkersLocked()
+                    dispatchLocked(PolicyEvent.StartRequested(point.profileId, point.outboundId, point.mode, point.compiledJson))
+                    true
+                }
+                if (!accepted) return@withTimeout false
+                while (stillDesired() && userIntentEpoch.get() == restorationEpoch) {
+                    val current = snapshot.value
+                    if (current.state == ConnectionState.CONNECTED) {
+                        val same =
+                            current.activeProfileId == point.profileId &&
+                                current.activeOutboundId == point.outboundId &&
+                                current.mode == point.mode
+                        if (!same) return@withTimeout false
+                        val healthy = engine.probeOutbound(point.proxyTag ?: "proxy", L7_PROBE_URL, ACTIVE_PROBE_TIMEOUT_MS).isSuccess
+                        return@withTimeout healthy && stillDesired() && userIntentEpoch.get() == restorationEpoch
+                    }
+                    if (current.state == ConnectionState.FAILED || current.state == ConnectionState.DISCONNECTED) return@withTimeout false
+                    delay(25)
+                }
+                false
+            }
+            return restored
+        } catch (_: TimeoutCancellationException) {
+            return false
+        } finally {
+            if (!restored && restorationEpoch != null) {
+                withContext(NonCancellable) {
+                    mutex.withLock {
+                        if (userIntentEpoch.get() == restorationEpoch) {
+                            userIntentEpoch.incrementAndGet()
+                            dispatchLocked(PolicyEvent.UserDisconnect)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     suspend fun onPermissionDenied() {
@@ -314,30 +412,32 @@ class ConnectionController(
     }
 
     private suspend fun dispatch(event: PolicyEvent) {
-        mutex.withLock {
-            val (next, commands) = machine.reduce(machineState, context, event)
-            machineState = next
-            val hops = _snapshot.value
-            _snapshot.value = next.snapshot.copy(
-                serverTcpMs = if (next.snapshot.activeProfileId == hops.activeProfileId &&
-                    next.snapshot.state != ConnectionState.DISCONNECTED &&
-                    next.snapshot.state != ConnectionState.FAILED
-                ) {
-                    hops.serverTcpMs
-                } else {
-                    null
-                },
-                channel = channel,
-                hops = hops.hops,
-                hopHost = hops.hopHost,
-                hopTimedOut = hops.hopTimedOut,
-                hopChecked = hops.hopChecked,
-                hopRunning = hops.hopRunning,
-                pipeSilentCount = shownPipeSilent,
-                pipeTunnelCount = shownPipeTunnel,
-            )
-            commands.forEach { execute(it) }
-        }
+        mutex.withLock { dispatchLocked(event) }
+    }
+
+    private fun dispatchLocked(event: PolicyEvent) {
+        val (next, commands) = machine.reduce(machineState, context, event)
+        machineState = next
+        val hops = _snapshot.value
+        _snapshot.value = next.snapshot.copy(
+            serverTcpMs = if (next.snapshot.activeProfileId == hops.activeProfileId &&
+                next.snapshot.state != ConnectionState.DISCONNECTED &&
+                next.snapshot.state != ConnectionState.FAILED
+            ) {
+                hops.serverTcpMs
+            } else {
+                null
+            },
+            channel = channel,
+            hops = hops.hops,
+            hopHost = hops.hopHost,
+            hopTimedOut = hops.hopTimedOut,
+            hopChecked = hops.hopChecked,
+            hopRunning = hops.hopRunning,
+            pipeSilentCount = shownPipeSilent,
+            pipeTunnelCount = shownPipeTunnel,
+        )
+        commands.forEach { execute(it) }
     }
 
     private fun execute(command: PolicyCommand) {
@@ -375,7 +475,9 @@ class ConnectionController(
                 // Hop map is a sibling job — never awaited by tunnel dial / Connected.
                 scheduleTrace(force = true)
                 CrashTrail.mark("controller StartEngine mode=$mode jsonBytes=${json.length}")
+                val restoreGate = pendingRestoreGate
                 scope.launch {
+                    if (restoreGate != null && !restoreGate()) return@launch
                     runCatching { engine.start(json, mode) }
                         .onFailure { error ->
                             LerNetLog.e(TAG, "engine.start failed: ${error.message}", error)
@@ -413,8 +515,10 @@ class ConnectionController(
                 groupProbeJob?.cancel()
                 failoverSwitchJob?.cancel()
                 scheduleTrace(force = true)
+                val restoreGate = pendingRestoreGate
                 retryJob = scope.launch {
                     delay(command.delayMs)
+                    if (restoreGate != null && !restoreGate()) return@launch
                     armConnectTimeout()
                     loggedTunBytes = false
                     dnsOkInWindow = false
@@ -625,8 +729,11 @@ class ConnectionController(
                 delay(if (failures == 0) tunnelHealthIntervalMs() else 2_000L)
                 val before = _snapshot.value
                 if (before.state != ConnectionState.CONNECTED ||
-                    before.activeProfileId != profileId || before.activeOutboundId != outboundId
-                ) return@launch
+                    before.activeProfileId != profileId ||
+                    before.activeOutboundId != outboundId
+                ) {
+                    return@launch
+                }
 
                 val result = try {
                     probe()
@@ -637,8 +744,11 @@ class ConnectionController(
                 }
                 val after = _snapshot.value
                 if (after.state != ConnectionState.CONNECTED ||
-                    after.activeProfileId != profileId || after.activeOutboundId != outboundId
-                ) return@launch
+                    after.activeProfileId != profileId ||
+                    after.activeOutboundId != outboundId
+                ) {
+                    return@launch
+                }
 
                 if (result.isSuccess) {
                     if (failures > 0) LerNetLog.i(TAG, "tunnel health recovered after $failures miss")

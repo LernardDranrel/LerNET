@@ -27,7 +27,7 @@ import kotlinx.serialization.json.Json
 
 /** This window never owns the VPN controller. Closing it only cancels its own observation work. */
 @Composable
-internal fun DesktopNetworkWindow(onClose: () -> Unit, useLerNetProxy: () -> Boolean, readClientContext: () -> ClientObservationContext) {
+internal fun DesktopNetworkWindow(onClose: () -> Unit, useLerNetProxy: () -> Boolean, readClientContext: () -> ClientObservationContext, readDiagnosticLog: () -> List<String> = { emptyList() }) {
     val scope = rememberCoroutineScope()
     var history by remember { mutableStateOf(ObservationSnapshotHistory()) }
     val snapshot = history.report
@@ -78,9 +78,9 @@ internal fun DesktopNetworkWindow(onClose: () -> Unit, useLerNetProxy: () -> Boo
         LaunchedEffect(window) { WindowsTitleBar.dark(window) }
         MaterialTheme(colorScheme = desktopColors, typography = desktopTypography,
             shapes = Shapes(small = RoundedCornerShape(10.dp), medium = RoundedCornerShape(14.dp), large = RoundedCornerShape(18.dp))) {
-            DesktopNetworkObservation(snapshot, history.previous, busy, error, refresh,
+            DesktopNetworkObservation(snapshot, history.comparisonBaseline, busy, error, refresh,
                 onExport = {
-                    val current = snapshot
+                    val current = history.exportReport(readDiagnosticLog())
                     if (current != null) {
                         val dialog = FileDialog(window, "Сохранить локальный отчёт сети", FileDialog.SAVE)
                         dialog.file = "LerNET-network-${current.finishedAt}.json"
@@ -121,6 +121,8 @@ internal fun DesktopNetworkWindow(onClose: () -> Unit, useLerNetProxy: () -> Boo
                 traceRunning = traceState.phase in setOf(ObservationTracePhase.STARTING, ObservationTracePhase.RECORDING, ObservationTracePhase.STOPPING),
                 onCancel = { refreshJob?.cancel() },
                 comparisonSnapshot = history.current,
+                onPinBaseline = { history = history.pinBaseline() },
+                baselinePinned = history.anchor != null,
                 traceStatus = traceState.title + " · " + traceState.detail + (traceState.file?.let { "\n${it.absolutePath}" } ?: ""),
             )
         }

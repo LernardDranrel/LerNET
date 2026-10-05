@@ -1,0 +1,48 @@
+{
+  "format": "lernet-network-workspace",
+  "version": 1,
+  "legacy": {
+    "format": "lernet-transfer", "version": 1, "scope": "all",
+    "groups": [{"id": "europe", "name": "Europe", "profileIds": ["de", "nl"], "autoSwap": true}],
+    "profiles": [
+      {"id": "de", "name": "Germany", "source": "JSON", "outbounds": [{"id": "de-out", "tag": "proxy", "type": "socks", "singBoxJson": "{\"type\":\"socks\",\"server\":\"de.example.invalid\",\"server_port\":1080}"}], "selectedOutboundId": "de-out"},
+      {"id": "nl", "name": "Netherlands", "source": "JSON", "outbounds": [{"id": "nl-out", "tag": "proxy", "type": "socks", "singBoxJson": "{\"type\":\"socks\",\"server\":\"nl.example.invalid\",\"server_port\":1080}"}], "selectedOutboundId": "nl-out"}
+    ],
+    "rules": [], "selectedProfileId": "de"
+  },
+  "saved": {
+    "schemaVersion": 1, "revision": 2,
+    "device": {
+      "scope": {"type": "device"},
+      "nodes": [
+        {
+          "id": "private-bank", "sortIndex": 0, "title": "Only through VPN", "protected": true,
+          "conditions": {"blocks": [{"kind": "DOMAIN", "values": ["bank.example"]}]},
+          "target": {"type": "channel", "id": "shared-europe"}
+        },
+        {
+          "id": "private-work", "sortIndex": 1,
+          "conditions": {"blocks": [{"kind": "DOMAIN", "values": ["work.example"]}]},
+          "target": {"type": "channel", "id": "shared-europe"}
+        },
+        {
+          "id": "deny", "sortIndex": 2,
+          "conditions": {"blocks": [{"kind": "DOMAIN", "values": ["blocked.example"]}]},
+          "target": {"type": "block"}
+        }
+      ],
+      "defaultTarget": {"type": "direct"}
+    },
+    "trees": [
+      {"scope": {"type": "folder", "id": "europe"}, "defaultTarget": {"type": "current_exit"}}
+    ],
+    "channels": [
+      {
+        "id": "shared-europe", "name": "Europe", "owner": {"type": "device"},
+        "target": {"type": "folder", "id": "europe", "routeScope": {"type": "folder", "id": "europe"}, "fallback": "BLOCK"},
+        "lifecycle": {"coldStart": true, "idleTimeoutMs": 900000}
+      }
+    ],
+    "folderPolicies": [{"folderId": "europe", "selection": "LOWEST_LATENCY", "autoSwap": true}]
+  }
+}

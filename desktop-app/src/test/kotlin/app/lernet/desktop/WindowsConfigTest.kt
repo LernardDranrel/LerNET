@@ -20,6 +20,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Test
+import org.junit.Assume.assumeTrue
 
 class WindowsConfigTest {
     @Test
@@ -131,6 +132,7 @@ class WindowsConfigTest {
 
     @Test
     fun preflightMeasuresHttpThroughOutboundBeforeTunStarts() {
+        assumeNativeIntegration()
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/generate_204") { exchange ->
             exchange.sendResponseHeaders(204, -1)
@@ -167,6 +169,7 @@ class WindowsConfigTest {
 
     @Test
     fun readsLiveConnectionsApiFromBundledCore() {
+        assumeNativeIntegration()
         val directory = Files.createTempDirectory("lernet-windows-api")
         val binary = BundledCore.install(directory)
         val port = ServerSocket(0).use { it.localPort }
@@ -202,6 +205,7 @@ class WindowsConfigTest {
 
     @Test
     fun launchesLocalProxyAndStops() {
+        assumeNativeIntegration()
         val directory = Files.createTempDirectory("lernet-windows-proxy")
         val binary = BundledCore.install(directory)
         val port = ServerSocket(0).use { it.localPort }
@@ -250,6 +254,7 @@ class WindowsConfigTest {
         assertThat(config.json).contains("browser.exe")
 
         val directory = Files.createTempDirectory("lernet-windows-check")
+        assumeNativeIntegration()
         val binary = BundledCore.install(directory)
         val configFile = directory.resolve("config.json")
         Files.writeString(configFile, config.json)
@@ -261,5 +266,9 @@ class WindowsConfigTest {
         assertThat(process.waitFor(15, TimeUnit.SECONDS)).isTrue()
         assertThat(process.exitValue()).isEqualTo(0)
         assertThat(output).doesNotContain("FATAL")
+    }
+
+    private fun assumeNativeIntegration() {
+        assumeTrue("Native network tests require an isolated Windows guest", java.lang.Boolean.getBoolean("lernet.nativeIntegration"))
     }
 }

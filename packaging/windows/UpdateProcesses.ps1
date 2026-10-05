@@ -19,7 +19,7 @@ function Get-LerNetOwnedProcesses($Snapshot, [string]$Executable) {
         if (-not $changed) { break }
     }
     return @($Snapshot | Where-Object { $owned.ContainsKey([int]$_.ProcessId) -and
-        ($_.ExecutablePath -eq $Executable -or $_.Name -in @('sing-box.exe', 'java.exe', 'javaw.exe')) })
+        ($_.ExecutablePath -eq $Executable -or $_.Name -in @('sing-box.exe', 'lernet-core.exe', 'java.exe', 'javaw.exe')) })
 }
 
 function Get-LerNetEventName([string]$Executable) {

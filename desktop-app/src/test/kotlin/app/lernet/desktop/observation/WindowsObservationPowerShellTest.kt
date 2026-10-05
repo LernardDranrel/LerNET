@@ -101,6 +101,23 @@ class WindowsObservationPowerShellTest {
         assertThat(detail.length).isAtMost(1024)
     }
 
+    @Test fun `malformed later XML retains complete filters and reports partial evidence`() {
+        val file = temp.newFile("partial.xml")
+        file.writeText("<wfp><filters><item><filterId>42</filterId><filterKey>fixture</filterKey><action><type>FWP_ACTION_BLOCK</type></action></item></filters><broken>" + 0.toChar() + "</broken></wfp>")
+        val path = Base64.getEncoder().encodeToString(file.absolutePath.toByteArray(StandardCharsets.UTF_8))
+        val result = execute(wfpFunctions() + "\n" + """
+            ${'$'}fixturePath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$path'))
+            ${'$'}rows = @(Read-WfpState ${'$'}fixturePath)
+            @{rows=${'$'}rows;partial=${'$'}script:wfpPartial;detail=${'$'}script:wfpDetail} | ConvertTo-Json -Depth 6 -Compress
+        """.trimIndent())
+        assertThat(result.exitCode).isEqualTo(0)
+        val envelope = Json.parseToJsonElement(result.output).jsonObject
+        assertThat(envelope["partial"]!!.jsonPrimitive.boolean).isTrue()
+        assertThat(envelope["rows"]!!.jsonArray.single().jsonObject["FilterId"]!!.jsonPrimitive.content).isEqualTo("42")
+        assertThat(envelope["detail"]!!.jsonPrimitive.content).contains("XmlException")
+        assertThat(envelope["detail"]!!.jsonPrimitive.content).contains("character=U+")
+    }
+
     @Test fun `event script returns mocked events and explains denied channels on Windows PowerShell`() {
         val mock = """
             function Get-WinEvent {

@@ -2,7 +2,8 @@ package app.lernet.desktop.observation
 
 import app.lernet.engine.net.observation.*
 
-internal data class ClientObservationContext(val profileName: String = "", val endpoint: String = "", val protocol: String = "", val requestedMode: String = "FULL_VPN")
+internal data class ClientObservationContext(val profileName: String = "", val endpoint: String = "", val protocol: String = "", val requestedMode: String = "FULL_VPN",
+    val tunnelState: String = "", val tunnelMessage: String = "", val clientVersion: String = "")
 
 /** Configuration metadata only; never serialize the original outbound or its credentials. */
 internal fun withClientContext(snapshot: NetworkSnapshot, context: ClientObservationContext): NetworkSnapshot {
@@ -11,7 +12,8 @@ internal fun withClientContext(snapshot: NetworkSnapshot, context: ClientObserva
         rows = listOf(EvidenceRow("selected-profile", context.profileName.ifBlank { "Профиль не выбран" }, mapOf(
             "Профиль" to context.profileName, "Сервер" to context.endpoint, "Протокол" to context.protocol,
             "Запрошенный режим" to context.requestedMode,
-        ))), capturedAt = snapshot.startedAt)
+        ) + mapOf("Версия клиента" to context.clientVersion, "Состояние ядра" to context.tunnelState,
+            "Статус ядра" to app.lernet.desktop.ProbeDiagnostics.clean(context.tunnelMessage)).filterValues(String::isNotBlank))), capturedAt = snapshot.startedAt)
     val additional = buildList {
         if (context.requestedMode == "FULL_VPN" && !snapshot.elevated) add(NetworkFinding("admin-required",
             "Для полного VPN нужны права администратора", "LerNET сейчас может работать как прокси. Для создания TUN Windows требует повышенные права.",
@@ -28,7 +30,11 @@ internal fun withClientContext(snapshot: NetworkSnapshot, context: ClientObserva
                     }))
                 if (externalVirtual.isNotEmpty()) add(NetworkFinding("endpoint-other-virtual", "Путь к серверу зависит от виртуального канала",
                     "Подходящий маршрут ведёт через другой виртуальный адаптер. Это может быть полезная корпоративная сеть или второй VPN. Проверьте этот путь, если LerNET подключается, а интернет остаётся у другого клиента.",
-                    FindingKind.POTENTIAL_CONFLICT, listOf(source.id, "routes", "adapters"), externalVirtual.map { it.name + " · " + it.description }))
+                    FindingKind.POTENTIAL_CONFLICT, listOf(source.id, "routes", "adapters", "processes", "services"), externalVirtual.map { it.name + " · " + it.description },
+                    reason = "В таблице маршрутов путь к ${context.endpoint} проходит через внешний виртуальный интерфейс: ${externalVirtual.joinToString { it.name }}. Связанные ниже программы найдены по совпадению названия; это подсказка, а не доказательство владения адаптером.",
+                    impact = "Предварительная проверка LerNET без собственного TUN использует текущий путь Windows. При отключении другого VPN этот путь может измениться или перестать работать. Это ещё не подтверждает причину ошибки проверки.",
+                    nextSteps = listOf("Сохраните полный разбор перед отключением другого клиента.", "Когда безопасно прервать сеть, штатно отключите другой VPN и обновите снимок в том же окне.", "В «Что изменилось» сравните адаптер, маршруты, DNS и фильтры. Сохраните полный разбор ещё раз."),
+                    relatedItems = externalVirtual.flatMap { adapter -> listOf(EvidenceRow(adapter.id, adapter.name, mapOf("Описание" to adapter.description, "Интерфейс" to adapter.index.toString()))) + NetworkDependencies.relatedPrograms(snapshot, adapter) }))
             } else if (!NetworkRouteSelection.isNumericAddress(context.endpoint)) {
                 add(NetworkFinding("endpoint-hostname", "Сервер задан именем",
                     "Пассивный снимок не выполняет DNS-запрос. Чтобы изучить путь, в разделе «Маршруты» укажите уже известный IP сервера.",

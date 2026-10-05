@@ -29,6 +29,11 @@ sourceSets.main {
     resources.srcDir("../core-engine/src/main/assets")
 }
 
+tasks.withType<Test>().configureEach {
+    // Native integration tests must run in an isolated Windows guest, never as an implicit unit-test side effect.
+    systemProperty("lernet.nativeIntegration", providers.gradleProperty("lernetNativeIntegration").orNull == "true")
+}
+
 dependencies {
     implementation(project(":core-config-shared"))
     implementation(project(":core-engine-shared"))

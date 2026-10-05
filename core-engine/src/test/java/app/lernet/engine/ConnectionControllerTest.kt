@@ -19,6 +19,10 @@ import app.lernet.engine.policy.ManualFailoverGroup
 import app.lernet.engine.policy.ReconnectSettings
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -27,11 +31,131 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ConnectionControllerTest {
     private val dispatcher = StandardTestDispatcher()
+
+    @Test
+    fun failedModeSwitchRestoresExactEffectiveJsonAndPriorProxyMode() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine()
+        val controller = controller(this, engine, hardStopTimeoutMs = 2_500)
+        controller.connect(sampleProfile(), catchAllNodes(), RunMode.PROXY, defaults = EngineDefaults(directDnsServer = "9.9.9.9"))
+        runCurrent()
+        val actualJson = engine.startedConfigs.single()
+        val point = requireNotNull(controller.suspendForModeSwitch())
+        runCurrent()
+        assertThat(controller.restoreAfterModeSwitch(point, { true })).isTrue()
+        assertThat(engine.startedConfigs.last()).isEqualTo(actualJson)
+        assertThat(controller.snapshot.value.activeProfileId).isEqualTo("p1")
+        assertThat(controller.snapshot.value.mode).isEqualTo(RunMode.PROXY)
+    }
+
+    @Test
+    fun explicitNewStopPreventsRestoringOldSimpleSession() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine()
+        val controller = controller(this, engine, hardStopTimeoutMs = 2_500)
+        reachConnected(this, controller, engine)
+        val point = requireNotNull(controller.suspendForModeSwitch())
+        runCurrent()
+        controller.disconnect()
+        runCurrent()
+        assertThat(controller.restoreAfterModeSwitch(point, { true })).isFalse()
+        assertThat(engine.startCount).isEqualTo(1)
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.DISCONNECTED)
+    }
+
+    @Test
+    fun automaticExpertStartBudgetTimeoutCanRestorePriorModeAfterCleanup() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine()
+        val controller = controller(this, engine, hardStopTimeoutMs = 2_500)
+        reachConnected(this, controller, engine)
+        val point = requireNotNull(controller.suspendForModeSwitch())
+        runCurrent()
+        var restored = false
+        try {
+            withTimeout(50) { delay(100) }
+        } catch (_: TimeoutCancellationException) {
+            restored = withContext(NonCancellable) { controller.restoreAfterModeSwitch(point, { true }) }
+        }
+        assertThat(restored).isTrue()
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
+        assertThat(controller.snapshot.value.mode).isEqualTo(point.mode)
+    }
+
+    @Test
+    fun newerModeIntentRejectsRollbackWithoutRestartingNativeEngine() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine()
+        val controller = controller(this, engine, hardStopTimeoutMs = 2_500)
+        reachConnected(this, controller, engine)
+        val point = requireNotNull(controller.suspendForModeSwitch())
+        runCurrent()
+        assertThat(controller.restoreAfterModeSwitch(point, { false })).isFalse()
+        assertThat(engine.startCount).isEqualTo(1)
+    }
+
+    @Test
+    fun supersededModeSwitchDoesNotDisconnectTheStillActiveSimpleVpn() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine()
+        val controller = controller(this, engine, hardStopTimeoutMs = 2_500)
+        reachConnected(this, controller, engine)
+        val outcome = runCatching { controller.suspendForModeSwitch { false } }
+        assertThat(outcome.exceptionOrNull()).isInstanceOf(IllegalStateException::class.java)
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
+        assertThat(engine.stopCount).isEqualTo(0)
+    }
+
+    @Test
+    fun failedHttpsProofDoesNotClaimOldSimpleConnectionRestored() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine(probeResult = Result.failure(IllegalStateException("HTTPS unavailable")))
+        val controller = controller(this, engine, hardStopTimeoutMs = 2_500)
+        reachConnected(this, controller, engine)
+        val point = requireNotNull(controller.suspendForModeSwitch())
+        runCurrent()
+        assertThat(controller.restoreAfterModeSwitch(point, { true })).isFalse()
+        runCurrent()
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.DISCONNECTED)
+    }
+
+    @Test
+    fun cancelledRollbackStopsOnlyItsOwnRestoration() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine(hangStartNumber = 2)
+        val controller = controller(this, engine, hardStopTimeoutMs = 2_500)
+        reachConnected(this, controller, engine)
+        val point = requireNotNull(controller.suspendForModeSwitch())
+        runCurrent()
+        val rollback = async { controller.restoreAfterModeSwitch(point, { true }) }
+        runCurrent()
+        assertThat(engine.startCount).isEqualTo(2)
+        rollback.cancelAndJoin()
+        runCurrent()
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.DISCONNECTED)
+        assertThat(engine.stopCount).isAtLeast(2)
+    }
+
+    @Test
+    fun newerSimpleSelectionIsNotOverwrittenByOldRollback() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine()
+        val controller = controller(this, engine, hardStopTimeoutMs = 2_500)
+        reachConnected(this, controller, engine)
+        val point = requireNotNull(controller.suspendForModeSwitch())
+        runCurrent()
+        val second = sampleProfile().copy(
+            id = "p2", selectedOutboundId = "out-2",
+            outbounds = sampleProfile().outbounds.map {
+                it.copy(id = "out-2")
+            }
+        )
+        controller.connect(second, catchAllNodes().map { it.copy(profileId = "p2") }, RunMode.PROXY)
+        runCurrent()
+        assertThat(controller.restoreAfterModeSwitch(point, { true })).isFalse()
+        assertThat(controller.snapshot.value.activeProfileId).isEqualTo("p2")
+        assertThat(controller.snapshot.value.mode).isEqualTo(RunMode.PROXY)
+        assertThat(engine.startCount).isEqualTo(2)
+    }
 
     @Test
     fun startupProbeWaitsForSlowNetworkWithoutSlowingConnectedRefresh() = runTest(dispatcher) {
@@ -94,8 +218,11 @@ class ConnectionControllerTest {
             reconnect = ReconnectSettings(maxAttempts = 3, watchdogTimeoutMs = 60_000),
             tunnelHealthProbe = {
                 checks++
-                if (checks == 2) Result.success(42L)
-                else Result.failure(IllegalStateException("no reply"))
+                if (checks == 2) {
+                    Result.success(42L)
+                } else {
+                    Result.failure(IllegalStateException("no reply"))
+                }
             },
         )
         controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
@@ -142,8 +269,10 @@ class ConnectionControllerTest {
             failoverEnabled = true,
             group = ManualFailoverGroup("g", "Резерв", listOf("out-1", "out-2")),
         )
-        controller.connect(first, catchAllNodes(), RunMode.FULL_VPN,
-            defaults = EngineDefaults(tunMtu = 1380, directDnsServer = "9.9.9.9"))
+        controller.connect(
+            first, catchAllNodes(), RunMode.FULL_VPN,
+            defaults = EngineDefaults(tunMtu = 1380, directDnsServer = "9.9.9.9")
+        )
         runCurrent()
         controller.onEngineSignal(ConnectionCause.DialFailure("network down"))
         runCurrent()
@@ -924,6 +1053,7 @@ private class ProgressiveHopTracer : HopTracer {
 private class RecordingBoxEngine(
     private val hangStop: Boolean = false,
     private val hangStart: Boolean = false,
+    private val hangStartNumber: Int? = null,
     private val startError: Throwable? = null,
     private val failOnStartNumber: Int? = null,
     private val probeResult: Result<Int> = Result.success(0),
@@ -949,7 +1079,7 @@ private class RecordingBoxEngine(
         if (shouldFail) {
             throw startError ?: error("start failed")
         }
-        if (hangStart) {
+        if (hangStart || hangStartNumber == startCount) {
             delay(60_000)
             return
         }

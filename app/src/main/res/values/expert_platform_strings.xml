@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="expert_platform_notification_title">LerNET · управление сетью</string>
+    <string name="expert_platform_notification_text">TUN работает. Правила управляют выходом приложений в сеть.</string>
+    <string name="expert_platform_notification_starting">Подготавливаем TUN и правила сети.</string>
+    <string name="expert_platform_simple_conflict">Сетью управляет Expert. Сначала остановите этот режим.</string>
+    <string name="expert_platform_missing_permission">Android не разрешил создать VPN. Подтвердите системный запрос.</string>
+    <string name="expert_platform_other_vpn">Другой VPN уже управляет сетью. Отключите его перед запуском Expert.</string>
+    <string name="expert_platform_native_missing">Встроенное ядро не поддерживает постоянный Expert TUN. Нужна сборка с Expert API.</string>
+    <string name="expert_platform_tunnel_lost">Android остановил Expert VPN. Активные правила больше не применяются.</string>
+    <string name="expert_platform_package_protection_unavailable">Для защиты и блокировки по приложениям нужен Android 10 или новее. На старой системе приложение нельзя определить достаточно надёжно.</string>
+    <string name="expert_platform_start_failed">Не удалось запустить Expert. Причина записана в журнале ядра.</string>
+    <string name="expert_platform_start_failed_restored">Expert не запустился. Предыдущее подключение и его правила восстановлены.</string>
+    <string name="expert_platform_start_failed_restore_failed">Expert не запустился. Вернуть прежнее подключение и подтвердить HTTPS через него не удалось. Причина записана в журнале.</string>
+    <string name="expert_platform_start_failed_cleanup">Expert не запустился, и ядро не подтвердило полную остановку. Предыдущее подключение не восстанавливаем, пока сетевые ресурсы заняты. Нажмите «Остановить», затем откройте Android → Настройки → Приложения → LerNET → Остановить. Принудительная остановка приложения освобождает его сетевые ресурсы. Если включена системная блокировка сети без VPN, Android продолжит блокировать трафик, пока вы не измените эту настройку VPN.</string>
+    <string name="expert_platform_close_uncertain">Ядро не подтвердило освобождение VPN. Повторная попытка может не помочь. Нажмите «Остановить», затем откройте Android → Настройки → Приложения → LerNET → Остановить. Принудительная остановка приложения освобождает его сетевые ресурсы. Если включена системная блокировка сети без VPN, Android продолжит блокировать трафик, пока вы не измените эту настройку VPN.</string>
+    <string name="expert_platform_apply_rejected">Новые правила не применились. Предыдущая схема осталась активной.</string>
+    <string name="expert_platform_apply_uncertain">Ядро не подтвердило, какая версия схемы действует. Приложение не считает её применённой.</string>
+    <string name="expert_platform_native_stopped">Ядро Expert остановлено. Нужен повторный запуск режима.</string>
+    <string name="expert_platform_exit_missing">Выхода нет в текущей применённой схеме.</string>
+    <string name="expert_platform_probe_stale">Схема изменилась во время проверки. Этот замер уже устарел.</string>
+    <string name="expert_platform_exit_sleeping">Выход спит. Проверка связи не поднимает его автоматически.</string>
+    <string name="expert_platform_protocol_invalid">Ядро прислало некорректный ответ. Подробности записаны в журнале.</string>
+    <string name="expert_platform_restart_blocked">Expert не восстановлен автоматически: сохранённая схема, профили или параметры отличаются от последней подтверждённой версии, либо её подтверждение не удалось сохранить. Проверьте настройки и нажмите «Запустить», чтобы явно разрешить текущую сохранённую схему. Если Android блокирует сеть без VPN, до запуска трафик останется заблокирован.</string>
+    <string name="expert_platform_restart_invalidation_failed">Не удалось безопасно сохранить состояние автоматического восстановления. Изменение подключения не начато. Причина записана в журнале.</string>
+    <string name="expert_platform_restart_promotion_failed">Правила применены и работают, но сохранить подтверждение для автоматического восстановления не удалось. После завершения процесса Android потребуется ручной запуск Expert. Причина записана в журнале.</string>
+</resources>

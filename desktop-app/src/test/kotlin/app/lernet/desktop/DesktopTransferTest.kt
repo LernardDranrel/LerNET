@@ -82,4 +82,28 @@ class DesktopTransferTest {
         val imported = DesktopTransfer.merge(StoredState(), DesktopTransfer.export(state))
         assertEquals(imported.profiles.single().id, imported.rules.single().profileId)
     }
+
+    @Test fun `workspace transaction preserves already remapped identities and platform preferences`() {
+        val preferences = saved.copy(corePath = "C:\\custom\\sing-box.exe", tunMtu = 1400, healthUrl = "https://health.example/204")
+        val bundle = TransferCodec.decode(DesktopTransfer.export(saved))
+        val materialized = DesktopTransfer.materializeWorkspace(preferences, bundle)
+        assertEquals(bundle.profiles.map { it.id }, materialized.profiles.map { it.id })
+        assertEquals(bundle.groups.map { it.id }, materialized.groups.map { it.id })
+        assertEquals(bundle.rules.map { it.id }, materialized.rules.map { it.id })
+        assertEquals(bundle.profiles.single().selectedOutboundId, materialized.profiles.single().selectedOutboundId)
+        assertEquals("grp_group", materialized.rules.first().profileId)
+        assertEquals(group.id, materialized.profiles.single().groupId)
+        assertEquals(preferences.corePath, materialized.corePath)
+        assertEquals(preferences.tunMtu, materialized.tunMtu)
+        assertEquals(preferences.healthUrl, materialized.healthUrl)
+        assertEquals(saved.rulePositions, materialized.rulePositions)
+    }
+
+    @Test fun `invalid workspace references fail before materialization`() {
+        val bundle = TransferCodec.decode(DesktopTransfer.export(saved))
+        val malformed = bundle.copy(groups = bundle.groups.map { it.copy(profileIds = listOf("missing-profile")) })
+        val failure = runCatching { DesktopTransfer.materializeWorkspace(saved, malformed) }
+        assertTrue(failure.isFailure)
+        assertEquals("profile", saved.profiles.single().id)
+    }
 }

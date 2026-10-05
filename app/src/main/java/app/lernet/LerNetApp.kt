@@ -10,9 +10,12 @@ import app.lernet.log.CrashGuard
 import app.lernet.vpn.LibboxNative
 import dagger.hilt.android.HiltAndroidApp
 import java.io.File
+import javax.inject.Inject
+import app.lernet.ui.expert.ExpertCoordinator
 
 @HiltAndroidApp
 class LerNetApp : Application() {
+    @Inject lateinit var expertCoordinator: ExpertCoordinator
     lateinit var logStore: AppLogStore
         private set
 

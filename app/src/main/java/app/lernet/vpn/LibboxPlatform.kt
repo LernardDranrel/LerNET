@@ -39,6 +39,7 @@ class LibboxPlatform(
     private val context: Context,
     private val vpn: VpnService?,
     private val tunRequired: Boolean,
+    private val captureAllApplications: Boolean = false,
 ) : PlatformInterface {
     @Volatile
     private var myTunName: String? = null
@@ -73,8 +74,9 @@ class LibboxPlatform(
         jniCall("openTun") {
             CrashTrail.mark("PlatformInterface.openTun")
             val service = vpn ?: throw Exception("proxy mode has no TUN")
+            (service as? TunOwner)?.beforeOpenTun()
             val pfd = try {
-                TunEstablisher.establish(service, options, context.packageName)
+                TunEstablisher.establish(service, options, context.packageName, captureAllApplications)
             } catch (error: Throwable) {
                 CrashTrail.recordFailure("openTun.establish", error)
                 throw error
@@ -82,8 +84,11 @@ class LibboxPlatform(
             if (service is TunOwner) {
                 service.retainTun(pfd)
             }
-            CrashTrail.mark("PlatformInterface.openTun fd=${pfd.fd}")
-            pfd.fd
+            // The pinned libbox platform wrapper duplicates this borrowed descriptor before
+            // handing it to NativeTun. VpnService retains and closes the original PFD.
+            val nativeDescriptor = pfd.fd
+            CrashTrail.mark("PlatformInterface.openTun fd=$nativeDescriptor serviceFd=${pfd.fd}")
+            nativeDescriptor
         }
 
     override fun useProcFS(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
@@ -288,5 +293,7 @@ class LibboxPlatform(
 }
 
 interface TunOwner {
+    fun beforeOpenTun() = Unit
+
     fun retainTun(pfd: ParcelFileDescriptor)
 }

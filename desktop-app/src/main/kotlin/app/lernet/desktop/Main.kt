@@ -75,6 +75,9 @@ import app.lernet.engine.RunMode
 import app.lernet.engine.compile.EngineDefaults
 import app.lernet.engine.compile.OutboundPatch
 import app.lernet.config.model.DnsPolicy
+import app.lernet.desktop.expert.DesktopExpert
+import app.lernet.desktop.expert.ExpertIntent
+import app.lernet.desktop.expert.ExpertPhase
 import java.awt.Toolkit
 import java.awt.FileDialog
 import java.awt.Frame
@@ -92,6 +95,7 @@ private val green = Color(0xFF80DEBE)
 private val APP_VERSION: String = AppVersionResource::class.java.getResourceAsStream("/lernet-version.txt")
     ?.bufferedReader()?.use { it.readText().trim() }?.takeIf { it.isNotBlank() } ?: "dev"
 private object AppVersionResource
+private data class ExpertArchivePreview(val raw: String, val fileName: String, val profiles: Int, val folders: Int)
 internal val desktopColors = darkColorScheme(
     primary = blue, onPrimary = background,
     primaryContainer = Color(0xFF293B62), onPrimaryContainer = Color(0xFFE1E8FF),
@@ -129,9 +133,10 @@ fun main(args: Array<String>) {
 
 private fun desktopApplication(startupCheck: String?, startupFallbackMessage: String?) = application {
     val controller = remember { DesktopController().also { startupFallbackMessage?.let(it::showMessage) } }
-    DisposableEffect(controller) {
+    val expert = remember { if (startupCheck == null) DesktopExpertController(controller) else null }
+    DisposableEffect(controller, expert) {
         val closed = java.util.concurrent.atomic.AtomicBoolean(false)
-        val closeController = { if (closed.compareAndSet(false, true)) controller.close() }
+        val closeController = { if (closed.compareAndSet(false, true)) { expert?.close(); controller.close() } }
         val hook = Thread({ closeController() }, "LerNET-shutdown")
         Runtime.getRuntime().addShutdownHook(hook)
         val listener = if (startupCheck == null) WindowsUpdateShutdown.listen {
@@ -148,8 +153,21 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
     val windowState = rememberWindowState(size = DpSize(1180.dp, 760.dp))
     val tunnel by controller.tunnel.state.collectAsState()
     val ui by controller.state.collectAsState()
+    val expertUi = expert?.state?.collectAsState()?.value
+    var expertTab by remember { mutableStateOf(false) }
+    var expertConfirm by remember { mutableStateOf<ExpertIntent?>(null) }
+    var expertImport by remember { mutableStateOf<ExpertArchivePreview?>(null) }
+    var expertReplaceConfirm by remember { mutableStateOf(false) }
+    var expertStartPending by remember { mutableStateOf(false) }
+    var expertStartPreflight by remember { mutableStateOf<ExpertPreflightResult?>(null) }
+    LaunchedEffect(expertStartPending) {
+        if (expertStartPending) expertStartPreflight = WindowsExpertPreflight().read()
+    }
     val icon = painterResource(
-        when (tunnel.status) {
+        when {
+            expertUi?.phase == ExpertPhase.RUNNING -> "lernet-icon-running.png"
+            expertUi?.phase == ExpertPhase.FAILED -> "lernet-icon-failed.png"
+            else -> when (tunnel.status) {
             TunnelStatus.RUNNING -> when {
                 ui.healthFailures >= 2 -> "lernet-icon-failed.png"
                 ui.healthVerified == true -> "lernet-icon-running.png"
@@ -157,6 +175,7 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
             }
             TunnelStatus.FAILED -> "lernet-icon-failed.png"
             else -> "lernet-icon.png"
+            }
         },
     )
     Tray(
@@ -166,9 +185,12 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
         menu = {
             Item("Открыть", onClick = { visible = true })
             Item("Сеть устройства", onClick = { networkWindowOpen = true })
-            Item("Отключить VPN", onClick = controller::disconnect)
+            Item("Отключить", onClick = {
+                if (expertUi?.phase in setOf(ExpertPhase.RUNNING, ExpertPhase.STARTING, ExpertPhase.APPLYING)) expert?.dispatch(ExpertIntent.Stop)
+                else controller.disconnect()
+            })
             Separator()
-            Item("Выход", onClick = { controller.close(); exitApplication() })
+            Item("Выход", onClick = { expert?.close(); controller.close(); exitApplication() })
         },
     )
     Window(
@@ -195,15 +217,137 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
             shapes = Shapes(small = RoundedCornerShape(10.dp), medium = RoundedCornerShape(14.dp), large = RoundedCornerShape(18.dp))) {
             Surface(color = background, contentColor = desktopColors.onBackground) {
                 if (startupCheck == null) DesktopUpdatePrompt()
-                DesktopScreen(controller, onOpenNetwork = { networkWindowOpen = true }, onRequestElevation = {
-                    WindowsElevation.relaunchAsAdministrator()
-                        .onSuccess { controller.close(); exitApplication() }
-                        .onFailure { controller.showMessage(it.message ?: "Не удалось запросить права администратора") }
-                })
+                Column(Modifier.fillMaxSize()) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        FilterChip(selected = !expertTab, onClick = { expertTab = false }, label = { Text("VPN") })
+                        FilterChip(selected = expertTab, onClick = { expertTab = true }, label = { Text("Экспертный режим") })
+                        Spacer(Modifier.weight(1f))
+                        if (expertUi?.phase == ExpertPhase.RUNNING) Text("Управление сетью включено", color = green)
+                        else if (tunnel.status == TunnelStatus.RUNNING) Text("VPN подключён", color = green)
+                    }
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        if (expertTab && expert != null && expertUi != null) {
+                            DesktopExpert(expertUi, onIntent = { intent ->
+                                when (intent) {
+                                    ExpertIntent.OpenNetworkObservation -> networkWindowOpen = true
+                                    ExpertIntent.Import -> chooseTransferFile(false)?.let { file ->
+                                        try {
+                                            check(Files.size(file) <= 20_000_000)
+                                            val raw = Files.readString(file)
+                                            val preview = app.lernet.config.policy.PolicyWorkspaceCodec.decode(raw)
+                                            expertImport = ExpertArchivePreview(raw, file.fileName.toString(), preview.legacy.profiles.size, preview.legacy.groups.size)
+                                            expertReplaceConfirm = false
+                                        } catch (_: Exception) { expert.reportError("Не удалось прочитать архив LerNET. Проверьте формат и размер файла (до 20 МБ).") }
+                                    }
+                                    ExpertIntent.Export, ExpertIntent.EnableSystemGuard, ExpertIntent.RecoverSystemGuard -> expertConfirm = intent
+                                    ExpertIntent.ChooseExecutable -> {
+                                        val dialog = FileDialog(null as Frame?, "Выбрать исполняемый файл", FileDialog.LOAD)
+                                        dialog.isVisible = true
+                                        dialog.file?.let { expert.addExecutable(Path.of(dialog.directory, it).toString()) }
+                                        dialog.dispose()
+                                    }
+                                    ExpertIntent.Start -> {
+                                        expertStartPreflight = null
+                                        expertStartPending = true
+                                    }
+                                    else -> expert.dispatch(intent)
+                                }
+                            })
+                        } else DesktopScreen(controller, onOpenNetwork = { networkWindowOpen = true }, onRequestElevation = {
+                            WindowsElevation.relaunchAsAdministrator()
+                                .onSuccess { expert?.close(); controller.close(); exitApplication() }
+                                .onFailure { controller.showMessage(it.message ?: "Не удалось запросить права администратора") }
+                        })
+                    }
+                }
+                if (expertStartPending) {
+                    AlertDialog(
+                        onDismissRequest = { expertStartPending = false },
+                        title = { Text("Включить управление сетью?") },
+                        text = {
+                            Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text("Общий TUN будет обрабатывать трафик устройства по вашим сохранённым правилам. " +
+                                    "В новой схеме путь по умолчанию — напрямую; защищённые ветки имеют отдельные правила.")
+                                if (!WindowsElevation.isElevated) {
+                                    Text("Windows запросит права администратора и откроет новую копию LerNET. " +
+                                        "Текущее подключение будет остановлено. После этого откройте экспертный режим и подтвердите включение.")
+                                }
+                                if (tunnel.status in setOf(TunnelStatus.RUNNING, TunnelStatus.STARTING)) {
+                                    Text("Обычное подключение LerNET будет остановлено перед переключением. " +
+                                        "В текущей копии с правами администратора, если прежнее подключение уже работало, " +
+                                        "после ошибки запуска приложение попытается его восстановить.")
+                                }
+                                val snapshot = expertStartPreflight
+                                if (snapshot == null) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically) {
+                                        CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                                        Text("Читаем текущие пути Windows…")
+                                    }
+                                } else {
+                                    Text(snapshot.summary, fontWeight = FontWeight.SemiBold)
+                                    snapshot.facts.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+                                    snapshot.warnings.forEach { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.bodySmall) }
+                                }
+                            }
+                        },
+                        confirmButton = { Button(enabled = expertStartPreflight != null, onClick = {
+                            expertStartPending = false
+                            if (!WindowsElevation.isElevated) {
+                                WindowsElevation.relaunchAsAdministrator()
+                                    .onSuccess { expert?.close(); controller.close(); exitApplication() }
+                                    .onFailure { expert?.reportError(it.message ?: "Не удалось запросить права администратора") }
+                            } else expert?.dispatch(ExpertIntent.Start)
+                        }) { Text("Включить") } },
+                        dismissButton = { TextButton(onClick = { expertStartPending = false }) { Text("Отмена") } },
+                    )
+                }
+                expertConfirm?.let { action ->
+                    AlertDialog(onDismissRequest = { expertConfirm = null },
+                        title = { Text(when (action) { ExpertIntent.Export -> "Сохранить рабочую область?"; ExpertIntent.EnableSystemGuard -> "Защитить всё устройство?"; else -> "Восстановить обычный доступ в сеть?" }) },
+                        text = { Text(when (action) {
+                            ExpertIntent.Export -> "Архив содержит настройки подключения и секреты профилей. Передавайте его только доверенным людям."
+                            ExpertIntent.EnableSystemGuard -> "При остановке LerNET Windows будет блокировать обычный выход " +
+                                "в сеть для всего устройства. Разрешённые ветки внутри работающего TUN смогут выходить напрямую. " +
+                                "Внешние соединения другого VPN-клиента тоже могут быть заблокированы, " +
+                                "включая его доступ к корпоративной сети. Обычные связи программ с localhost тоже блокируются. " +
+                                "Для возврата обычной сети отдельно отключите " +
+                                "системную защиту в разделе «Защита»."
+                            else -> "Будут удалены только системные фильтры LerNET. После остановки TUN приложения смогут использовать обычную сеть."
+                        }) },
+                        confirmButton = { Button(onClick = {
+                            expertConfirm = null
+                            when (action) {
+                                ExpertIntent.Export -> chooseTransferFile(true, "LerNET-workspace.json")?.let { expert?.exportArchive(it) }
+                                ExpertIntent.EnableSystemGuard -> expert?.enableSystemGuard()
+                                ExpertIntent.RecoverSystemGuard -> expert?.dispatch(action)
+                                else -> Unit
+                            }
+                        }) { Text("Продолжить") } }, dismissButton = { TextButton(onClick = { expertConfirm = null }) { Text("Отмена") } })
+                }
+                expertImport?.let { archive ->
+                    AlertDialog(onDismissRequest = { expertImport = null },
+                        title = { Text(if (expertReplaceConfirm) "Заменить всю рабочую область?" else "Импорт рабочей области") },
+                        text = { Text(if (expertReplaceConfirm)
+                            "Текущие профили, папки и сохранённая схема будут заменены содержимым «${archive.fileName}». Активные правила не изменятся до вашего отдельного применения."
+                        else "${archive.fileName}\nПрофилей: ${archive.profiles} · папок: ${archive.folders}.\nДобавление создаёт копии с новыми идентификаторами. Замена переносит всю рабочую область, включая основной путь по умолчанию. Импорт не включает новые правила в работающем TUN.") },
+                        confirmButton = { Button(onClick = {
+                            expert?.importArchive(archive.raw, replace = expertReplaceConfirm)
+                            expertImport = null
+                        }) { Text(if (expertReplaceConfirm) "Заменить" else "Добавить копии") } },
+                        dismissButton = { Row {
+                            if (!expertReplaceConfirm) TextButton(onClick = { expertReplaceConfirm = true }) { Text("Заменить всё…") }
+                            TextButton(onClick = { expertImport = null }) { Text("Отмена") }
+                        } })
+                }
             }
         }
     }
     if (networkWindowOpen) DesktopNetworkWindow(
+        readDiagnosticLog = { controller.tunnel.state.value.logs },
         onClose = { networkWindowOpen = false },
         useLerNetProxy = {
             val saved = controller.state.value.saved
@@ -216,7 +360,7 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
             val profile = saved.profiles.firstOrNull { it.id == saved.selectedProfileId }
             val outbound = profile?.outbounds?.firstOrNull { it.id == profile.selectedOutboundId }
             val endpoint = runCatching { outbound?.singBoxJson?.let { kotlinx.serialization.json.Json.parseToJsonElement(it).jsonObject["server"]?.jsonPrimitive?.content } }.getOrNull().orEmpty()
-            app.lernet.desktop.observation.ClientObservationContext(profile?.name.orEmpty(), endpoint, outbound?.type.orEmpty(), profile?.modeOverride ?: saved.mode)
+            app.lernet.desktop.observation.ClientObservationContext(profile?.name.orEmpty(), endpoint, outbound?.type.orEmpty(), profile?.modeOverride ?: saved.mode, controller.tunnel.state.value.status.name, controller.tunnel.state.value.message, APP_VERSION)
         },
     )
 }
@@ -311,6 +455,7 @@ private fun DesktopScreen(controller: DesktopController, onRequestElevation: () 
             }
             if (ui.message.isNotBlank() && ui.message != statusLine)
                 Text(ui.message, color = if (ui.connectionError != null) desktopColors.error else muted, maxLines = 2)
+                if (ui.networkWarning.isNotBlank()) Text(ui.networkWarning, color = Color(0xFFF1CC80), fontSize = 12.sp, maxLines = 3)
             Spacer(Modifier.height(18.dp))
             when (tab) {
                 Tab.PROFILES -> Profiles(ui.saved, tunnel, ui.busy, ui.probes, ui.tunnelLatencyMs, trace, controller,

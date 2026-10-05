@@ -7,7 +7,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.*
 
-internal data class WindowsObservationDefinition(val id: String, val title: String, val explanation: String)
+internal data class WindowsObservationDefinition(val id: String, val title: String, val explanation: String, val timeoutMs: Long = 15_000)
 
 internal class WindowsNetworkObservation(private val runner: ObservationCommandRunner = SystemObservationCommandRunner) {
     fun collect(): NetworkSnapshot {
@@ -30,12 +30,12 @@ internal class WindowsNetworkObservation(private val runner: ObservationCommandR
                     runCatching {
                         val result = runner.run(listOf(windowsTool("WindowsPowerShell/v1.0/powershell.exe"),
                             "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath.toString(),
-                            "-Source", definition.id, "-WfpStateFile", wfpPath.toString()), 15_000)
+                            "-Source", definition.id, "-WfpStateFile", wfpPath.toString()), definition.timeoutMs)
                         parseSource(definition, result)
                     }.getOrElse { source(definition, SourceState.ERROR, detail = it.message ?: it.javaClass.simpleName) }
                 }
             }
-            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(65)
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120)
             val sources = futures.mapIndexed { index, future ->
                 runCatching { future.get(maxOf(1, deadline - System.nanoTime()), TimeUnit.NANOSECONDS) }.getOrElse {
                     future.cancel(true)
@@ -86,7 +86,10 @@ internal class WindowsNetworkObservation(private val runner: ObservationCommandR
             WindowsObservationDefinition("neighbors", "Соседи в локальной сети", "Уже известный системе ARP/ND-кэш. LerNET не сканирует сеть и не ищет новые устройства."),
             WindowsObservationDefinition("compartments", "Изолированные сети", "Сетевые контексты Windows, контейнеров и виртуальных машин могут иметь отдельные таблицы маршрутов."),
             WindowsObservationDefinition("firewall-profiles", "Профили брандмауэра", "Эффективные профили и действия по умолчанию. Правила не изменяются."),
-            WindowsObservationDefinition("firewall-rules", "Правила брандмауэра", "Активные правила с приложением, адресами, портами и источником политики. Совпадение одного поля ещё не доказывает блокировку."),
+            WindowsObservationDefinition("firewall-rules", "Правила брандмауэра", "Активные правила и источник политики. Условия программ, портов и адресов читаются отдельно; совпадение поля ещё не доказывает блокировку.", 45_000),
+            WindowsObservationDefinition("firewall-applications", "Программы в правилах", "Условия приложений активного хранилища брандмауэра. InstanceID — идентификатор записи, а не доказательство блокировки программы.", 45_000),
+            WindowsObservationDefinition("firewall-ports", "Порты в правилах", "Протоколы и порты условий брандмауэра. Само условие не сообщает, разрешает правило связь или запрещает.", 45_000),
+            WindowsObservationDefinition("firewall-addresses", "Адреса в правилах", "Адресные условия брандмауэра из ActiveStore; записи не меняются.", 45_000),
             WindowsObservationDefinition("ipsec", "Активные IPsec-каналы", "Текущие защищённые связи и параметры соединения, без ключей. SSTP и другие VPN не обязаны появляться здесь."),
             WindowsObservationDefinition("nat", "Преобразование адресов", "Локальные NAT-сети Windows. NAT домашнего роутера отсюда не виден."),
             WindowsObservationDefinition("nat-mappings", "Переадресация портов", "Статические правила Windows NAT с внутренними и внешними адресами."),
@@ -100,7 +103,7 @@ internal class WindowsNetworkObservation(private val runner: ObservationCommandR
             ObservationSource(d.id, d.title, d.explanation, state, rows, detail)
 
         internal fun parseSource(definition: WindowsObservationDefinition, result: ObservationCommandResult): ObservationSource {
-            if (result.timedOut) return source(definition, SourceState.TIMEOUT, detail = "Чтение превысило 15 секунд")
+            if (result.timedOut) return source(definition, SourceState.TIMEOUT, detail = "Чтение превысило ${definition.timeoutMs / 1000} секунд")
             observationOutputProblem(result)?.let { return source(definition, SourceState.ERROR, detail = it).copy(complete = false) }
             val value = try { Json.parseToJsonElement(result.output.trim().removePrefix("\uFEFF")).jsonObject }
             catch (error: Exception) { return source(definition, SourceState.ERROR, detail = observationJsonProblem(error)).copy(complete = false) }
@@ -134,6 +137,8 @@ internal class WindowsNetworkObservation(private val runner: ObservationCommandR
                 "adapter-properties" -> listOf("Name", "RegistryKeyword")
                 "neighbors" -> listOf("InterfaceIndex", "IPAddress", "CompartmentId")
                 "wfp" -> listOf("FilterKey")
+                "firewall-rules" -> listOf("Name", "PolicyStoreSource")
+                "firewall-applications", "firewall-ports", "firewall-addresses" -> listOf("InstanceID")
                 "compartments" -> listOf("CompartmentId")
                 "nat-mappings" -> listOf("NatName", "Protocol", "ExternalIPAddress", "ExternalPort", "InternalIPAddress", "InternalPort")
                 "installed-apps" -> listOf("PSPath")

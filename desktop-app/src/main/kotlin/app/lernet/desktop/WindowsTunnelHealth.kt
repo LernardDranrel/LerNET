@@ -34,6 +34,63 @@ internal object WindowsRouteInspector {
 
     private val api: IpHelper by lazy { Native.load("iphlpapi", IpHelper::class.java) }
 
+    /** Local route-table inspection only; it sends no packets and performs no DNS lookup. */
+    fun checkExpert(interfaceIdentity: String): String? = runCatching {
+        val index = interfaceIdentity.split(':').getOrNull(1)?.toIntOrNull()
+        check(index != null && index > 0) { "Ядро не передало индекс общего TUN" }
+        val luid = interfaceLuid(index)
+        val samples = mutableListOf(
+            InetAddress.getByAddress(byteArrayOf(1, 1, 1, 1)),
+            InetAddress.getByAddress(byteArrayOf(203.toByte(), 0, 113, 1)),
+            InetAddress.getByAddress(byteArrayOf(0x20, 0x01, 0x0d, 0xb8.toByte(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)),
+        )
+        val interfaces = NetworkInterface.getNetworkInterfaces().toList().filter { it.index != index && it.isUp && !it.isLoopback }
+        val ownAddresses = interfaces.flatMap { it.inetAddresses.toList() }.map { it.address.toList() }.toSet()
+        interfaces.flatMap { it.interfaceAddresses }.forEach { assignment ->
+            val address = assignment.address
+            val prefix = assignment.networkPrefixLength.toInt()
+            if (!address.isLoopbackAddress && !address.isLinkLocalAddress && !address.isMulticastAddress) {
+                connectedSample(address, prefix, ownAddresses)?.let(samples::add)
+            }
+        }
+        inspectExpertRoutes(samples.distinctBy { it.hostAddress }, index, luid, ::bestInterface, ::interfaceLuid, ::interfaceAlias)
+    }.getOrElse { "Не удалось подтвердить перехват маршрутов Windows: ${it.message ?: it.javaClass.simpleName}" }
+
+    internal fun inspectExpertRoutes(
+        destinations: List<InetAddress>, expectedIndex: Int, expectedLuid: Long,
+        indexFor: (InetAddress) -> Int, luidFor: (Int) -> Long, aliasFor: (Int) -> String,
+    ): String? = destinations.firstNotNullOfOrNull { address ->
+        val actual = indexFor(address)
+        if (actual == expectedIndex && luidFor(actual) == expectedLuid) null
+        else "Windows выбрала для ${address.hostAddress} интерфейс «${aliasFor(actual)}», а не общий TUN LerNET. Возможен конфликт маршрутов с другим VPN."
+    }
+
+    /** Bounded numeric samples include IPv4 /31 peers and IPv6 global/ULA neighbours. */
+    internal fun connectedSample(address: InetAddress, prefix: Int, ownAddresses: Set<List<Byte>>): InetAddress? {
+        val bits = address.address.size * 8
+        if (prefix !in 1 until bits) return null
+        val network = address.address.copyOf()
+        for (bit in prefix until bits) {
+            val offset = bit / 8
+            network[offset] = (network[offset].toInt() and (1 shl (7 - bit % 8)).inv()).toByte()
+        }
+        val hostBits = bits - prefix
+        val candidates = if (hostBits == 1) 0..1 else {
+            val reservedBroadcast = if (address is Inet4Address) 1 else 0
+            1..minOf(3, (1 shl minOf(hostBits, 3)) - 1 - reservedBroadcast)
+        }
+        return candidates.asSequence().map { host ->
+            network.copyOf().also { it[it.lastIndex] = (it.last().toInt() or host).toByte() }
+        }.firstOrNull { it.toList() !in ownAddresses }?.let(InetAddress::getByAddress)
+    }
+
+    internal fun interfaceLuid(index: Int): Long {
+        val luid = LongByReference()
+        val result = api.ConvertInterfaceIndexToLuid(index, luid)
+        check(result == 0) { "ConvertInterfaceIndexToLuid($index): $result" }
+        return luid.value.also { check(it != 0L) { "Windows не передала LUID интерфейса $index" } }
+    }
+
     fun check(url: String): String? = runCatching {
         val host = URI(url).host ?: error("У адреса проверки нет имени сервера")
         val destinations = InetAddress.getAllByName(host)
@@ -70,7 +127,7 @@ internal object WindowsRouteInspector {
         return buffer.getWideString(0).also { check(it.isNotBlank()) { "Empty interface alias: $index" } }
     }
 
-    private fun bestInterface(address: InetAddress): Int {
+    internal fun bestInterface(address: InetAddress): Int {
         val family = when (address) {
             is Inet4Address -> 2 // AF_INET
             is Inet6Address -> 23 // AF_INET6 on Windows

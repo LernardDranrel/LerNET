@@ -13,6 +13,10 @@ import app.lernet.engine.redact.LerNetLog
 import io.nekohasekai.libbox.InterfaceUpdateListener
 import java.net.NetworkInterface
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 /**
  * Publishes the **underlay** (wifi/cell) to libbox, never the VPN TUN.
@@ -26,6 +30,13 @@ object DefaultNetworkMonitor {
     private val listener = AtomicReference<InterfaceUpdateListener?>(null)
     private val underlay = AtomicReference<Network?>(null)
     private val tunName = AtomicReference<String?>(null)
+    private val fingerprint = AtomicReference<String?>(null)
+    private val mutableChanges = MutableStateFlow(0L)
+
+    /** Emits only actual underlay changes; repeated capabilities callbacks do not invalidate probes. */
+    val changes: StateFlow<Long> = mutableChanges.asStateFlow()
+
+    fun currentTunName(): String? = tunName.get()
 
     @Volatile
     private var connectivity: ConnectivityManager? = null
@@ -39,6 +50,8 @@ object DefaultNetworkMonitor {
         override fun onLost(network: Network) {
             if (underlay.get() == network) {
                 underlay.set(null)
+                fingerprint.set(null)
+                mutableChanges.update { it + 1 }
                 listener.get()?.updateDefaultInterface("", -1, false, false)
                 LerNetLog.w(TAG, "underlay lost")
             }
@@ -125,6 +138,14 @@ object DefaultNetworkMonitor {
         val index = runCatching { NetworkInterface.getByName(name)?.index ?: -1 }.getOrDefault(-1)
         val expensive = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) != true
         underlay.set(network)
+        val nextFingerprint = buildString {
+            append(network).append('|').append(name)
+            append('|').append(link?.linkAddresses.orEmpty().map { it.toString() }.sorted())
+            append('|').append(link?.dnsServers.orEmpty().mapNotNull { it.hostAddress }.sorted())
+            append('|').append(link?.routes.orEmpty().map { "${it.destination}:${it.gateway?.hostAddress}" }.sorted())
+            append('|').append(link?.mtu)
+        }
+        if (fingerprint.getAndSet(nextFingerprint) != nextFingerprint) mutableChanges.update { it + 1 }
         LerNetLog.i(TAG, "default underlay name=$name index=$index net=$network")
         current.updateDefaultInterface(name, index, expensive, false)
     }

@@ -2,6 +2,7 @@ package app.lernet.engine
 
 import android.content.Context
 import app.lernet.BuildConfig
+import app.lernet.R
 import app.lernet.engine.compile.AssembledKeys
 import app.lernet.engine.compile.ConfigAssembler
 import app.lernet.engine.log.CrashTrail
@@ -11,6 +12,10 @@ import app.lernet.vpn.LibboxCommandHandler
 import app.lernet.vpn.LibboxNative
 import app.lernet.vpn.LibboxPlatformRegistry
 import app.lernet.vpn.LibboxStatusClient
+import app.lernet.vpn.VpnRuntime
+import app.lernet.vpn.expert.ExpertVpnSession
+import app.lernet.vpn.expert.ExpertVpnToken
+import app.lernet.engine.policy.TunIdentity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.nekohasekai.libbox.CommandClient
 import io.nekohasekai.libbox.CommandServer
@@ -22,6 +27,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -29,6 +35,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withTimeout
 
 @Singleton
 class LibboxBoxEngine @Inject constructor(
@@ -57,18 +64,26 @@ class LibboxBoxEngine @Inject constructor(
                 val message = error.message ?: error.toString()
                 LerNetLog.e(TAG, "start escaped: $message", error)
                 CrashTrail.recordFailure("engine.start", error)
-                runCatching { host.stop() }
+                runCatching { abort() }
                 emitFailed(EngineErrorMapper.map(message))
             }
     }
 
     private suspend fun startGuarded(compiledJson: String, mode: RunMode) {
+        if (ExpertVpnSession.isOwned) {
+            emitFailed(ConnectionCause.InvalidConfig(listOf(context.getString(R.string.expert_platform_simple_conflict))))
+            return
+        }
         if (compiledJson.isBlank()) {
             emitFailed(ConnectionCause.InvalidConfig(listOf("пустой compiled JSON")))
             return
         }
         val gen = generation.get()
         mutex.withLock {
+            if (ExpertVpnSession.isOwned) {
+                emitFailed(ConnectionCause.InvalidConfig(listOf(context.getString(R.string.expert_platform_simple_conflict))))
+                return
+            }
             if (generation.get() != gen) {
                 LerNetLog.w(TAG, "start aborted: stop requested")
                 return
@@ -78,7 +93,7 @@ class LibboxBoxEngine @Inject constructor(
             }.onFailure { error ->
                 closeStatusClient()
                 closeServerLocked()
-                host.stop()
+                abort()
                 val message = error.message ?: error.toString()
                 LerNetLog.e(TAG, "libbox start failed: $message", error)
                 CrashTrail.recordFailure("engine.startLocked", error)
@@ -108,11 +123,32 @@ class LibboxBoxEngine @Inject constructor(
         if (closed == null) {
             LerNetLog.e(TAG, "graceful libbox close timed out after ${GRACEFUL_CLOSE_MS}ms")
         }
-        host.stop()
+        // A delayed simple-mode stop must never tear down a newly reserved Expert service.
+        if (!ExpertVpnSession.isOwned) host.stop()
     }
 
     override fun abort() {
-        host.stop()
+        if (!ExpertVpnSession.isOwned) host.stop()
+    }
+
+    /** Serializes the handover with every simple-mode start and drains the previous service first. */
+    suspend fun reserveExpert(
+        stillDesired: () -> Boolean = { true },
+        onFailure: (TunIdentity?, String) -> Unit,
+    ): ExpertVpnToken = mutex.withLock {
+        check(stillDesired()) { "Expert handover was superseded before draining Simple" }
+        check(!ExpertVpnSession.isOwned) { "Expert VPN is already active" }
+        generation.incrementAndGet()
+        withContext(Dispatchers.IO) {
+            closeStatusClient()
+            closeServerLocked()
+            host.stop()
+            withTimeout(8_000L) {
+                while (VpnRuntime.current() != null || LibboxPlatformRegistry.peek() != null) delay(25L)
+            }
+            check(stillDesired()) { "Expert handover was superseded before service reservation" }
+            ExpertVpnSession.reserve(onFailure)
+        }
     }
 
     override suspend fun probeOutbound(tag: String, url: String, timeoutMs: Int): Result<Int> =

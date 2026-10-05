@@ -71,6 +71,8 @@ internal fun DesktopNetworkObservation(
     onRefresh: () -> Unit, onExport: () -> Unit, onProbe: () -> Unit, probeResult: String?,
     onStartTrace: () -> Unit, onStopTrace: () -> Unit, traceRunning: Boolean, traceStatus: String,
     onCancel: (() -> Unit)? = null,
+    onPinBaseline: (() -> Unit)? = null,
+    baselinePinned: Boolean = false,
     comparisonSnapshot: NetworkSnapshot? = snapshot,
 ) {
     var page by remember { mutableStateOf(ObservationPage.OVERVIEW) }
@@ -127,7 +129,7 @@ internal fun DesktopNetworkObservation(
                             "${snapshot.platform} · снимок ${observationTime(snapshot.finishedAt)} · ${if (snapshot.elevated) "права администратора" else "обычные права"}",
                             color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                     }
-                    if (!compact) OutlinedButton(onExport, enabled = snapshot != null && !busy) { Text("Сохранить отчёт") }
+                    if (!compact) OutlinedButton(onExport, enabled = snapshot != null && !busy) { Text("Сохранить полный разбор") }
                     if (busy && onCancel != null) TextButton(onCancel) { Text("Отменить") }
                     Button(onRefresh, enabled = !busy) { Text(if (busy) "Читаем…" else if (snapshot == null) "Исследовать" else "Обновить") }
                 }
@@ -138,7 +140,7 @@ internal fun DesktopNetworkObservation(
                             modifier = Modifier.testTag("network-nav-${item.name}")) }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onExport, enabled = snapshot != null && !busy) { Text("Сохранить отчёт") }
+                        TextButton(onExport, enabled = snapshot != null && !busy) { Text("Сохранить полный разбор") }
                         Spacer(Modifier.weight(1f))
                         Text("Меньше движения", fontSize = 11.sp)
                         Switch(reducedMotion, { reducedMotion = it }, Modifier.semantics { contentDescription = "Меньше движения" })
@@ -190,13 +192,20 @@ internal fun DesktopNetworkObservation(
                         }
                     }
                     ObservationPage.CHANGES -> {
-                        if (previous == null) Notice("Нужен второй снимок", "Нажмите «Обновить» после изменения сети. Здесь появится сравнение с предыдущим снимком.")
-                        else if (changes.isEmpty()) Notice("Настройки совпадают", "В прочитанных источниках изменений не найдено. Состояние самого канала могло измениться без изменения настроек.", observationMint)
-                        else LazyColumn(state = sectionListState, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            item { PageReadingGuide(page.title, pageReadingPlan(page), reducedMotion) }
-                            item { Text("${observationTime(previous.finishedAt)} → ${observationTime(snapshot.finishedAt)} · ${changes.size} изменений",
-                                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                            items(changes) { change -> ChangeDetail(change) }
+                        Column(Modifier.fillMaxWidth()) {
+                            Notice("До и после отключения VPN", "1. Снимите состояние с работающим VPN и зафиксируйте «до». 2. Штатно отключите другой клиент, когда безопасно потерять сеть. 3. Нажмите «Обновить». 4. Сохраните полный разбор: оба снимка, изменения и журнал LerNET останутся в одном JSON-файле.")
+                            if (onPinBaseline != null) OutlinedButton(onPinBaseline, enabled = !busy) {
+                                Text(if (baselinePinned) "Перезаписать снимок «до»" else "Зафиксировать текущий снимок «до»")
+                            }
+                            if (baselinePinned && previous != null) Text("Снимок «до» закреплён: ${observationTime(previous.finishedAt)}. Обновления его не заменяют.", fontSize = 12.sp)
+                            if (previous == null) Notice("Нужен второй снимок", "Нажмите «Обновить» после изменения подключения. Будет показано сравнение с предыдущим или закреплённым снимком.")
+                            else if (changes.isEmpty()) Notice("Настройки совпадают", "В прочитанных источниках изменений не найдено. Состояние самого канала могло измениться без изменения настроек.", observationMint)
+                            else LazyColumn(state = sectionListState, verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.weight(1f)) {
+                                item { PageReadingGuide(page.title, pageReadingPlan(page), reducedMotion) }
+                                item { NetworkChangeSummary(previous, comparisonSnapshot ?: snapshot) }
+                                item { Text("${observationTime(previous.finishedAt)} → ${observationTime(snapshot.finishedAt)} · ${changes.size} изменений", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                items(changes) { change -> ChangeDetail(change) }
+                            }
                         }
                     }
                     else -> {
@@ -479,6 +488,20 @@ private fun EvidenceDetail(row: EvidenceRow, sourceId: String, snapshot: Network
             }
         }
     }
+}
+
+@Composable
+private fun NetworkChangeSummary(before: NetworkSnapshot, after: NetworkSnapshot) {
+    val disabled = before.adapters.filter { it.up && it.virtual }.filter { old -> after.adapters.none { it.id == old.id && it.up } }
+    val dns = NetworkDependencies.localDnsFindings(after)
+    val lines = buildList {
+        if (disabled.isNotEmpty()) add("Выключены или исчезли виртуальные адаптеры: ${disabled.joinToString { it.name }}.")
+        if (dns.isNotEmpty()) add("Локальный DNS всё ещё требует проверки: ${dns.joinToString { it.evidence.joinToString() }}. Сверьте обработчик после отключения VPN.")
+        val removed = before.routes.filter { route -> route.store == "ActiveStore" && after.routes.none { it == route } }
+        if (removed.isNotEmpty()) add("Изменились или исчезли ${removed.size} текущих маршрутов. Условия выбора пути могли измениться.")
+        add("Сравнение показывает изменения, но не устанавливает, какая программа их внесла. Ошибки чтения источников показаны отдельно.")
+    }
+    Notice("Что стоит проверить", lines.joinToString("\n"))
 }
 
 @Composable

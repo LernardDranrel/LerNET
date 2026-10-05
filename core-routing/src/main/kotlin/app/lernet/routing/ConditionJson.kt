@@ -127,7 +127,12 @@ object ConditionJson {
         val keys = parts.flatMap { it.keys }
         val collision = keys.size != keys.toSet().size
         val nested = parts.any { it["type"] != null || it["invert"] != null }
-        if (collision || nested) return logical("and", parts)
+        // sing-box ORs destination fields inside one default rule. Distinct blocks must
+        // retain AND, e.g. a domain AND an IP range, not silently become domain OR range.
+        val destinationFields = setOf("domain", "domain_suffix", "domain_keyword", "domain_regex", "ip_cidr", "ip_is_private")
+        val addressGroupCollision = parts.count { part -> part.keys.any { it in destinationFields } } > 1
+        val ruleSetAddressCollision = parts.any { "rule_set" in it } && parts.any { part -> part.keys.any { it in destinationFields } }
+        if (collision || nested || addressGroupCollision || ruleSetAddressCollision) return logical("and", parts)
         return buildJsonObject {
             parts.forEach { part -> part.forEach { (key, value) -> put(key, value) } }
         }

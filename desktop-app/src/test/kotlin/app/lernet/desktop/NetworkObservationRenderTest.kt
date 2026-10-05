@@ -17,6 +17,29 @@ import java.io.File
 class NetworkObservationRenderTest {
     private var frameTime = 0L
     @OptIn(ExperimentalComposeUiApi::class)
+    @Test fun renderPinnedBeforeAndAfterWithoutOpeningApplication() {
+        File("build/observation-previews").mkdirs()
+        val before = fixtureSnapshot()
+        val after = before.copy(finishedAt = before.finishedAt + 60_000, adapters = before.adapters.map { it.copy(dns = listOf("127.0.0.1")) },
+            sources = before.sources.map { if (it.id == "dns") it.copy(rows = it.rows.map { row -> row.copy(fields = row.fields + ("ServerAddresses" to "127.0.0.1")) }) else it })
+        for (width in listOf(1240, 560)) {
+            val scene = ImageComposeScene(width = width, height = 900) {
+                MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
+                    DesktopNetworkObservation(after, before, false, null, {}, {}, {}, null, {}, {}, false, "",
+                        onPinBaseline = {}, baselinePinned = true)
+                }
+            }
+            try {
+                pumpFrames(scene)
+                clickTag(scene, "network-nav-CHANGES")
+                assertText(scene, "До и после отключения VPN")
+                assertText(scene, "Что стоит проверить")
+                saveFrame(scene, File("build/observation-previews/network-$width-comparison.png"))
+            } finally { scene.close() }
+        }
+    }
+
+    @OptIn(ExperimentalComposeUiApi::class)
     @Test fun renderReadingFlowAtDesktopAndCompactWidths() {
         val snapshot = fixtureSnapshot()
         val destination = File("build/observation-previews").apply { mkdirs() }

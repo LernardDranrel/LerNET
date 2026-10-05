@@ -57,7 +57,7 @@ class AndroidEngineProcessHost @Inject constructor(
         when (command.action) {
             HostAction.START_FOREGROUND -> {
                 CrashTrail.mark("host START_FOREGROUND ${command.target}")
-                runCatching { ContextCompat.startForegroundService(context, Intent(context, service)) }
+                runCatching { ContextCompat.startForegroundService(context, Intent(context, service).setAction(ACTION_SIMPLE_START)) }
                     .onFailure { LerNetLog.e(TAG, "startForegroundService ${command.target} failed: ${it.message}", it) }
             }
             HostAction.SIGNAL_STOP ->
@@ -77,6 +77,7 @@ class AndroidEngineProcessHost @Inject constructor(
 
     companion object {
         const val ACTION_HARD_STOP = "app.lernet.action.HARD_STOP"
+        const val ACTION_SIMPLE_START = "app.lernet.action.SIMPLE_START"
         private const val TAG = "LerNet.Host"
     }
 }
