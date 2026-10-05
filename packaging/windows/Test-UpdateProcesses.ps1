@@ -18,4 +18,12 @@ if (@(Get-LerNetOwnedProcesses $fixtures 'C:\Unknown\LerNET.exe').Count -ne 0) {
 $signal = Get-LerNetEventName 'C:\Fixtures\LerNET\LerNET.exe'
 if ($signal -ne (Get-LerNetEventName 'c:\fixtures\lernet\LerNET.exe')) { throw 'Event is case-sensitive' }
 if ($signal -eq (Get-LerNetEventName 'C:\Portable\LerNET.exe')) { throw 'Event is not scoped to installation' }
+$failure = [Management.Automation.ErrorRecord]::new(
+    [InvalidOperationException]::new('private-profile-token'),
+    'FixtureFailure', [Management.Automation.ErrorCategory]::InvalidOperation, 'private-profile-data')
+$diagnostic = Get-LerNetPreparationFailure 'stop-owned-process' $failure $false | ConvertTo-Json -Compress
+if ($diagnostic.Contains('private-profile')) { throw 'Preparation diagnostic leaked private exception or target data' }
+if (-not $diagnostic.Contains('FixtureFailure') -or -not $diagnostic.Contains('stop-owned-process')) {
+    throw 'Preparation diagnostic omitted its actionable stage or error id'
+}
 Write-Output 'Installer ownership fixture checks passed; no real processes or registry queried.'

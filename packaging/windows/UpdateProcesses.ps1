@@ -30,13 +30,28 @@ function Get-LerNetEventName([string]$Executable) {
     return 'Local\LerNET.Update.' + ([BitConverter]::ToString($hash).Replace('-', '').ToLowerInvariant())
 }
 
+function Get-LerNetPreparationFailure([string]$Stage, $Failure, [bool]$HasLegacyProduct) {
+    # Exception messages and invocation text may contain private paths or arguments.
+    return [ordered]@{
+        stage = $Stage
+        exceptionType = $Failure.Exception.GetType().FullName
+        errorId = $Failure.FullyQualifiedErrorId
+        scriptLine = $Failure.InvocationInfo.ScriptLineNumber
+        categoryReason = $Failure.CategoryInfo.Reason
+        legacyProductSupplied = $HasLegacyProduct
+    }
+}
+
 if ($FunctionsOnly) { return }
+$lernetPreparationStage = 'resolve-installation'
 try {
     $executable = Join-Path ([IO.Path]::GetFullPath($InstallDir)) 'LerNET.exe'
+    $lernetPreparationStage = 'snapshot-processes'
     $snapshot = @(Get-CimInstance Win32_Process)
     $owned = @(Get-LerNetOwnedProcesses $snapshot $executable)
     if ($owned.Count -gt 0) {
         try {
+            $lernetPreparationStage = 'signal-shutdown'
             $signal = [Threading.EventWaitHandle]::OpenExisting((Get-LerNetEventName $executable))
             try { [void]$signal.Set() } finally { $signal.Dispose() }
             $deadline = [DateTime]::UtcNow.AddSeconds(15)
@@ -45,6 +60,7 @@ try {
             }
         } catch [Threading.WaitHandleCannotBeOpenedException] {
             # Older versions have no shutdown signal. Ask to close first, then scoped fallback.
+            $lernetPreparationStage = 'close-window-fallback'
             foreach ($item in $owned | Where-Object { $_.ExecutablePath -eq $executable }) {
                 $process = Get-Process -Id $item.ProcessId -ErrorAction SilentlyContinue
                 if ($process) { [void]$process.CloseMainWindow() }
@@ -53,12 +69,14 @@ try {
         }
         # Snapshot creation time guards against a reused PID. Stop children before launchers.
         $ordered = @($owned | Sort-Object @{Expression={ if ($_.ExecutablePath -eq $executable) { 1 } else { 0 } }})
+        $lernetPreparationStage = 'stop-owned-process'
         foreach ($item in $ordered) {
             $current = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$item.ProcessId)"
             if ($current -and $current.CreationDate -eq $item.CreationDate -and $current.ExecutablePath -eq $item.ExecutablePath) {
                 Stop-Process -Id $item.ProcessId -Force
             }
         }
+        $lernetPreparationStage = 'confirm-process-exit'
         foreach ($item in $owned) {
             Wait-Process -Id $item.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
             $current = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$item.ProcessId)"
@@ -66,6 +84,7 @@ try {
         }
     }
     if ($LegacyProduct) {
+        $lernetPreparationStage = 'verify-legacy-installation'
         if ($LegacyProduct -notmatch '^\{[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}\}$') { throw 'Invalid legacy product id' }
         $keys = @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\')
         $product = @($keys | ForEach-Object { Get-ItemProperty -LiteralPath ($_ + $LegacyProduct) -ErrorAction SilentlyContinue })
@@ -73,12 +92,14 @@ try {
             [IO.Path]::GetFullPath($product[0].InstallLocation).TrimEnd('\') -ne [IO.Path]::GetFullPath($InstallDir).TrimEnd('\')) {
             throw 'Legacy installation does not match the selected directory'
         }
+        $lernetPreparationStage = 'uninstall-legacy'
         $uninstall = Start-Process -FilePath "$env:SystemRoot\System32\msiexec.exe" -ArgumentList @('/x', $LegacyProduct, '/qn', '/norestart') -WindowStyle Hidden -Wait -PassThru
         if ($uninstall.ExitCode -eq 3010) { exit 10 }
         if ($uninstall.ExitCode -ne 0) { throw "Legacy uninstall failed: $($uninstall.ExitCode)" }
     }
     exit 0
 } catch {
-    # Setup logs the exit code. Never print process command lines or profile data.
+    $lernetFailure = Get-LerNetPreparationFailure $lernetPreparationStage $_ ([bool]$LegacyProduct)
+    [Console]::Error.WriteLine('LerNET_PREPARATION_FAILURE ' + ($lernetFailure | ConvertTo-Json -Compress))
     exit 1
 }

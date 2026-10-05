@@ -126,7 +126,8 @@ begin
   Params := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\UpdateProcesses.ps1') +
     '" -InstallDir "' + ExpandConstant('{app}') + '"';
   if LegacyProduct <> '' then Params := Params + ' -LegacyProduct "' + LegacyProduct + '"';
-  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params, '', SW_HIDE, ewWaitUntilTerminated, Code) then
+  if not ExecAndLogOutput(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params, '', SW_HIDE,
+    ewWaitUntilTerminated, Code, nil) then
     Result := 'Не удалось подготовить обновление. Закройте LerNET через меню в трее и повторите.'
   else if Code = 10 then begin
     NeedsRestart := True;
@@ -163,7 +164,8 @@ begin
     RaiseException('Компоненты восстановления LerNET были изменены. Приложение не удалено. Повторно установите официальную сборку.');
   Params := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ShutdownScript +
     '" -InstallDir "' + ExpandConstant('{app}') + '"';
-  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params, '', SW_HIDE, ewWaitUntilTerminated, Code) then
+  if not ExecAndLogOutput(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params, '', SW_HIDE,
+    ewWaitUntilTerminated, Code, nil) then
     RaiseException('Не удалось остановить LerNET перед удалением. Закройте приложение через меню в трее и повторите.');
   if Code <> 0 then
     RaiseException('Не удалось подтвердить остановку LerNET. Приложение не удалено. Код: ' + IntToStr(Code));

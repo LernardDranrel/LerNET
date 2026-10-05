@@ -63,6 +63,16 @@ build/v1.1.0-native/libbox-expert.aar  (arm64-v8a + x86_64, Android API 24)
 
 Building these files does not start a VPN, install a service or change routes.
 
+## Android Simple health probes
+
+The pinned libbox `NewStandaloneCommandClient` has no stream handler. Its unary
+`URLTestOutbound` and `GetURLViaOutbound` calls establish and close their own RPC
+connection through `getClientForCall` / `callWithResult`. Do not call `Connect`
+on that client: `Connect` is the handler-bound streaming API and dereferences
+the missing handler. The Kotlin probe retains final `Disconnect` for context
+cleanup and still requires an actual successful L7 result. This contract also
+applies when verifying Simple recovery after failed Expert preparation.
+
 ## Runtime boundaries
 
 * The ingress Box owns the TUN, interface monitor and network manager.
@@ -105,10 +115,19 @@ Building these files does not start a VPN, install a service or change routes.
 * Android uses the platform-protected underlay sockets and the native-owned
   duplicate of the borrowed TUN descriptor supplied by its VpnService. The
   service retains its original descriptor; libbox duplicates it once.
+* Windows guardian decodes the x64 MIB_IF_ROW2 index at byte 8, GUID at
+  byte 12 and alias at byte 28. GUID alignment is four bytes. Raw-row tests
+  and real guest GetIfEntry2 bytes cover these offsets; adapter creator,
+  owner and permit checks still require the exact actual interface identity.
 * Typed Windows corporate exits carry adapter GUID, alias and interface index.
   Every socket verifies the adapter is still operational and has that identity,
   rejects the owned ingress, and binds to that exact adapter. Such exits never
   use the default physical underlay. Android retains them as unsupported rules.
+  Their individual gate skips automatic public HTTPS health recovery: an
+  intranet-only split tunnel need not reach the public probe endpoint. A folder
+  still selects its candidates by its configured HTTPS probe. When grouping
+  corporate profiles, that endpoint must be reachable through each intended
+  candidate; a working intranet alone does not establish folder eligibility.
 * The trusted Windows core exposes only the Expert TUN command and requires an
   elevated token before creating a control listener. Generic proxy commands are
   excluded from this executable.
