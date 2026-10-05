@@ -252,16 +252,31 @@ func allowedCoreApp(path string) error {
 	}
 	return errors.New("native image has no persistent LerNET core permission")
 }
+
+// MIB_IF_ROW2 begins with NET_LUID, NET_IFINDEX, a 4-byte-aligned GUID,
+// then WCHAR Alias[257]. GUID and Alias are not 8-byte aligned.
+const (
+	mibIfRow2Size                 = 1352
+	mibIfRow2InterfaceIndexOffset = 8
+	mibIfRow2InterfaceGUIDOffset  = 12
+	mibIfRow2AliasOffset          = 28
+)
+
+func decodeInterfaceIdentity(row *[mibIfRow2Size]byte) (uint32, windowsGUID, string) {
+	index := binary.LittleEndian.Uint32(row[mibIfRow2InterfaceIndexOffset:])
+	id := *(*windowsGUID)(unsafe.Pointer(&row[mibIfRow2InterfaceGUIDOffset]))
+	name := readUTF16((*uint16)(unsafe.Pointer(&row[mibIfRow2AliasOffset])))
+	return index, id, name
+}
+
 func interfaceIdentity(luid uint64) (uint32, windowsGUID, string, error) {
-	var row [1352]byte
+	var row [mibIfRow2Size]byte
 	binary.LittleEndian.PutUint64(row[:], luid)
 	r, _, _ := iphelper.NewProc("GetIfEntry2").Call(uintptr(unsafe.Pointer(&row[0])))
 	if e := nativeResult("read owned interface", r); e != nil {
 		return 0, windowsGUID{}, "", e
 	}
-	index := binary.LittleEndian.Uint32(row[8:])
-	id := *(*windowsGUID)(unsafe.Pointer(&row[16]))
-	name := readUTF16((*uint16)(unsafe.Pointer(&row[32])))
+	index, id, name := decodeInterfaceIdentity(&row)
 	runtime.KeepAlive(row)
 	return index, id, name, nil
 }

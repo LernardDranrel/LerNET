@@ -3,11 +3,44 @@
 package main
 
 import (
+	"encoding/binary"
 	"errors"
 	"reflect"
 	"testing"
 	"unsafe"
 )
+
+func TestMibIfRow2IdentityLayout(t *testing.T) {
+	var header struct {
+		luid  uint64
+		index uint32
+		guid  windowsGUID
+		alias [257]uint16
+	}
+	if unsafe.Sizeof(header.guid) != 16 || unsafe.Alignof(header.guid) != 4 ||
+		unsafe.Offsetof(header.index) != mibIfRow2InterfaceIndexOffset ||
+		unsafe.Offsetof(header.guid) != mibIfRow2InterfaceGUIDOffset ||
+		unsafe.Offsetof(header.alias) != mibIfRow2AliasOffset {
+		t.Fatal("guardian identity offsets disagree with the MIB_IF_ROW2 ABI")
+	}
+}
+
+func TestInterfaceIdentityDecodesNativeMibIfRow2(t *testing.T) {
+	// Native Win32 byte layout, independent of the decoder's offset constants.
+	var row [1352]byte
+	binary.LittleEndian.PutUint64(row[0:8], 0x1234567800000000)
+	binary.LittleEndian.PutUint32(row[8:12], 1337)
+	nativeGUID := [16]byte{0xd1, 0x57, 0x8d, 0xc3, 0xa7, 0x05, 0x33, 0x4c, 0x90, 0x4f, 0x7f, 0xbc, 0xee, 0xe6, 0x0e, 0x82}
+	copy(row[12:28], nativeGUID[:])
+	name := "LerNET-Guard-owned-tun"
+	for i, char := range name {
+		binary.LittleEndian.PutUint16(row[28+i*2:], uint16(char))
+	}
+	index, guid, alias := decodeInterfaceIdentity(&row)
+	if index != 1337 || formatGUID(guid) != "c38d57d1-05a7-4c33-904f-7fbceee60e82" || alias != name {
+		t.Fatalf("wrong owned adapter identity: index=%d guid=%s alias=%q", index, formatGUID(guid), alias)
+	}
+}
 
 func TestCreatorPinsLuidUntilPermissionRevokeSucceeds(t *testing.T) {
 	held := true
