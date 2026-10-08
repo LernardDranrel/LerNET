@@ -3,6 +3,7 @@ package expert
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -26,6 +27,7 @@ import (
 	"github.com/sagernet/sing/common/control"
 	J "github.com/sagernet/sing/common/json"
 	M "github.com/sagernet/sing/common/metadata"
+	"github.com/sagernet/sing/common/ntp"
 	"github.com/sagernet/sing/service"
 )
 
@@ -741,7 +743,11 @@ func probeGate(ctx context.Context, gate adapter.Outbound, address string, timeo
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || timeoutMs < 1000 || timeoutMs > 45000 {
 		return ProbeResult{Reason: "invalid_probe_request"}
 	}
+	tlsContext := ctx
 	if native, ok := gate.(*exitGate); ok {
+		// Manual probes carry a caller/session context, while the physical
+		// generation owns the platform certificate store (Android KeyStore).
+		tlsContext = native.ctx
 		native.mu.Lock()
 		epoch := native.networkEpoch
 		transportGeneration := native.transportGeneration
@@ -755,24 +761,26 @@ func probeGate(ctx context.Context, gate adapter.Outbound, address string, timeo
 	}
 	ctx, cancel := context.WithTimeout(context.WithValue(ctx, probeContextKey{}, true), time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
-	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true, DialContext: func(dialCtx context.Context, network, address string) (net.Conn, error) {
-		// net/http detaches the dial from the request's deadline to reuse pooled
-		// connections. A health probe owns a single connection and must retain
-		// its actual active/candidate deadline through native provider setup.
-		deadline, _ := ctx.Deadline()
-		dialCtx, dialCancel := context.WithDeadline(dialCtx, deadline)
-		stopProbe := context.AfterFunc(ctx, dialCancel)
-		if ctx.Err() != nil {
-			dialCancel()
-		}
-		conn, dialErr := gate.DialContext(dialCtx, network, M.ParseSocksaddr(address))
-		if dialErr != nil {
-			stopProbe()
-			dialCancel()
-			return nil, dialErr
-		}
-		return &probeDialConn{Conn: conn, cancel: dialCancel, stopProbe: stopProbe}, nil
-	}}
+	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true,
+		TLSClientConfig: &tls.Config{RootCAs: adapter.RootPoolFromContext(tlsContext), Time: ntp.TimeFuncFromContext(tlsContext)},
+		DialContext: func(dialCtx context.Context, network, address string) (net.Conn, error) {
+			// net/http detaches the dial from the request's deadline to reuse pooled
+			// connections. A health probe owns a single connection and must retain
+			// its actual active/candidate deadline through native provider setup.
+			deadline, _ := ctx.Deadline()
+			dialCtx, dialCancel := context.WithDeadline(dialCtx, deadline)
+			stopProbe := context.AfterFunc(ctx, dialCancel)
+			if ctx.Err() != nil {
+				dialCancel()
+			}
+			conn, dialErr := gate.DialContext(dialCtx, network, M.ParseSocksaddr(address))
+			if dialErr != nil {
+				stopProbe()
+				dialCancel()
+				return nil, dialErr
+			}
+			return &probeDialConn{Conn: conn, cancel: dialCancel, stopProbe: stopProbe}, nil
+		}}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	req, err := http.NewRequestWithContext(ctx, "GET", address, nil)
@@ -791,7 +799,7 @@ func probeGate(ctx context.Context, gate adapter.Outbound, address string, timeo
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return ProbeResult{Reason: "operation_cancelled"}
 		}
-		return ProbeResult{Reason: "https_probe_failed"}
+		return ProbeResult{Reason: probeFailureCode(err)}
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 400 {

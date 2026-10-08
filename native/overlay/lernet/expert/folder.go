@@ -156,7 +156,7 @@ func (f *folderGate) selectCandidate(ctx context.Context) (string, error) {
 				return
 			}
 			result := probeGate(ctx, gate, f.options.ProbeURL, f.options.ProbeTimeoutMs)
-			if result.HTTPSLatencyMs == nil && ctx.Err() == nil && result.Reason != "exit_transport_changed" {
+			if probeNeedsRecovery(result) && ctx.Err() == nil {
 				if gate.recoverAt(ctx, result.transportGeneration) == nil {
 					result = probeGate(ctx, gate, f.options.ProbeURL, f.options.ProbeTimeoutMs)
 				}
@@ -446,6 +446,11 @@ func (f *folderGate) checkHealth() {
 			return
 		}
 		if gate != nil && !gate.matchesGeneration(result.transportGeneration) {
+			f.healthChecking = false
+			f.mu.Unlock()
+			return
+		}
+		if !probeNeedsRecovery(result) {
 			f.healthChecking = false
 			f.mu.Unlock()
 			return

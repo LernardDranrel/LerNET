@@ -3,10 +3,51 @@ package expert
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
+	"errors"
 	"net"
+	"strings"
 	"time"
 )
+
+// Report only typed categories: provider error text may contain credentials.
+func probeFailureCode(err error) string {
+	var certificate *tls.CertificateVerificationError
+	var authority x509.UnknownAuthorityError
+	var invalid x509.CertificateInvalidError
+	var hostname x509.HostnameError
+	var dns *net.DNSError
+	var network net.Error
+	switch {
+	case errors.As(err, &certificate), errors.As(err, &authority), errors.As(err, &invalid), errors.As(err, &hostname):
+		return "https_probe_certificate_failed"
+	case errors.As(err, &dns):
+		return "https_probe_dns_failed"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "https_probe_timeout"
+	case errors.As(err, &network) && network.Timeout():
+		return "https_probe_timeout"
+	default:
+		return "https_probe_failed"
+	}
+}
+
+// Restarting a transport cannot repair the probe site's certificate, DNS or
+// HTTP rejection. Keep these failures visible without tearing down user flows.
+func probeNeedsRecovery(result ProbeResult) bool {
+	if result.HTTPSLatencyMs != nil || strings.HasPrefix(result.Reason, "https_status_") {
+		return false
+	}
+	switch result.Reason {
+	case "https_probe_certificate_failed", "https_probe_dns_failed", "invalid_probe_request",
+		"exit_sleeping", "operation_cancelled", "exit_transport_changed":
+		return false
+	default:
+		return true
+	}
+}
 
 type probeDialConn struct {
 	net.Conn
@@ -74,7 +115,7 @@ func (g *exitGate) checkHealth() {
 			g.mu.Unlock()
 			return
 		}
-		if result.Reason == "exit_sleeping" || result.Reason == "exit_transport_changed" {
+		if !probeNeedsRecovery(result) {
 			g.mu.Unlock()
 			return
 		}

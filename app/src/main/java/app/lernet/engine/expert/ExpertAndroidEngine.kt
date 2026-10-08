@@ -1,5 +1,7 @@
 package app.lernet.engine.expert
 
+import android.os.SystemClock
+
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
@@ -117,6 +119,7 @@ class ExpertAndroidEngine @Inject constructor(
     private var exitTags: Map<ExpertExitKey, String> = emptyMap()
     private val tagBindings = mutableMapOf<String, ExpertExitKey>()
     private var observedNetworkEpoch: Long? = null
+    private val statusDiagnostics = app.lernet.engine.policy.ExpertStatusDiagnostics()
     private val trackedFlows = mutableMapOf<String, ExpertExitKey>()
     private val exitGenerations = mutableMapOf<ExpertExitKey, Long>()
     private val lossReported = AtomicBoolean(false)
@@ -576,6 +579,10 @@ class ExpertAndroidEngine @Inject constructor(
         check(actual.instanceId == previous.instanceId && actual.interfaceId == previous.interfaceId) {
             "Native Expert status reports a changed TUN"
         }
+        val underlayMissing = DefaultNetworkMonitor.underlyingNetwork() == null
+        statusDiagnostics.update(body, !underlayMissing, SystemClock.elapsedRealtime())?.let {
+            LerNetLog.i("LerNet.Expert", it)
+        }
         check(ExpertNativeJson.boolean(body, "running") == true) {
             ExpertNativeJson.string(body, "stop_reason")?.let(::nativeReason)
                 ?: context.getString(R.string.expert_platform_native_stopped)
@@ -590,7 +597,6 @@ class ExpertAndroidEngine @Inject constructor(
                 )
             )
         }
-        val underlayMissing = DefaultNetworkMonitor.underlyingNetwork() == null
         tun?.let {
             mutableEvents.emit(ExpertBackendEvent.NetworkStatus(
                 it, actual.revision,

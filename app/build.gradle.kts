@@ -26,7 +26,7 @@ android {
         applicationId = "app.lernet"
         minSdk = 26
         targetSdk = 36
-        versionCode = 119
+        versionCode = 120
         versionName = lernetVersion
         buildConfigField("String", "GIT_SHA", "\"${gitHeadSha()}\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
