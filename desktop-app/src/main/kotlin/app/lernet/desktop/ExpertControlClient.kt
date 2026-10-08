@@ -87,8 +87,9 @@ internal class ExpertControlClient(
                 val explanation = (objectBody?.get("error") as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
                     ?.takeIf { it.length <= 256 && it.none(Char::isISOControl) }
                     ?.replace(bearerToken, "***")?.let(::expertNativeFailureExplanation)
+                val routeDetails = objectBody?.let(::captureRouteFailureDetails).orEmpty()
                 throw ExpertControlRejectedException(
-                    status, "Ядро отклонило операцию ($status)${explanation?.let { ": $it" }.orEmpty()}",
+                    status, "Ядро отклонило операцию ($status)${explanation?.let { ": $it" }.orEmpty()}$routeDetails",
                 )
             }
             return requireNotNull(objectBody) { "Ядро вернуло некорректный ответ управления" }
@@ -125,4 +126,23 @@ internal class ExpertControlClient(
             "capabilities", "start", "apply", "stop", "status", "probe", "wake", "recover", "sleep", "network_changed",
         )
     }
+}
+
+internal fun captureRouteFailureDetails(body: JsonObject): String {
+    if ((body["error"] as? JsonPrimitive)?.contentOrNull != "expert_capture_route_update_failed") return ""
+    val stage = when ((body["route_update_stage"] as? JsonPrimitive)?.contentOrNull) {
+        "configuration" -> "настройки TUN"
+        "previous_ranges" -> "предыдущие маршруты"
+        "next_ranges" -> "новые маршруты"
+        "existing_metric" -> "приоритет существующего маршрута"
+        "read_route" -> "чтение маршрута"
+        "add_route" -> "добавление маршрута"
+        "read_obsolete_route" -> "чтение прежнего маршрута"
+        "obsolete_metric" -> "приоритет прежнего маршрута"
+        "delete_route" -> "удаление прежнего маршрута"
+        else -> return ""
+    }
+    val code = (body["win32_code"] as? JsonPrimitive)?.takeUnless { it.isString }?.longOrNull
+        ?.takeIf { it in 1..4_294_967_295L }
+    return " Этап: $stage.${code?.let { " Код Windows: $it." }.orEmpty()}"
 }

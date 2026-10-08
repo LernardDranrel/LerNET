@@ -167,10 +167,8 @@ func (s *Session) checkPlatformIngress(full bool) error {
 		err = s.verifyPlatformIdentity(s.ack.InterfaceID)
 	}
 	if err != nil {
-		s.stateMu.Lock()
-		s.stopReason = ErrorCode(err)
-		s.stateMu.Unlock()
-		s.failIngressLocked()
+		// Keep routes installed and stop new admission while the watcher retries.
+		s.setNetworkReasonLocked(ErrorCode(err))
 	}
 	return err
 }

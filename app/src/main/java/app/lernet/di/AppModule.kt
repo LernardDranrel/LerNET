@@ -25,6 +25,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -75,13 +76,23 @@ object AppModule {
         scope: CoroutineScope,
         dialer: OutboundDialer,
         @ApplicationContext context: Context,
+        sessionStore: app.lernet.vpn.SimpleSessionStore,
     ): ConnectionController = ConnectionController(
         engine,
         scope,
         outboundDialer = dialer,
         tunnelHealthProbe = AndroidTunnelProbe::measure,
         ruleSetDirectory = GeoRuleSetStore.install(context),
+        underlayAvailable = { app.lernet.vpn.DefaultNetworkMonitor.underlyingNetwork() != null },
+        persistSessionIntent = { config -> kotlinx.coroutines.withContext(Dispatchers.IO) {
+            sessionStore.write(config)
+        } },
     ).also { controller ->
+        scope.launch {
+            app.lernet.vpn.DefaultNetworkMonitor.changes.collect {
+                if (app.lernet.vpn.DefaultNetworkMonitor.underlyingNetwork() != null) controller.onUnderlayRestored()
+            }
+        }
         AsnCaches.protect = VpnRuntime::protectDatagram
         val localGeoIp = LocalGeoIp { context.assets.open("hop-geoip.idx") }
         val hopDetails = RipeStatHopDetails()

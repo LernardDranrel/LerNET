@@ -1,24 +1,19 @@
 package app.lernet.desktop.expert
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -35,25 +30,22 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isCtrlPressed
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
-import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
+import app.lernet.desktop.RouteConditionBlockEditor
+import app.lernet.desktop.RouteEditorModal
+import app.lernet.desktop.routeEditorStateSaver
 import app.lernet.routing.ConditionBlock
 import app.lernet.routing.ConditionKind
 import app.lernet.routing.MatchJoin
 import app.lernet.routing.RouteCompiler
+import app.lernet.routing.RuleConditions
 import app.lernet.routing.policy.DestinationRedirect
 import app.lernet.routing.policy.ExitLifecyclePolicy
 import app.lernet.routing.policy.FolderPolicy
@@ -61,6 +53,7 @@ import app.lernet.routing.policy.FolderSelection
 import app.lernet.routing.policy.PolicyChannel
 import app.lernet.routing.policy.PolicyDestinationAddress
 import app.lernet.routing.policy.PolicyNode
+import app.lernet.routing.policy.PolicyOtherwise
 import app.lernet.routing.policy.PolicyScope
 import app.lernet.routing.policy.PolicyTarget
 import app.lernet.routing.policy.PolicyTree
@@ -74,43 +67,9 @@ internal fun ExpertModal(
     onSave: () -> Unit,
     canSave: Boolean,
     saveText: String = "Готово",
+    showCancel: Boolean = true,
     content: @Composable () -> Unit,
-) {
-    val panel: @Composable () -> Unit = {
-        Surface(
-            modifier = Modifier.width(800.dp).fillMaxHeight(.92f).onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown) {
-                    false
-                } else {
-                    when {
-                        event.key == Key.Escape -> {
-                            onDismiss()
-                            true
-                        }
-                        event.key == Key.Enter && event.isCtrlPressed && canSave -> {
-                            onSave()
-                            true
-                        }
-                        else -> false
-                    }
-                }
-            },
-            color = ExpertColors.panel, shape = RoundedCornerShape(22.dp), border = BorderStroke(1.dp, ExpertColors.border),
-        ) {
-            Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(title, color = ExpertColors.text, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
-                HorizontalDivider(color = ExpertColors.border)
-                ExpertScrollableColumn(Modifier.weight(1f), spacing = 14) { content() }
-                HorizontalDivider(color = ExpertColors.border)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onDismiss) { Text("Отмена · Esc") }
-                    Button(onClick = onSave, enabled = canSave) { Text("$saveText · Ctrl+Enter") }
-                }
-            }
-        }
-    }
-    if (LocalInspectionMode.current) panel() else Dialog(onDismissRequest = onDismiss) { panel() }
-}
+) = RouteEditorModal(title, onDismiss, onSave, canSave, saveText, showCancel, content)
 
 @Composable
 internal fun ExpertRuleEditor(
@@ -122,20 +81,27 @@ internal fun ExpertRuleEditor(
     pending: Boolean = false,
     onSave: (PolicyNode) -> Unit,
 ) {
-    var title by remember(original.id) { mutableStateOf(original.title) }
-    var parentId by remember(original.id) { mutableStateOf(original.parentId) }
-    var conditions by remember(original.id) { mutableStateOf(original.conditions) }
-    var target by remember(original.id) { mutableStateOf(original.target) }
-    var protected by remember(original.id) { mutableStateOf(original.protected) }
-    var enabled by remember(original.id) { mutableStateOf(original.enabled) }
-    var detached by remember(original.id) { mutableStateOf(original.detached) }
-    var rewrite by remember(original.id) { mutableStateOf(original.redirect != null) }
-    var address by remember(original.id) { mutableStateOf(original.redirect?.address.orEmpty()) }
-    var port by remember(original.id) { mutableStateOf(original.redirect?.port?.toString().orEmpty()) }
+    val otherwise = PolicyOtherwise.isOtherwise(original)
+    val structural = tree.nodes.any { it.parentId == original.id && !it.detached }
+    var title by rememberSaveable(original.id) { mutableStateOf(original.title) }
+    var parentId by rememberSaveable(original.id) { mutableStateOf(original.parentId) }
+    var conditions by rememberSaveable(original.id, stateSaver = routeEditorStateSaver<RuleConditions>()) {
+        mutableStateOf(original.conditions)
+    }
+    var target by rememberSaveable(original.id, stateSaver = routeEditorStateSaver<PolicyTarget>()) { mutableStateOf(original.target) }
+    var protected by rememberSaveable(original.id) { mutableStateOf(original.protected) }
+    var enabled by rememberSaveable(original.id) { mutableStateOf(original.enabled) }
+    var detached by rememberSaveable(original.id) { mutableStateOf(original.detached) }
+    var rewrite by rememberSaveable(original.id) { mutableStateOf(original.redirect != null) }
+    var address by rememberSaveable(original.id) { mutableStateOf(original.redirect?.address.orEmpty()) }
+    var port by rememberSaveable(original.id) { mutableStateOf(original.redirect?.port?.toString().orEmpty()) }
     var apps by remember { mutableStateOf<Int?>(null) }
     val inheritedProtection = ExpertPolicyEditing.inheritedProtection(tree, parentId)
     val effectiveProtection = protected || inheritedProtection
     val errors = RouteCompiler.validateConditions(original.id, conditions).map { it.message } + buildList {
+        if (!otherwise && conditions.blocks.isEmpty() && tree.nodes.none { it.id == original.id }) {
+            add("Добавьте условие. Для оставшегося трафика используйте ветку ИНАЧЕ.")
+        }
         if (rewrite && address.isBlank() && port.isBlank()) add("Укажите адрес или порт перенаправления.")
         if (rewrite && address.isNotBlank() && PolicyDestinationAddress.normalize(address.trim()) == null) {
             add("Укажите IP или имя назначения без схемы https:// и пути.")
@@ -160,20 +126,27 @@ internal fun ExpertRuleEditor(
             )
         )
     }
-    ExpertModal("Правило", onDismiss, ::save, errors.isEmpty() && !pending) {
+    ExpertModal(if (otherwise) "Ветка ИНАЧЕ" else "Правило", onDismiss, ::save, errors.isEmpty() && !pending) {
         EditorPersistenceNotice(state, pending)
         OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(), label = { Text("Название") }, singleLine = true)
-        ExpertSelect(
-            "Родитель",
-            listOf(null to "Корень схемы") + tree.nodes.filter { candidate ->
-                candidate.id !in descendants &&
-                    candidate.target !is PolicyTarget.Profile &&
-                    candidate.target !is PolicyTarget.Folder &&
-                    candidate.target !is PolicyTarget.Channel
-            }
-                .map { it.id to it.title.ifBlank { "Без названия" } },
-            parentId
-        ) { parentId = it }
+        if (!otherwise) {
+            ExpertSelect(
+                "Родитель",
+                listOf(null to "Корень схемы") + tree.nodes.filter { candidate ->
+                    candidate.id !in descendants &&
+                        (
+                            PolicyOtherwise.isOtherwise(candidate) ||
+                                (
+                                    candidate.target !is PolicyTarget.Profile &&
+                                        candidate.target !is PolicyTarget.Folder &&
+                                        candidate.target !is PolicyTarget.Channel
+                                    )
+                            )
+                }
+                    .map { it.id to it.title.ifBlank { "Без названия" } },
+                parentId
+            ) { parentId = it }
+        }
         ExpertPolicyEditing.inactiveReason(original, tree, state)?.let {
             ExpertMessage("Ветка не выполняется на Windows", it, warning = true)
             if (original.protected) {
@@ -185,103 +158,86 @@ internal fun ExpertRuleEditor(
                 )
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Между условиями", color = ExpertColors.muted)
-            FilterChip(conditions.join == MatchJoin.AND, { conditions = conditions.copy(join = MatchJoin.AND) }, label = { Text("И") })
-            FilterChip(conditions.join == MatchJoin.OR, { conditions = conditions.copy(join = MatchJoin.OR) }, label = { Text("ИЛИ") })
-        }
-        Text(
-            "Значения внутри одного поля объединяются через ИЛИ. Пустое правило охватывает весь трафик своей ветки.",
-            color = ExpertColors.muted, fontSize = 12.sp
-        )
-        conditions.blocks.forEachIndexed { index, block ->
-            var rawValues by remember(original.id, index, block.kind) { mutableStateOf(block.values.joinToString("\n")) }
-            LaunchedEffect(block.values) {
-                if (rawValues.lines().map { it.trim() }.filter { it.isNotBlank() } != block.values) {
-                    rawValues = block.values.joinToString("\n")
-                }
-            }
-            Surface(color = ExpertColors.background, shape = RoundedCornerShape(12.dp)) {
-                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            ExpertPolicyEditing.kindName(block.kind), Modifier.weight(1f), color = ExpertColors.text,
-                            fontWeight = FontWeight.Medium
-                        )
-                        TextButton(onClick = {
-                            conditions = conditions.copy(
-                                blocks = conditions.blocks.filterIndexed { current, _ ->
-                                    current != index
-                                }
-                            )
-                        }) {
-                            Text("Удалить условие")
-                        }
-                    }
-                    if (block.kind == ConditionKind.APP) {
-                        ExpertMessage(
-                            "Условие Android сохранено",
-                            "Пакеты Android не определяют программы Windows. Ветка останется в архиве; добавьте отдельное условие Windows.",
-                            warning = true,
-                        )
-                    }
-                    if (block.kind == ConditionKind.PRIVATE) {
-                        Text(
-                            "Локальные адреса устройства и частных сетей. " +
-                                "Имена корпоративных сайтов могут потребовать отдельное DNS-правило.",
-                            color = ExpertColors.muted, fontSize = 13.sp
-                        )
-                    } else {
-                        OutlinedTextField(
-                            rawValues, { raw ->
-                                rawValues = raw
-                                val changed = block.copy(values = raw.lines().map { it.trim() }.filter { it.isNotBlank() })
-                                conditions = conditions.copy(
-                                    blocks = conditions.blocks.mapIndexed {
-                                            current,
-                                            value
-                                        ->
-                                        if (current == index) changed else value
-                                    }
-                                )
-                            }, Modifier.fillMaxWidth(), label = { Text("Значения, по одному в строке") },
-                            supportingText = { Text(conditionHint(block.kind)) }, minLines = 2, maxLines = 5
-                        )
-                    }
-                    if (block.kind == ConditionKind.PROCESS) OutlinedButton(onClick = { apps = index }) { Text("Выбрать программы") }
-                }
-            }
-        }
-        ExpertSelect<ConditionKind?>(
-            "Добавить условие",
-            listOf(null to "Выберите тип") + ConditionKind.entries.map {
-                it to ExpertPolicyEditing.kindName(it)
-            },
-            null
-        ) {
-            if (it != null) {
-                conditions = conditions.copy(
-                    blocks = conditions.blocks + ConditionBlock(
-                        it,
-                        if (it == ConditionKind.PRIVATE) listOf("private") else emptyList()
-                    )
+        if (otherwise) {
+            ExpertMessage(
+                "Оставшийся трафик этой развилки",
+                "Эта ветка выбирается после остальных условий на том же уровне. " +
+                    "Добавьте дочерние правила, чтобы продолжить проверку оставшегося трафика."
+            )
+            if (original.parentId != null && tree.nodes.none { it.id == original.id }) {
+                ExpertMessage(
+                    "Новый последний путь этой развилки",
+                    "После её дочерних условий оставшийся трафик получит выбранный выход. " +
+                        "Он больше не будет проверяться следующими внешними ветками.",
+                    warning = true,
                 )
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Между условиями", color = ExpertColors.muted)
+                FilterChip(conditions.join == MatchJoin.AND, { conditions = conditions.copy(join = MatchJoin.AND) }, label = { Text("И") })
+                FilterChip(conditions.join == MatchJoin.OR, { conditions = conditions.copy(join = MatchJoin.OR) }, label = { Text("ИЛИ") })
+            }
+            Text(
+                "Значения внутри одного поля объединяются через ИЛИ. Пустое правило охватывает весь трафик своей ветки.",
+                color = ExpertColors.muted, fontSize = 12.sp
+            )
+            conditions.blocks.forEachIndexed { index, block ->
+                RouteConditionBlockEditor(
+                    block,
+                    onChange = { changed ->
+                        conditions = conditions.copy(
+                            blocks = conditions.blocks.mapIndexed { current, value ->
+                                if (current == index) changed else value
+                            }
+                        )
+                    },
+                    onRemove = {
+                        conditions = conditions.copy(blocks = conditions.blocks.filterIndexed { current, _ -> current != index })
+                    },
+                    onPickProcesses = { apps = index },
+                )
+            }
+            ExpertSelect<ConditionKind?>(
+                "Добавить условие",
+                listOf(null to "Выберите тип") + ConditionKind.entries.map {
+                    it to ExpertPolicyEditing.kindName(it)
+                },
+                null
+            ) {
+                if (it != null) {
+                    conditions = conditions.copy(
+                        blocks = conditions.blocks + ConditionBlock(
+                            it,
+                            if (it == ConditionKind.PRIVATE) listOf("private") else emptyList()
+                        )
+                    )
+                }
             }
         }
         HorizontalDivider(color = ExpertColors.border)
         if (inheritedProtection) {
             ExpertMessage(
-                "Защита унаследована от родителя",
-                "Этот трафик уже обязан использовать защищённый путь. Снятие собственной отметки не отменяет защиту родительской ветки."
+                "Прямой выход запрещён родительской веткой",
+                "Изменить ограничение можно в её настройках."
             )
         }
-        ExpertTargetEditor(target, tree.scope, state, effectiveProtection) { target = it }
+        if (structural) {
+            ExpertMessage(
+                "Путь задаётся в дочерних ветках",
+                "Это развилка. Выберите выход в конечных правилах или в её дочерней ветке ИНАЧЕ."
+            )
+        } else {
+            ExpertTargetEditor(target, tree.scope, state, effectiveProtection) { target = it }
+        }
         if (conditions.blocks.any { it.kind == ConditionKind.DOMAIN }) DomainRecognitionQualification()
         ExpertToggle(
-            "Только защищённый путь",
-            "Если выход недоступен, прямой путь запрещён трафику, совпавшему с этой веткой.", protected
+            "Только через VPN/прокси для всей ветки",
+            "Прямой выход запрещён для этой ветки и всех вложенных правил. Ограничение также учитывается при обработке DNS.",
+            effectiveProtection, enabled = !inheritedProtection && !pending
         ) {
             protected = it
+            if (it && target == PolicyTarget.Direct) target = PolicyTarget.Block
             if (it && targetFallback(target) == UnavailableFallback.DIRECT) target = withFallback(target, UnavailableFallback.BLOCK)
         }
         ExpertToggle(
@@ -300,11 +256,13 @@ internal fun ExpertRuleEditor(
                 supportingText = { Text("Пустое поле сохраняет исходный порт.") }
             )
         }
-        ExpertToggle("Ветка включена", "Выключенная ветка сохраняется в схеме и не участвует в выборе пути.", enabled) { enabled = it }
-        ExpertToggle(
-            "Хранить отдельно от дерева",
-            "Отсоединённое правило можно редактировать, но оно не выполняется.", detached
-        ) { detached = it }
+        if (!otherwise) {
+            ExpertToggle("Ветка включена", "Выключенная ветка сохраняется в схеме и не участвует в выборе пути.", enabled) { enabled = it }
+            ExpertToggle(
+                "Хранить отдельно от дерева",
+                "Отсоединённое правило можно редактировать, но оно не выполняется.", detached
+            ) { detached = it }
+        }
         if (errors.isNotEmpty()) ExpertMessage("Проверьте правило", errors.joinToString("\n"), error = true)
     }
     apps?.let { index ->
@@ -337,7 +295,7 @@ internal fun ExpertTargetEditor(
 ) {
     val options = buildList<Pair<String, String>> {
         add("direct" to "Напрямую")
-        add("block" to "Запретить")
+        add("block" to "Блокировать трафик")
         if (scope != PolicyScope.Device) add("current" to "Выход этой схемы")
         state.folders.forEach { add("folder:${it.id}" to "Папка: ${it.name}") }
         state.profiles.forEach { add("profile:${it.id}" to "Профиль: ${it.name}") }
@@ -354,7 +312,7 @@ internal fun ExpertTargetEditor(
         is PolicyTarget.Folder -> "folder:${target.id}"
         is PolicyTarget.Channel -> "channel:${target.id}"
     }
-    ExpertSelect("Куда направить", options, key) { value ->
+    ExpertSelect("Куда направить", options, key, disabledOptions = if (protected) setOf("direct") else emptySet()) { value ->
         onChange(
             when {
                 value == "direct" -> PolicyTarget.Direct
@@ -367,6 +325,15 @@ internal fun ExpertTargetEditor(
             }
         )
     }
+    if (target == PolicyTarget.Direct) Text(
+        if (protected) "Прямой выход противоречит запрету этой ветки. Выберите VPN/прокси или блокировку."
+        else "Трафик проходит через TUN и выходит через обычную сеть устройства, без выбранного VPN/прокси.",
+        color = if (protected) ExpertColors.red else ExpertColors.muted, fontSize = 12.sp,
+    )
+    if (protected && target == PolicyTarget.Block) Text(
+        "Сейчас выбран запрет всего трафика этой ветки. Чтобы разрешить соединения, выберите профиль, папку или канал с VPN/прокси.",
+        color = ExpertColors.muted, fontSize = 12.sp,
+    )
     when (target) {
         is PolicyTarget.Profile -> {
             val profile = state.profiles.firstOrNull { it.id == target.id }
@@ -399,41 +366,47 @@ internal fun ExpertTargetEditor(
         }
         PolicyTarget.Direct, PolicyTarget.Block, PolicyTarget.CurrentExit -> Unit
     }
+    val childScope = when (target) {
+        is PolicyTarget.Profile -> target.routeScope
+        is PolicyTarget.Folder -> target.routeScope
+        else -> null
+    }
+    if (childScope != null) {
+        Text(
+            if (protected) "Запрет прямого выхода действует и в этом дереве. Правила «Напрямую» внутри него вызовут конфликт. Измените эти правила или используйте VPN/прокси без дочернего дерева."
+            else "Трафик сначала проверяется по этому дереву. Его правила могут направить соединение напрямую, заблокировать или передать выбранному VPN/прокси.",
+            color = ExpertColors.muted, fontSize = 12.sp,
+        )
+        TextButton({
+            when (target) {
+                is PolicyTarget.Profile -> onChange(target.copy(routeScope = null))
+                is PolicyTarget.Folder -> onChange(target.copy(routeScope = null))
+                else -> Unit
+            }
+        }) { Text("Использовать только VPN/прокси") }
+    }
 }
 
 @Composable
 private fun FallbackSelector(current: UnavailableFallback, protected: Boolean, onChange: (UnavailableFallback) -> Unit) {
-    ExpertSelect(
-        "Если выход недоступен",
-        if (protected) {
-            listOf(UnavailableFallback.BLOCK to "Запретить")
+    if (protected) {
+        if (current == UnavailableFallback.BLOCK) {
+            Text("Если подключение недоступно, трафик будет заблокирован.", color = ExpertColors.muted, fontSize = 12.sp)
         } else {
-            listOf(
-                UnavailableFallback.BLOCK to "Запретить", UnavailableFallback.DIRECT to "Разрешить напрямую"
-            )
-        },
-        current, onChange
-    )
-    Text(
-        "Прямой запасной путь раскрывает обычный IP устройства. Выберите его только для трафика, которому это допустимо.",
-        color = ExpertColors.muted, fontSize = 12.sp
-    )
-}
-
-@Composable
-internal fun ExpertDefaultTargetEditor(
-    tree: PolicyTree,
-    state: ExpertUiState,
-    onDismiss: () -> Unit,
-    pending: Boolean = false,
-    onSave: (PolicyTarget) -> Unit,
-) {
-    var target by remember { mutableStateOf(tree.defaultTarget) }
-    ExpertModal("Путь по умолчанию", onDismiss, { onSave(target) }, !pending) {
-        EditorPersistenceNotice(state, pending)
-        ExpertMessage("Последнее действие схемы", "Этот путь выбирается, если ни одно правило схемы не подошло.")
-        ExpertTargetEditor(target, tree.scope, state, false) { target = it }
+            Text("Сохранённый прямой запасной путь противоречит запрету этой ветки.", color = ExpertColors.red, fontSize = 12.sp)
+            TextButton({ onChange(UnavailableFallback.BLOCK) }) { Text("Заменить прямой запасной путь блокировкой") }
+        }
+        return
     }
+    ExpertSelect(
+        "Если подключение недоступно",
+        listOf(UnavailableFallback.BLOCK to "Блокировать трафик", UnavailableFallback.DIRECT to "Разрешить напрямую"),
+        current, onChange = onChange,
+    )
+    if (current == UnavailableFallback.DIRECT) Text(
+        "При отказе подключения трафик пойдёт через обычную сеть устройства, без выбранного VPN/прокси.",
+        color = ExpertColors.muted, fontSize = 12.sp,
+    )
 }
 
 @Composable
@@ -502,7 +475,7 @@ internal fun ExpertLifecycleEditor(
     val firstFlowMs = ExpertLifecycleValues.milliseconds(firstFlow, 45_000)
     val startupMs = ExpertLifecycleValues.milliseconds(startup, 45_000)
     val pendingCount = pendingLimit.toIntOrNull()?.takeIf { it in 1..1_000 }
-    val valid = idleMs != null && firstFlowMs != null && startupMs != null && pendingCount != null
+    val valid = (!value.coldStart || idleMs != null) && firstFlowMs != null && startupMs != null && pendingCount != null
     LaunchedEffect(valid) { onValidity(valid) }
     ExpertToggle(
         "Холодный старт",
@@ -514,7 +487,8 @@ internal fun ExpertLifecycleEditor(
         idle, { raw ->
             idle = raw
             ExpertLifecycleValues.milliseconds(raw, 86_400_000)?.let { onChange(value.copy(idleTimeoutMs = it)) }
-        }, Modifier.fillMaxWidth(), label = { Text("Засыпать после тишины, секунд") }, singleLine = true, isError = idleMs == null,
+        }, Modifier.fillMaxWidth(), label = { Text("Засыпать после тишины, секунд") }, singleLine = true,
+        enabled = value.coldStart, isError = value.coldStart && idleMs == null,
         supportingText = { Text("1–86400 секунд. Например, 900 секунд — 15 минут. Живые соединения не закрываются ради сна.") }
     )
     OutlinedTextField(
@@ -551,7 +525,8 @@ internal fun ExpertLifecycleEditor(
         )
     }
     Text(
-        "Таймер продлевается пользовательским трафиком. Живое соединение не закрывается ради сна. " +
+        (if (value.coldStart) "Таймер продлевается пользовательским трафиком. Живое соединение не закрывается ради сна. "
+        else "Холодный старт выключен: таймер сна не используется. ") +
             "Пока выход просыпается, запрос ожидает не более ${value.firstFlowTimeoutMs / 1000} секунд; " +
             "в очереди может быть до ${value.maxPendingFlows} запросов.",
         color = ExpertColors.muted, fontSize = 13.sp
@@ -655,17 +630,18 @@ private fun EditorPersistenceNotice(state: ExpertUiState, pending: Boolean) {
 }
 
 @Composable
-internal fun <T> ExpertSelect(label: String, options: List<Pair<T, String>>, selected: T, onChange: (T) -> Unit) {
+internal fun <T> ExpertSelect(label: String, options: List<Pair<T, String>>, selected: T, disabledOptions: Set<T> = emptySet(), onChange: (T) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(label, color = ExpertColors.muted, fontSize = 12.sp)
         Box {
             OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp)) {
-                Text(options.firstOrNull { it.first == selected }?.second ?: "Сохранённое значение недоступно")
+                Text(options.firstOrNull { it.first == selected }?.second ?: "Сохранённое значение недоступно", Modifier.weight(1f))
+                Text("▾")
             }
             DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
                 options.forEach { option ->
-                    DropdownMenuItem(text = { Text(option.second) }, onClick = {
+                    DropdownMenuItem(text = { Text(option.second) }, enabled = option.first !in disabledOptions, onClick = {
                         expanded = false
                         onChange(option.first)
                     })
@@ -676,9 +652,9 @@ internal fun <T> ExpertSelect(label: String, options: List<Pair<T, String>>, sel
 }
 
 @Composable
-internal fun ExpertToggle(title: String, explanation: String, value: Boolean, onChange: (Boolean) -> Unit) {
+internal fun ExpertToggle(title: String, explanation: String, value: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
     Row(
-        Modifier.fillMaxWidth().toggleable(value, role = Role.Switch, onValueChange = onChange).padding(vertical = 4.dp),
+        Modifier.fillMaxWidth().toggleable(value, enabled = enabled, role = Role.Switch, onValueChange = onChange).padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -686,7 +662,7 @@ internal fun ExpertToggle(title: String, explanation: String, value: Boolean, on
             Text(title, color = ExpertColors.text, fontWeight = FontWeight.Medium)
             Text(explanation, color = ExpertColors.muted, fontSize = 12.sp, lineHeight = 18.sp)
         }
-        Switch(value, onCheckedChange = null)
+        Switch(value, onCheckedChange = null, enabled = enabled)
     }
 }
 
@@ -773,15 +749,6 @@ private fun ExpertApplicationPicker(
             }
         }
     }
-}
-
-private fun conditionHint(kind: ConditionKind): String = when (kind) {
-    ConditionKind.DOMAIN -> "Например, example.org или *.example.org. ! перед значением означает исключение."
-    ConditionKind.GEOIP -> "Двухбуквенный код страны: RU, DE, NL. Страна IP не определяет язык или владельца сайта."
-    ConditionKind.PRIVATE -> "Частные адреса локальной сети."
-    ConditionKind.CIDR -> "Например, 192.168.1.0/24, 10.0.0.5/32 или IPv6-подсеть."
-    ConditionKind.APP -> "Пакеты Android, например org.telegram.messenger. Windows не использует этот идентификатор."
-    ConditionKind.PROCESS -> "Имя процесса, например chrome.exe, или полный путь к исполняемому файлу."
 }
 
 private fun targetFallback(target: PolicyTarget): UnavailableFallback? = when (target) {

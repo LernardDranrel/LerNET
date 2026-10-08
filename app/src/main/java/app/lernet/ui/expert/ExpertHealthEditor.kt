@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -31,10 +32,10 @@ internal fun ExpertHealthEditor(
     onDismiss: () -> Unit,
     onCommit: suspend (PolicyHealthSettings) -> String?,
 ) {
-    var minimum by remember(initial) { mutableStateOf(expertSecondsInput(initial.minimumIntervalMs)) }
-    var maximum by remember(initial) { mutableStateOf(expertSecondsInput(initial.maximumIntervalMs)) }
-    var timeout by remember(initial) { mutableStateOf(expertSecondsInput(initial.activeTimeoutMs)) }
-    var failures by remember(initial) { mutableStateOf(initial.failedChecksBeforeRecovery.toString()) }
+    var minimum by rememberSaveable(initial) { mutableStateOf(expertSecondsInput(initial.minimumIntervalMs)) }
+    var maximum by rememberSaveable(initial) { mutableStateOf(expertSecondsInput(initial.maximumIntervalMs)) }
+    var timeout by rememberSaveable(initial) { mutableStateOf(expertSecondsInput(initial.activeTimeoutMs)) }
+    var failures by rememberSaveable(initial) { mutableStateOf(initial.failedChecksBeforeRecovery.toString()) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()

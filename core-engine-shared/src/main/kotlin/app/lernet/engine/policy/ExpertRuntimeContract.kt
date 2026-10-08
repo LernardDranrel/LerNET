@@ -72,7 +72,27 @@ sealed interface ExpertBackendEvent {
         val revision: Long,
         val epoch: Long,
     ) : ExpertBackendEvent
+    /** Current network evidence; underlay loss does not revoke Start. */
+    data class NetworkStatus(
+        override val identity: TunIdentity,
+        val revision: Long,
+        val reason: String?,
+        val recovering: Boolean = false,
+    ) : ExpertBackendEvent
     data class Observation(val connection: ExpertConnectionObservation, override val identity: TunIdentity? = null) : ExpertBackendEvent
+    data class DirectNetworkSnapshot(
+        val facts: ExpertDirectNetworkFacts,
+        override val identity: TunIdentity,
+        val revision: Long,
+    ) : ExpertBackendEvent
+
+    /** Native history is bounded independently of the shared UI history. */
+    data class ObservationHistory(
+        val droppedCount: Long,
+        val limit: Int = 500,
+        override val identity: TunIdentity? = null,
+        val visibleFlowIds: Set<String>? = null,
+    ) : ExpertBackendEvent
 
     /** Native queue counts are factual; polling a native cold exit does not manufacture a Kotlin flow. */
     data class ExitStatus(
@@ -112,6 +132,26 @@ data class ExpertConnectionObservation(
     val active: Boolean? = null,
     val startedAtMs: Long? = null,
     val policyRevision: Long? = null,
+    val sourceIp: String? = null,
+    val sourcePort: Int? = null,
+    val destinationIp: String? = null,
+    val destinationPort: Int? = null,
+    val domain: String? = null,
+    val processName: String? = null,
+    /** Transport and sniffed application protocol are separate facts. `protocol` retains its legacy transport meaning. */
+    val network: String? = null,
+    val sniffedProtocol: String? = null,
+    val geoCountry: String? = null,
+    val observedAtMs: Long? = null,
+    val lastUpdateAtMs: Long? = null,
+    val closedAtMs: Long? = null,
+    val state: String? = null,
+    val errorReason: String? = null,
+    val errorStage: String? = null,
+    val closeReason: String? = null,
+    val packageNames: List<String> = emptyList(),
+    val inspection: FlowInspection? = null,
+    val identity: TunIdentity? = null,
 )
 
 enum class ExpertSessionPhase { STOPPED, STARTING, RUNNING, STOPPING, FAILED }
@@ -129,6 +169,9 @@ data class ExpertExitState(
 
 data class ExpertRuntimeState(
     val phase: ExpertSessionPhase = ExpertSessionPhase.STOPPED,
+    val desiredEnabled: Boolean = false,
+    val networkReason: String? = null,
+    val networkRecovering: Boolean = false,
     val capabilities: PolicyControlCapabilities = PolicyControlCapabilities.RESTART_ONLY,
     val saved: NetworkPolicy,
     val draft: NetworkPolicy = saved,
@@ -147,6 +190,10 @@ data class ExpertRuntimeState(
     val actualFolderSelections: Map<String, ExpertExitKey> = emptyMap(),
     val retiredCleanupFailures: List<ExpertRetiredCleanupFailure> = emptyList(),
     val connections: List<ExpertConnectionObservation> = emptyList(),
+    val connectionHistoryLimit: Int = 500,
+    val connectionHistoryTruncated: Boolean = false,
+    val connectionDroppedCount: Long = 0,
+    val directNetwork: ExpertDirectNetworkFacts? = null,
     val reasons: List<ExpertReason> = emptyList(),
 ) {
     val hasDraftChanges: Boolean get() = saved != draft
@@ -156,6 +203,12 @@ sealed interface ExpertIntent {
     data object Start : ExpertIntent
     data object Stop : ExpertIntent
     data class Edit(val policy: NetworkPolicy) : ExpertIntent
+    data class EditChecked(val base: NetworkPolicy, val policy: NetworkPolicy) : ExpertIntent
+    data class UpdateLayout(
+        val scope: app.lernet.routing.policy.PolicyScope,
+        val points: Map<String, app.lernet.routing.policy.PolicyCanvasPoint> = emptyMap(),
+        val clear: Boolean = false,
+    ) : ExpertIntent
     data object SaveDraft : ExpertIntent
     data object DiscardDraft : ExpertIntent
     data object RestoreAppliedToDraft : ExpertIntent
@@ -166,6 +219,7 @@ sealed interface ExpertIntent {
     data class SleepExit(val key: ExpertExitKey) : ExpertIntent
     data object NetworkChanged : ExpertIntent
     data object Tick : ExpertIntent
+    data object ClearConnectionHistory : ExpertIntent
 }
 
 sealed interface ExpertExitResolution {

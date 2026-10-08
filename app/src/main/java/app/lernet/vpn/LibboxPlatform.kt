@@ -44,7 +44,8 @@ class LibboxPlatform(
     @Volatile
     private var myTunName: String? = null
 
-    override fun localDNSTransport(): LocalDNSTransport? = null
+    private val underlayDns = UnderlayDnsTransport(context)
+    override fun localDNSTransport(): LocalDNSTransport = underlayDns
 
     override fun usePlatformAutoDetectInterfaceControl(): Boolean = true
 
@@ -105,11 +106,11 @@ class LibboxPlatform(
         }
 
     override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener?) {
-        jniRun("startDefaultInterfaceMonitor") { DefaultNetworkMonitor.setListener(listener) }
+        jniRun("startDefaultInterfaceMonitor") { DefaultNetworkMonitor.setListener(listener, this) }
     }
 
     override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener?) {
-        jniRun("closeDefaultInterfaceMonitor") { DefaultNetworkMonitor.setListener(null) }
+        jniRun("closeDefaultInterfaceMonitor") { DefaultNetworkMonitor.removeListener(this) }
     }
 
     override fun getInterfaces(): NetworkInterfaceIterator =

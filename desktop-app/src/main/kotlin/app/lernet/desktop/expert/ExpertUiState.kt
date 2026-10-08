@@ -4,6 +4,9 @@ import androidx.compose.ui.graphics.ImageBitmap
 import app.lernet.config.policy.ExternalExitRequest
 import app.lernet.config.policy.VerifiedInterfaceBinding
 import app.lernet.engine.policy.ExitPhase
+import app.lernet.engine.policy.ExpertDirectNetworkFacts
+import app.lernet.engine.policy.ExpertTunnelHealth
+import app.lernet.engine.policy.FlowInspection
 import app.lernet.engine.policy.PolicyControlCapabilities
 import app.lernet.routing.policy.NetworkPolicy
 import app.lernet.routing.policy.PolicyInventory
@@ -17,6 +20,9 @@ data class ExpertUiState(
     val folders: List<ExpertFolder> = emptyList(),
     val selectedScope: PolicyScope = PolicyScope.Device,
     val phase: ExpertPhase = ExpertPhase.STOPPED,
+    val desiredEnabled: Boolean = false,
+    val networkReason: String? = null,
+    val tunnelHealth: ExpertTunnelHealth = ExpertTunnelHealth.OFF,
     val appliedRevision: Long? = null,
     val applied: NetworkPolicy? = null,
     val tunnelIdentity: String? = null,
@@ -40,6 +46,10 @@ data class ExpertUiState(
     val externalSaveAck: String? = null,
     val externalSaveError: String? = null,
     val externalSaveErrorRequestId: String? = null,
+    val connectionHistoryLimit: Int = 500,
+    val connectionHistoryTruncated: Boolean = false,
+    val connectionDroppedCount: Long = 0,
+    val directNetwork: ExpertDirectNetworkFacts? = null,
 ) {
     val hasDraftChanges: Boolean get() = draft != saved
     val hasUnappliedChanges: Boolean get() = appliedRevision != saved.revision
@@ -113,6 +123,25 @@ data class ExpertConnection(
     val active: Boolean? = null,
     val protected: Boolean = false,
     val policyRevision: Long? = null,
+    val startedAtMs: Long? = null,
+    val domain: String? = null,
+    val destinationIp: String? = null,
+    val destinationPort: Int? = null,
+    val sourceIp: String? = null,
+    val sourcePort: Int? = null,
+    val processName: String? = null,
+    val processPath: String? = null,
+    val network: String? = null,
+    val sniffedProtocol: String? = null,
+    val geoCountry: String? = null,
+    val observedAtMs: Long? = null,
+    val closedAtMs: Long? = null,
+    val errorReason: String? = null,
+    val state: String? = null,
+    val lastUpdateAtMs: Long? = null,
+    val errorStage: String? = null,
+    val closeReason: String? = null,
+    val inspection: FlowInspection? = null,
 )
 
 data class ExpertEvent(
@@ -134,6 +163,11 @@ data class ExpertProtection(
 
 sealed interface ExpertIntent {
     data class EditPolicy(val policy: NetworkPolicy) : ExpertIntent
+    data class UpdateLayout(
+        val scope: PolicyScope,
+        val points: Map<String, app.lernet.routing.policy.PolicyCanvasPoint> = emptyMap(),
+        val clear: Boolean = false,
+    ) : ExpertIntent
     data class SelectScope(val scope: PolicyScope) : ExpertIntent
     data object SaveDraft : ExpertIntent
     data object DiscardDraft : ExpertIntent
@@ -142,6 +176,7 @@ sealed interface ExpertIntent {
     data object Start : ExpertIntent
     data object Stop : ExpertIntent
     data object Refresh : ExpertIntent
+    data object ClearConnectionHistory : ExpertIntent
     data object OpenNetworkObservation : ExpertIntent
     data object Import : ExpertIntent
     data object Export : ExpertIntent

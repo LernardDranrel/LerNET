@@ -9,6 +9,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ExpertNativeStatusEvidenceTest {
+    @Test fun `flow identities match the native positive int64 contract on both platforms`() {
+        for (value in listOf("1", "17", "9223372036854775807")) {
+            val row = Json.parseToJsonElement("{\"id\":$value}") as JsonObject
+            assertEquals(value, ExpertNativeStatusEvidence.flowId(row))
+        }
+        for (value in listOf("0", "-1", "1.5", "9223372036854775808", "\"17\"", "true", "null", "{}", "[]")) {
+            val row = Json.parseToJsonElement("{\"id\":$value}") as JsonObject
+            assertEquals(null, ExpertNativeStatusEvidence.flowId(row))
+        }
+    }
+
     @Test fun `cleanup evidence requires actual numeric revision and accepts only finite reason codes`() {
         val body = Json.parseToJsonElement(
             """{"retired_cleanup_failures":[

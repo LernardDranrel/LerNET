@@ -19,6 +19,8 @@ import app.lernet.vpn.expert.RetainedTunDescriptor
 import dagger.hilt.android.AndroidEntryPoint
 import java.util.UUID
 import javax.inject.Inject
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancel
 
 @AndroidEntryPoint
 class LerNetVpnService : VpnService(), TunOwner {
@@ -40,6 +42,8 @@ class LerNetVpnService : VpnService(), TunOwner {
     private var teardownConfirmed = false
     private var hasStarted = false
     private var statusNotification: ConnectionNotification? = null
+    private val notificationScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate)
+    private var expertNotificationJob: kotlinx.coroutines.Job? = null
     private val serviceInstance = UUID.randomUUID().toString()
 
     @Synchronized
@@ -129,10 +133,22 @@ class LerNetVpnService : VpnService(), TunOwner {
             ExpertServiceRestorer.restore()
             return START_NOT_STICKY
         }
+        if (systemStartup && !expert) SimpleServiceRestorer.restore()
         tornDown = false
         teardownConfirmed = false
         hasStarted = true
         status?.observe()
+        if (expert && expertNotificationJob == null) {
+            expertNotificationJob = notificationScope.launch {
+                app.lernet.vpn.expert.ExpertNotificationFeed.status.collect { current ->
+                    runCatching {
+                        getSystemService(android.app.NotificationManager::class.java).notify(
+                            NOTIFICATION_ID, ExpertVpnNotification.build(this@LerNetVpnService, CHANNEL_ID, current),
+                        )
+                    }.onFailure { LerNetLog.w(TAG, "Expert notification update failed", it) }
+                }
+            }
+        }
         VpnRuntime.attach(this)
         VpnRuntime.setRevokeSink(::notifyRevoked)
         if (platform == null) {
@@ -181,6 +197,8 @@ class LerNetVpnService : VpnService(), TunOwner {
         }
         LerNetLog.w(TAG, "VPN revoked by system")
         ExpertServiceRestorer.revoked()
+        runCatching { SimpleServiceRestorer.clear() }
+            .onFailure { LerNetLog.e(TAG, "Simple revoke intent write failed (${it.javaClass.simpleName})") }
         notifyRevoked()
         teardownSafely("revoked")
     }
@@ -188,6 +206,7 @@ class LerNetVpnService : VpnService(), TunOwner {
     @Synchronized
     override fun onDestroy() {
         teardownSafely("destroy")
+        notificationScope.cancel()
         super.onDestroy()
     }
 
@@ -229,6 +248,8 @@ class LerNetVpnService : VpnService(), TunOwner {
             VpnRuntime.detach(this)
         }
         teardownConfirmed = true
+        expertNotificationJob?.cancel()
+        expertNotificationJob = null
         statusNotification?.close()
         statusNotification = null
         clearLernetForeground()

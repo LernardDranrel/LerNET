@@ -1,6 +1,7 @@
 package app.lernet.ui.nav
 
 import android.app.Activity
+import androidx.activity.compose.LocalActivity
 import android.net.VpnService
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -41,6 +42,10 @@ import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.compose.runtime.saveable.rememberSaveable
+import app.lernet.ui.expert.ExpertSection
+import app.lernet.ui.expert.ExpertNavigationDrawer
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
@@ -87,11 +92,28 @@ private data class ExportRequest(val groupId: String?, val fileName: String)
 fun LerNetAppRoot() {
     app.lernet.ui.settings.AndroidUpdatePrompt()
     val navController = rememberNavController()
+    val entry by navController.currentBackStackEntryAsState()
+    var expertContext by rememberSaveable { mutableStateOf(false) }
+    val expertMode = when (entry?.destination?.route) {
+        Dest.Expert.route -> true
+        Dest.Home.route -> false
+        else -> expertContext
+    }
+    LaunchedEffect(expertMode) { expertContext = expertMode }
+    var expertProfilesOpen by rememberSaveable { mutableStateOf(false) }
+    var expertSection by rememberSaveable { mutableStateOf(ExpertSection.OVERVIEW) }
     val homeViewModel: HomeViewModel = hiltViewModel()
     val homeState by homeViewModel.state.collectAsStateWithLifecycle()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     var drawerDragActive by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    LaunchedEffect(drawerState.currentValue) {
+        if (drawerState.currentValue == DrawerValue.Closed) expertProfilesOpen = false
+    }
+    fun openAppPage(route: String) {
+        scope.launch { drawerState.close() }
+        navController.navigate(route) { launchSingleTop = true }
+    }
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     val shareFailed = stringResource(R.string.logs_share_failed)
@@ -150,7 +172,25 @@ fun LerNetAppRoot() {
         drawerState = drawerState,
         gesturesEnabled = !drawerDragActive,
         drawerContent = {
-            ConfigDrawer(
+            if (expertMode && !expertProfilesOpen) ExpertNavigationDrawer(expertSection, onSection = {
+                expertSection = it
+                scope.launch { drawerState.close() }
+                if (entry?.destination?.route != Dest.Expert.route && !navController.popBackStack(Dest.Expert.route, false)) {
+                    navController.navigate(Dest.Expert.route) { launchSingleTop = true }
+                }
+            }, onProfiles = { expertProfilesOpen = true },
+                onSettings = { openAppPage(Dest.Settings.route) },
+                onDiagnostics = { openAppPage(Dest.Diag.route) },
+                onNetwork = { openAppPage(Dest.Network.route) },
+            ) else ConfigDrawer(
+                header = {
+                    if (expertMode) {
+                        androidx.activity.compose.BackHandler(enabled = drawerState.isOpen) { expertProfilesOpen = false }
+                        TextButton({ expertProfilesOpen = false }, Modifier.padding(horizontal = 16.dp)) {
+                            Text(stringResource(R.string.expert_back_to_menu))
+                        }
+                    }
+                },
                 profiles = homeState.profiles,
                 groups = homeState.groups,
                 activeProfileId = homeState.activeProfile?.id,
@@ -175,7 +215,7 @@ fun LerNetAppRoot() {
                         exportRequest = ExportRequest(groupId, "LerNET-$name.lernet.json")
                     },
                     close = { scope.launch { drawerState.close() } },
-                ),
+                ).copy(managementOnly = expertMode),
             )
         },
     ) {
@@ -185,6 +225,7 @@ fun LerNetAppRoot() {
                 homeViewModel = homeViewModel,
                 homeState = homeState,
                 onOpenDrawer = { scope.launch { drawerState.open() } },
+                expertSection = expertSection, onExpertSection = { expertSection = it },
                 onShareLogs = shareLogs,
                 onImported = { ids ->
                     pendingImportGroupId?.let { homeViewModel.assignImportedToGroup(it, ids) }
@@ -207,7 +248,7 @@ fun LerNetAppRoot() {
 @Composable
 private fun DebugNavBootstrap(navController: NavHostController) {
     if (!BuildConfig.DEBUG) return
-    val activity = LocalContext.current as? Activity ?: return
+    val activity = LocalActivity.current ?: return
     val route = activity.intent?.getStringExtra(DEBUG_NAV_EXTRA)?.takeIf { it.isNotBlank() } ?: return
     LaunchedEffect(route) {
         delay(800)
@@ -374,6 +415,8 @@ private fun AppNavHost(
     onShareLogs: () -> Unit,
     onImported: (List<String>) -> Unit,
     showCrashBanner: Boolean,
+    expertSection: ExpertSection,
+    onExpertSection: (ExpertSection) -> Unit,
 ) {
     val reduceMotion = rememberReduceMotion()
     val expertViewModel: ExpertViewModel = hiltViewModel()
@@ -421,6 +464,7 @@ private fun AppNavHost(
         }
         composable(Dest.Expert.route) {
             ExpertRoute(
+                section = expertSection, onSectionChange = onExpertSection, onOpenDrawer = onOpenDrawer,
                 onVpn = { navController.navigate(Dest.Home.route) { popUpTo(Dest.Home.route) { inclusive = true }; launchSingleTop = true } },
                 simpleActive = homeState.snapshot.state in setOf(ConnectionState.CONNECTED, ConnectionState.CONNECTING, ConnectionState.RECONNECTING),
             )

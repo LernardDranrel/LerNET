@@ -58,3 +58,19 @@ func TestLerNETSystemRouteAllowsHostLocalRedirectWithoutOwnedRoute(t *testing.T)
 		t.Fatalf("local redirect %v %v", got, err)
 	}
 }
+
+func TestLerNETSystemRoutePreservesIPv6DNSInterfaceScope(t *testing.T) {
+	routes := []lernetRouteCandidate{
+		{prefix: netip.MustParsePrefix("fe80::/64"), index: 14, name: "Ethernet", guid: "dns", up: true, interfaceMetric: 999},
+		{prefix: netip.MustParsePrefix("fe80::/64"), index: 15, name: "Other", guid: "other", up: true},
+	}
+	for _, scope := range []string{"14", "Ethernet"} {
+		got, err := selectLerNETSystemRoute(netip.MustParseAddr("fe80::53").WithZone(scope), routes)
+		if err != nil || got.guid != "dns" {
+			t.Fatalf("scope %s: %v %v", scope, got, err)
+		}
+	}
+	if _, err := selectLerNETSystemRoute(netip.MustParseAddr("fe80::53%16"), routes); err == nil {
+		t.Fatal("missing DNS interface fell back to another adapter")
+	}
+}

@@ -1,8 +1,14 @@
 package app.lernet.desktop
 
+import app.lernet.engine.policy.ExpertVpnHandover
+import app.lernet.routing.policy.PolicyTarget
+import app.lernet.routing.policy.NetworkPolicy
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
@@ -92,7 +98,7 @@ private val panel = Color(0xFF151D2B)
 private val blue = Color(0xFF91ABFF)
 private val muted = Color(0xFFA1AEC4)
 private val green = Color(0xFF80DEBE)
-private val APP_VERSION: String = AppVersionResource::class.java.getResourceAsStream("/lernet-version.txt")
+internal val APP_VERSION: String = AppVersionResource::class.java.getResourceAsStream("/lernet-version.txt")
     ?.bufferedReader()?.use { it.readText().trim() }?.takeIf { it.isNotBlank() } ?: "dev"
 private object AppVersionResource
 private data class ExpertArchivePreview(val raw: String, val fileName: String, val profiles: Int, val folders: Int)
@@ -154,11 +160,14 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
     val tunnel by controller.tunnel.state.collectAsState()
     val ui by controller.state.collectAsState()
     val expertUi = expert?.state?.collectAsState()?.value
-    var expertTab by remember { mutableStateOf(false) }
+    val modeStates = rememberSaveableStateHolder()
+    var expertTab by rememberSaveable { mutableStateOf(false) }
     var expertConfirm by remember { mutableStateOf<ExpertIntent?>(null) }
     var expertImport by remember { mutableStateOf<ExpertArchivePreview?>(null) }
     var expertReplaceConfirm by remember { mutableStateOf(false) }
     var expertStartPending by remember { mutableStateOf(false) }
+    var expertHandover by remember { mutableStateOf<Pair<String, NetworkPolicy>?>(null) }
+    var keepVpn by remember { mutableStateOf(true) }
     var expertStartPreflight by remember { mutableStateOf<ExpertPreflightResult?>(null) }
     LaunchedEffect(expertStartPending) {
         if (expertStartPending) expertStartPreflight = WindowsExpertPreflight().read()
@@ -186,7 +195,9 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
             Item("Открыть", onClick = { visible = true })
             Item("Сеть устройства", onClick = { networkWindowOpen = true })
             Item("Отключить", onClick = {
-                if (expertUi?.phase in setOf(ExpertPhase.RUNNING, ExpertPhase.STARTING, ExpertPhase.APPLYING)) expert?.dispatch(ExpertIntent.Stop)
+                if (expertUi?.phase in setOf(ExpertPhase.RUNNING, ExpertPhase.STARTING, ExpertPhase.APPLYING, ExpertPhase.FAILED)) {
+                    expert?.dispatch(ExpertIntent.Stop)
+                }
                 else controller.disconnect()
             })
             Separator()
@@ -218,47 +229,54 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
             Surface(color = background, contentColor = desktopColors.onBackground) {
                 if (startupCheck == null) DesktopUpdatePrompt()
                 Column(Modifier.fillMaxSize()) {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        FilterChip(selected = !expertTab, onClick = { expertTab = false }, label = { Text("VPN") })
-                        FilterChip(selected = expertTab, onClick = { expertTab = true }, label = { Text("Экспертный режим") })
-                        Spacer(Modifier.weight(1f))
-                        if (expertUi?.phase == ExpertPhase.RUNNING) Text("Управление сетью включено", color = green)
-                        else if (tunnel.status == TunnelStatus.RUNNING) Text("VPN подключён", color = green)
-                    }
-                    Box(Modifier.weight(1f).fillMaxWidth()) {
-                        if (expertTab && expert != null && expertUi != null) {
-                            DesktopExpert(expertUi, onIntent = { intent ->
-                                when (intent) {
-                                    ExpertIntent.OpenNetworkObservation -> networkWindowOpen = true
-                                    ExpertIntent.Import -> chooseTransferFile(false)?.let { file ->
-                                        try {
-                                            check(Files.size(file) <= 20_000_000)
-                                            val raw = Files.readString(file)
-                                            val preview = app.lernet.config.policy.PolicyWorkspaceCodec.decode(raw)
-                                            expertImport = ExpertArchivePreview(raw, file.fileName.toString(), preview.legacy.profiles.size, preview.legacy.groups.size)
-                                            expertReplaceConfirm = false
-                                        } catch (_: Exception) { expert.reportError("Не удалось прочитать архив LerNET. Проверьте формат и размер файла (до 20 МБ).") }
+                    DesktopModeTabs(expertTab, { expertTab = it },
+                        status = when {
+                            expertUi?.phase == ExpertPhase.RUNNING -> "Управление включено"
+                            tunnel.status == TunnelStatus.RUNNING -> "VPN подключён"
+                            else -> ""
+                        }, reducedMotion = expertUi?.reducedMotion == true)
+                    Crossfade(expertTab, Modifier.weight(1f).fillMaxWidth(),
+                        animationSpec = tween(if (expertUi?.reducedMotion == true) 0 else 180), label = "workspace") { showExpert ->
+                        modeStates.SaveableStateProvider(showExpert) {
+                            if (showExpert && expert != null && expertUi != null) {
+                                DesktopExpert(expertUi, onIntent = { intent ->
+                                    when (intent) {
+                                        ExpertIntent.OpenNetworkObservation -> networkWindowOpen = true
+                                        ExpertIntent.Import -> chooseTransferFile(false)?.let { file ->
+                                            try {
+                                                check(Files.size(file) <= 20_000_000)
+                                                val raw = Files.readString(file)
+                                                val preview = app.lernet.config.policy.PolicyWorkspaceCodec.decode(raw)
+                                                expertImport = ExpertArchivePreview(raw, file.fileName.toString(), preview.legacy.profiles.size, preview.legacy.groups.size)
+                                                expertReplaceConfirm = false
+                                            } catch (_: Exception) { expert.reportError("Не удалось прочитать архив LerNET. Проверьте формат и размер файла (до 20 МБ).") }
+                                        }
+                                        ExpertIntent.Export, ExpertIntent.EnableSystemGuard, ExpertIntent.RecoverSystemGuard -> expertConfirm = intent
+                                        ExpertIntent.ChooseExecutable -> {
+                                            val dialog = FileDialog(null as Frame?, "Выбрать исполняемый файл", FileDialog.LOAD)
+                                            dialog.isVisible = true
+                                            dialog.file?.let { expert.addExecutable(Path.of(dialog.directory, it).toString()) }
+                                            dialog.dispose()
+                                        }
+                                        ExpertIntent.Start -> {
+                                            expertHandover = controller.connectedVpnProfileId()?.let { profileId ->
+                                                expertUi.saved.takeIf {
+                                                    ExpertVpnHandover.available(it, expertUi.draft)
+                                                }?.let { profileId to it }
+                                            }
+                                            keepVpn = true
+                                            expertStartPreflight = null
+                                            expertStartPending = true
+                                        }
+                                        else -> expert.dispatch(intent)
                                     }
-                                    ExpertIntent.Export, ExpertIntent.EnableSystemGuard, ExpertIntent.RecoverSystemGuard -> expertConfirm = intent
-                                    ExpertIntent.ChooseExecutable -> {
-                                        val dialog = FileDialog(null as Frame?, "Выбрать исполняемый файл", FileDialog.LOAD)
-                                        dialog.isVisible = true
-                                        dialog.file?.let { expert.addExecutable(Path.of(dialog.directory, it).toString()) }
-                                        dialog.dispose()
-                                    }
-                                    ExpertIntent.Start -> {
-                                        expertStartPreflight = null
-                                        expertStartPending = true
-                                    }
-                                    else -> expert.dispatch(intent)
-                                }
+                                })
+                            } else DesktopScreen(controller, onOpenNetwork = { networkWindowOpen = true }, onRequestElevation = {
+                                WindowsElevation.relaunchAsAdministrator()
+                                    .onSuccess { expert?.close(); controller.close(); exitApplication() }
+                                    .onFailure { controller.showMessage(it.message ?: "Не удалось запросить права администратора") }
                             })
-                        } else DesktopScreen(controller, onOpenNetwork = { networkWindowOpen = true }, onRequestElevation = {
-                            WindowsElevation.relaunchAsAdministrator()
-                                .onSuccess { expert?.close(); controller.close(); exitApplication() }
-                                .onFailure { controller.showMessage(it.message ?: "Не удалось запросить права администратора") }
-                        })
+                        }
                     }
                 }
                 if (expertStartPending) {
@@ -268,8 +286,22 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
                         text = {
                             Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Text("Общий TUN будет обрабатывать трафик устройства по вашим сохранённым правилам. " +
-                                    "В новой схеме путь по умолчанию — напрямую; защищённые ветки имеют отдельные правила.")
+                                Text("LerNET станет посредником для сетевых соединений устройства. " +
+                                    "Они будут следовать сохранённой схеме; путь по умолчанию указан в её корне.")
+                                expertHandover?.let { handover ->
+                                    val name = ui.saved.profiles.firstOrNull { it.id == handover.first }?.name.orEmpty()
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(checked = keepVpn, onCheckedChange = { keepVpn = it })
+                                        Text("Сохранить VPN «$name» как основной путь")
+                                    }
+                                    Text(if (keepVpn) "Пустая схема направит трафик через этот профиль и его правила." else
+                                        "VPN будет отключён. Трафик пойдёт напрямую; заблокированные в вашей сети сайты могут перестать открываться.")
+                                }
+                                if (expertHandover == null && expertUi?.saved?.device?.defaultTarget ==
+                                    PolicyTarget.Direct) {
+                                    Text("Основной путь схемы — напрямую. Если обычный VPN подключён, он будет отключён. " +
+                                        "Без отдельного правила сайты пойдут через вашу обычную сеть.")
+                                }
                                 if (!WindowsElevation.isElevated) {
                                     Text("Windows запросит права администратора и откроет новую копию LerNET. " +
                                         "Текущее подключение будет остановлено. После этого откройте экспертный режим и подтвердите включение.")
@@ -287,10 +319,20 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
                                         Text("Читаем текущие пути Windows…")
                                     }
                                 } else {
-                                    Text(snapshot.summary, fontWeight = FontWeight.SemiBold)
-                                    snapshot.facts.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
-                                    snapshot.warnings.forEach { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        style = MaterialTheme.typography.bodySmall) }
+                                    Text(if (snapshot.complete) "Сетевые настройки прочитаны" else
+                                        "Часть сетевых сведений недоступна", fontWeight = FontWeight.SemiBold)
+                                    Text("Это чтение настроек Windows, а не проверка Интернета. " +
+                                        "Отсутствие IPv6-пути само по себе не означает конфликт VPN.",
+                                        style = MaterialTheme.typography.bodySmall)
+                                    var details by remember(snapshot.checkedAtMs) { mutableStateOf(false) }
+                                    TextButton(onClick = { details = !details }) {
+                                        Text(if (details) "Скрыть подробности ▴" else "Маршруты и ограничения проверки ▾")
+                                    }
+                                    if (details) {
+                                        snapshot.facts.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+                                        snapshot.warnings.forEach { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            style = MaterialTheme.typography.bodySmall) }
+                                    }
                                 }
                             }
                         },
@@ -300,8 +342,12 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
                                 WindowsElevation.relaunchAsAdministrator()
                                     .onSuccess { expert?.close(); controller.close(); exitApplication() }
                                     .onFailure { expert?.reportError(it.message ?: "Не удалось запросить права администратора") }
-                            } else expert?.dispatch(ExpertIntent.Start)
-                        }) { Text("Включить") } },
+                            } else {
+                                val handover = expertHandover.takeIf { keepVpn }
+                                if (handover != null) expert?.startKeepingVpn(handover.first, handover.second)
+                                else expert?.dispatch(ExpertIntent.Start)
+                            }
+                        }) { Text(if (expertHandover != null && keepVpn) "Сохранить VPN и включить" else "Включить") } },
                         dismissButton = { TextButton(onClick = { expertStartPending = false }) { Text("Отмена") } },
                     )
                 }
@@ -377,49 +423,20 @@ private fun DesktopScreen(controller: DesktopController, onRequestElevation: () 
     val diagnostics by controller.diagnostics.collectAsState()
     val connectionHistory by controller.connectionHistory.collectAsState()
     val trace by controller.tracer.state.collectAsState()
-    var tab by remember { mutableStateOf(Tab.PROFILES) }
+    var tab by rememberSaveable { mutableStateOf(Tab.PROFILES) }
     var importOpen by remember { mutableStateOf(false) }
     var importGroupId by remember { mutableStateOf<String?>(null) }
     var newGroupOpen by remember { mutableStateOf(false) }
     var createMenu by remember { mutableStateOf(false) }
-    var routeOwnerId by remember { mutableStateOf<String?>(null) }
+    var routeOwnerId by rememberSaveable { mutableStateOf<String?>(null) }
     var traceDetailsRequest by remember { mutableIntStateOf(0) }
     var exportRequest by remember { mutableStateOf<ExportSelection?>(null) }
     Row(Modifier.fillMaxSize().background(background)) {
-        Column(Modifier.width(196.dp).fillMaxHeight().background(Color(0xFF111925)).padding(horizontal = 14.dp, vertical = 24.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(34.dp).background(Color.Black, androidx.compose.foundation.shape.RoundedCornerShape(9.dp)), contentAlignment = Alignment.Center) {
-                    Text("L", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Black)
-                }
-                Spacer(Modifier.width(10.dp))
-                Column {
-                    Text("LerNET", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = desktopColors.onSurface)
-                    Text("для Windows", color = muted, fontSize = 11.sp)
-                }
-            }
-            Spacer(Modifier.height(35.dp))
+        DesktopWorkspaceSidebar(onOpenNetwork) {
             Tab.entries.forEach { item ->
-                Row(
-                    Modifier.fillMaxWidth()
-                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(9.dp))
-                        .background(if (tab == item) desktopColors.primaryContainer else Color.Transparent)
-                        .clickable { if (item == Tab.ROUTES) routeOwnerId = null; tab = item }
-                        .padding(horizontal = 12.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    NavSymbol(item, tab == item)
-                    Spacer(Modifier.width(11.dp))
-                    Text(item.label, color = if (tab == item) desktopColors.onSurface else muted,
-                        fontWeight = if (tab == item) FontWeight.SemiBold else FontWeight.Normal)
-                }
-                Spacer(Modifier.height(4.dp))
+                WorkspaceNavigationItem(item.label, tab == item,
+                    { if (item == Tab.ROUTES) routeOwnerId = null; tab = item }) { NavSymbol(item, tab == item) }
             }
-            Spacer(Modifier.weight(1f))
-            OutlinedButton(onClick = onOpenNetwork, modifier = Modifier.fillMaxWidth()) { Text("Сеть устройства ↗", fontSize = 12.sp) }
-            Spacer(Modifier.height(12.dp))
-            HorizontalDivider(color = desktopColors.outlineVariant)
-            Spacer(Modifier.height(12.dp))
-            Text("LerNET v$APP_VERSION", color = muted, fontSize = 11.sp)
         }
         Column(Modifier.weight(1f).fillMaxHeight().padding(22.dp)) {
             val statusLine = (if (tunnel.status == TunnelStatus.RUNNING) ui.healthMessage else tunnel.message)

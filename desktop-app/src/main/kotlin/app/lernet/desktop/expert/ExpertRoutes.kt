@@ -1,13 +1,8 @@
 package app.lernet.desktop.expert
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.HorizontalScrollbar
-import androidx.compose.foundation.VerticalScrollbar
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,23 +11,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -42,59 +31,74 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.lernet.desktop.RouteCanvasTransform
+import app.lernet.desktop.RouteEditorCanvas
+import app.lernet.desktop.RouteEditorInspector
+import app.lernet.desktop.RouteEditorNodeActions
+import app.lernet.desktop.RouteEditorNodeFace
+import app.lernet.desktop.RouteEditorPositioned
+import app.lernet.desktop.RouteEditorView
+import app.lernet.desktop.RouteEditorViewToggle
+import app.lernet.desktop.routeEditorDrag
+import app.lernet.desktop.routeEditorStateSaver
 import app.lernet.routing.RouteLayoutNode
 import app.lernet.routing.RouteTreeLayout
+import app.lernet.routing.policy.PolicyBranchEditing
 import app.lernet.routing.policy.PolicyCanvasKeys
 import app.lernet.routing.policy.PolicyCanvasPoint
 import app.lernet.routing.policy.PolicyChannel
 import app.lernet.routing.policy.PolicyNode
+import app.lernet.routing.policy.PolicyOtherwise
 import app.lernet.routing.policy.PolicyScope
 import app.lernet.routing.policy.PolicyTarget
 import app.lernet.routing.policy.PolicyTree
 import java.util.UUID
-import kotlin.math.roundToInt
-
-private enum class RoutePresentation { GRAPH, LIST }
 
 @Composable
-internal fun ExpertRoutes(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, modifier: Modifier) {
-    val tree = ExpertPolicyEditing.tree(state.draft, state.selectedScope)
-    var view by remember { mutableStateOf(RoutePresentation.GRAPH) }
+internal fun ExpertRoutes(
+    state: ExpertUiState,
+    onIntent: (ExpertIntent) -> Unit,
+    modifier: Modifier,
+    highlightedNodeIds: Set<String> = emptySet(),
+) {
+    val tree = PolicyBranchEditing.displayTree(ExpertPolicyEditing.tree(state.draft, state.selectedScope))
+    val rootOtherwise = tree.nodes.first { it.parentId == null && !it.detached && PolicyOtherwise.isOtherwise(it) }
+    var view by rememberSaveable { mutableStateOf(RouteEditorView.SCHEME) }
     var ownerMenu by remember { mutableStateOf(false) }
-    var selectedId by remember(state.selectedScope) { mutableStateOf<String?>(null) }
-    var editing by remember(state.selectedScope) { mutableStateOf<PolicyNode?>(null) }
+    var selectedId by rememberSaveable(state.selectedScope) { mutableStateOf<String?>(null) }
+    var rootSelected by rememberSaveable(state.selectedScope) { mutableStateOf(true) }
+    var editing by rememberSaveable(state.selectedScope, stateSaver = routeEditorStateSaver<PolicyNode?>()) {
+        mutableStateOf<PolicyNode?>(null)
+    }
     var deleting by remember(state.selectedScope) { mutableStateOf<PolicyNode?>(null) }
-    var editingChannel by remember(state.selectedScope) { mutableStateOf<PolicyChannel?>(null) }
-    var folderSettings by remember(state.selectedScope) { mutableStateOf(false) }
-    var profileSettings by remember(state.selectedScope) { mutableStateOf(false) }
-    var defaultTargetEditor by remember(state.selectedScope) { mutableStateOf(false) }
+    var editingChannel by rememberSaveable(state.selectedScope, stateSaver = routeEditorStateSaver<PolicyChannel?>()) {
+        mutableStateOf<PolicyChannel?>(null)
+    }
+    var folderSettings by rememberSaveable(state.selectedScope) { mutableStateOf(false) }
+    var profileSettings by rememberSaveable(state.selectedScope) { mutableStateOf(false) }
     var pendingPolicy by remember { mutableStateOf<ExpertDraftSubmission?>(null) }
     var pendingCompletion by remember { mutableStateOf<(() -> Unit)?>(null) }
     val focus = remember { FocusRequester() }
@@ -128,7 +132,15 @@ internal fun ExpertRoutes(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit
         editing = PolicyNode(
             UUID.randomUUID().toString(), parentId = parent?.id,
             sortIndex = tree.nodes.count { it.parentId == parent?.id },
-            target = if (tree.scope == PolicyScope.Device) PolicyTarget.Direct else PolicyTarget.CurrentExit,
+            target = PolicyBranchEditing.initialChildTarget(tree, parent?.id),
+        )
+    }
+    fun newOtherwise(parent: PolicyNode) {
+        editing = PolicyNode(
+            UUID.randomUUID().toString(), parentId = parent.id,
+            sortIndex = tree.nodes.count { it.parentId == parent.id }, title = "ИНАЧЕ",
+            target = if (ExpertPolicyEditing.inheritedProtection(tree, parent.id)) PolicyTarget.Block else tree.defaultTarget,
+            otherwise = true,
         )
     }
     Column(
@@ -136,12 +148,12 @@ internal fun ExpertRoutes(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit
             if (event.type == KeyEventType.KeyDown &&
                 event.key in setOf(Key.Delete, Key.Backspace) &&
                 selected != null &&
+                !PolicyOtherwise.isOtherwise(selected) &&
                 editing == null &&
                 deleting == null &&
                 editingChannel == null &&
                 !folderSettings &&
-                !profileSettings &&
-                !defaultTargetEditor
+                !profileSettings
             ) {
                 deleting = selected
                 true
@@ -151,28 +163,44 @@ internal fun ExpertRoutes(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit
         },
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box {
-                OutlinedButton(onClick = { ownerMenu = true }) { Text(ExpertPolicyEditing.scopeName(state.selectedScope, state)) }
-                DropdownMenu(expanded = ownerMenu, onDismissRequest = { ownerMenu = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Всё устройство", fontWeight = FontWeight.SemiBold) },
-                        onClick = {
-                            ownerMenu = false
-                            onIntent(ExpertIntent.SelectScope(PolicyScope.Device))
-                        },
-                    )
-                    state.folders.forEach { folder ->
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box {
+                    OutlinedButton(onClick = { ownerMenu = true }) { Text(ExpertPolicyEditing.scopeName(state.selectedScope, state) + " ▾") }
+                    DropdownMenu(expanded = ownerMenu, onDismissRequest = { ownerMenu = false }) {
                         DropdownMenuItem(
-                            text = { Text("Папка: ${folder.name}", fontWeight = FontWeight.SemiBold) },
+                            text = { Text("Всё устройство", fontWeight = FontWeight.SemiBold) },
                             onClick = {
                                 ownerMenu = false
-                                onIntent(ExpertIntent.SelectScope(PolicyScope.Folder(folder.id)))
+                                onIntent(ExpertIntent.SelectScope(PolicyScope.Device))
                             },
                         )
-                        state.profiles.filter { it.folderId == folder.id }.forEach { profile ->
+                        state.folders.forEach { folder ->
                             DropdownMenuItem(
-                                text = { Text(profile.name, Modifier.padding(start = 18.dp)) },
+                                text = { Text("Папка: ${folder.name}", fontWeight = FontWeight.SemiBold) },
+                                onClick = {
+                                    ownerMenu = false
+                                    onIntent(ExpertIntent.SelectScope(PolicyScope.Folder(folder.id)))
+                                },
+                            )
+                            state.profiles.filter { it.folderId == folder.id }.forEach { profile ->
+                                DropdownMenuItem(
+                                    text = { Text(profile.name, Modifier.padding(start = 18.dp)) },
+                                    onClick = {
+                                        ownerMenu = false
+                                        onIntent(ExpertIntent.SelectScope(PolicyScope.Profile(profile.id)))
+                                    },
+                                )
+                            }
+                        }
+                        state.profiles.filter {
+                            it.folderId == null ||
+                                state.folders.none { folder ->
+                                    folder.id == it.folderId
+                                }
+                        }.forEach { profile ->
+                            DropdownMenuItem(
+                                text = { Text(profile.name) },
                                 onClick = {
                                     ownerMenu = false
                                     onIntent(ExpertIntent.SelectScope(PolicyScope.Profile(profile.id)))
@@ -180,96 +208,125 @@ internal fun ExpertRoutes(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit
                             )
                         }
                     }
-                    state.profiles.filter {
-                        it.folderId == null ||
-                            state.folders.none { folder ->
-                                folder.id == it.folderId
-                            }
-                    }.forEach { profile ->
-                        DropdownMenuItem(
-                            text = { Text(profile.name) },
-                            onClick = {
-                                ownerMenu = false
-                                onIntent(ExpertIntent.SelectScope(PolicyScope.Profile(profile.id)))
-                            },
-                        )
-                    }
                 }
+                RouteEditorViewToggle(view) { view = it }
+                OutlinedButton(
+                    onClick = {
+                        editingChannel = PolicyChannel(
+                            UUID.randomUUID().toString(), "", tree.scope,
+                            target = if (tree.scope == PolicyScope.Device) PolicyTarget.Direct else PolicyTarget.CurrentExit
+                        )
+                    },
+                    enabled = !state.busy,
+                ) { Text("Новый канал") }
+                if (state.selectedScope is PolicyScope.Folder) TextButton(onClick = { folderSettings = true }) { Text("Политика папки") }
+                if (state.selectedScope is PolicyScope.Profile) TextButton(onClick = { profileSettings = true }) { Text("Холодный старт") }
             }
-            FilterChip(view == RoutePresentation.GRAPH, { view = RoutePresentation.GRAPH }, label = { Text("Схема") })
-            FilterChip(view == RoutePresentation.LIST, { view = RoutePresentation.LIST }, label = { Text("Списком") })
             Button(onClick = { newNode() }, enabled = !state.busy) { Text("Добавить правило") }
-            OutlinedButton(
-                onClick = {
-                    editingChannel = PolicyChannel(
-                        UUID.randomUUID().toString(), "", tree.scope,
-                        target = if (tree.scope == PolicyScope.Device) PolicyTarget.Direct else PolicyTarget.CurrentExit
-                    )
-                },
-                enabled = !state.busy,
-            ) { Text("Новый канал") }
-            if (state.selectedScope is PolicyScope.Folder) TextButton(onClick = { folderSettings = true }) { Text("Политика папки") }
-            if (state.selectedScope is PolicyScope.Profile) TextButton(onClick = { profileSettings = true }) { Text("Холодный старт") }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "Если правило не подошло: ${ExpertPolicyEditing.targetName(tree.defaultTarget, state)}", Modifier.weight(1f),
+                "ИНАЧЕ — последний путь на каждой развилке. Его можно продолжить дочерними условиями.", Modifier.weight(1f),
                 color = ExpertColors.muted, fontSize = 13.sp
             )
-            TextButton(onClick = { defaultTargetEditor = true }) { Text("Изменить") }
+            TextButton(onClick = {
+                selectedId = rootOtherwise.id
+                rootSelected = false
+            }) { Text("Выбрать ИНАЧЕ") }
         }
         Text(
-            "Сначала проверяются верхние ветки. Условия родителя и ребёнка объединяются через И. " +
+            "Сначала проверяются ветки по порядку, затем ИНАЧЕ. Условия родителя и ребёнка объединяются через И. " +
                 "Каналы с одним идентификатором — один выход; название служит только подписью.",
             color = ExpertColors.muted, fontSize = 12.sp,
         )
         val nodeSelect: (PolicyNode) -> Unit = {
             selectedId = it.id
-            focus.requestFocus()
+            rootSelected = false
+            if (view == RouteEditorView.LIST || graphProblem != null) focus.requestFocus()
         }
         graphProblem?.let { ExpertMessage("Схема показана списком", it, warning = true) }
-        when (if (graphProblem != null) RoutePresentation.LIST else view) {
-            RoutePresentation.GRAPH -> ExpertGraph(
-                tree, state, selectedId, Modifier.weight(1f), nodeSelect,
-                { editing = it }, { newNode(it) }, { editingChannel = it }, { defaultTargetEditor = true }
-            ) { updated ->
-                editPolicy(ExpertPolicyEditing.replaceTree(state.draft, updated))
+        Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.weight(1f).fillMaxHeight()) {
+                when (if (graphProblem != null) RouteEditorView.LIST else view) {
+                    RouteEditorView.SCHEME -> ExpertGraph(
+                        tree, state, selectedId, Modifier.fillMaxSize(), nodeSelect,
+                        { editingChannel = it }, {
+                            selectedId = null
+                            rootSelected = true
+                        },
+                        addChild = { newNode(it) },
+                        addRoot = { newNode() },
+                        highlightedNodeIds = highlightedNodeIds,
+                        selectedRoot = rootSelected,
+                        updateLayout = { points, clear -> onIntent(ExpertIntent.UpdateLayout(tree.scope, points, clear)) },
+                    )
+                    RouteEditorView.LIST -> ExpertRouteList(
+                        tree, state, selectedId, Modifier.fillMaxSize(), nodeSelect,
+                        { editing = it }, { newNode(it) }, { deleting = it }, { editingChannel = it },
+                        rootSelect = {
+                            selectedId = null
+                            rootSelected = true
+                        }, addRoot = { newNode() }
+                    )
+                }
             }
-            RoutePresentation.LIST -> ExpertRouteList(
-                tree, state, selectedId, Modifier.weight(1f), nodeSelect,
-                { editing = it }, { newNode(it) }, { deleting = it }, { editingChannel = it }
-            )
-        }
-        selected?.let { node ->
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { editing = node }) { Text("Свойства") }
-                OutlinedButton(onClick = {
-                    editPolicy(
-                        ExpertPolicyEditing.moveNode(
-                            state.draft, tree.scope, node.id,
-                            -1
-                        )
+            RouteEditorInspector("ПРАВИЛО", Modifier.width(302.dp).fillMaxHeight()) {
+                if (rootSelected) {
+                    Text("Весь трафик", color = ExpertColors.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Проверка условий → ИНАЧЕ", color = ExpertColors.blue)
+                    OutlinedButton(onClick = { editing = rootOtherwise }) { Text("Настроить ИНАЧЕ") }
+                    OutlinedButton(onClick = { newNode() }) { Text("+ Дочернее правило") }
+                } else if (selected == null) {
+                    Text("Выберите блок на схеме или строку в списке", color = ExpertColors.text, fontSize = 16.sp)
+                    Text(
+                        "Перетаскивайте блоки на схеме. Свойства, порядок и целевой выход доступны здесь.",
+                        color = ExpertColors.muted, fontSize = 12.sp,
                     )
-                }) { Text("Выше") }
-                OutlinedButton(onClick = { editPolicy(ExpertPolicyEditing.moveNode(state.draft, tree.scope, node.id, 1)) }) { Text("Ниже") }
-                OutlinedButton(onClick = {
-                    editPolicy(
-                        ExpertPolicyEditing.putNode(
-                            state.draft, tree.scope,
-                            node.copy(enabled = !node.enabled)
-                        )
-                    )
-                }) {
-                    Text(if (node.enabled) "Выключить ветку" else "Включить ветку")
                 }
-                TextButton(onClick = { deleting = node }) { Text("Удалить · Delete", color = ExpertColors.red) }
-                val referencedScope = when (val target = node.target) {
-                    is PolicyTarget.Profile -> target.routeScope
-                    is PolicyTarget.Folder -> target.routeScope
-                    PolicyTarget.Direct, PolicyTarget.Block, PolicyTarget.CurrentExit, is PolicyTarget.Channel -> null
-                }
-                referencedScope?.let { scope ->
-                    OutlinedButton(onClick = { onIntent(ExpertIntent.SelectScope(scope)) }) { Text("Открыть дочернюю схему") }
+                selected?.let { node ->
+                    Text(policyNodeTitle(node), color = ExpertColors.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                    Text(ExpertPolicyEditing.conditionSummary(node), color = ExpertColors.muted, fontSize = 12.sp)
+                    Text(policyNodeTargetLabel(node, tree, state), color = ExpertColors.blue, fontSize = 13.sp)
+                    ExpertPolicyEditing.inactiveReason(node, tree, state)?.let { Text(it, color = ExpertColors.muted, fontSize = 12.sp) }
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedButton(onClick = { editing = node }) { Text("Свойства") }
+                        if (canAddPolicyChild(node)) OutlinedButton(onClick = { newNode(node) }) { Text("+ Дочернее правило") }
+                        if (canAddMissingOtherwise(tree, node)) {
+                            OutlinedButton(onClick = { newOtherwise(node) }) { Text("+ Ветка ИНАЧЕ") }
+                        }
+                        if (!PolicyOtherwise.isOtherwise(node)) {
+                            OutlinedButton(enabled = canMovePolicyNode(tree, node, -1), onClick = {
+                                editPolicy(
+                                    ExpertPolicyEditing.moveNode(
+                                        state.draft, tree.scope, node.id,
+                                        -1
+                                    )
+                                )
+                            }) { Text("Выше") }
+                            OutlinedButton(enabled = canMovePolicyNode(tree, node, 1), onClick = {
+                                editPolicy(ExpertPolicyEditing.moveNode(state.draft, tree.scope, node.id, 1))
+                            }) { Text("Ниже") }
+                            OutlinedButton(onClick = {
+                                editPolicy(
+                                    ExpertPolicyEditing.putNode(
+                                        state.draft, tree.scope,
+                                        node.copy(enabled = !node.enabled)
+                                    )
+                                )
+                            }) {
+                                Text(if (node.enabled) "Выключить ветку" else "Включить ветку")
+                            }
+                            TextButton(onClick = { deleting = node }) { Text("Удалить · Delete", color = ExpertColors.red) }
+                        }
+                        val referencedScope = when (val target = node.target) {
+                            is PolicyTarget.Profile -> target.routeScope
+                            is PolicyTarget.Folder -> target.routeScope
+                            PolicyTarget.Direct, PolicyTarget.Block, PolicyTarget.CurrentExit, is PolicyTarget.Channel -> null
+                        }
+                        referencedScope?.let { scope ->
+                            OutlinedButton(onClick = { onIntent(ExpertIntent.SelectScope(scope)) }) { Text("Открыть дочернюю схему") }
+                        }
+                    }
                 }
             }
         }
@@ -338,21 +395,6 @@ internal fun ExpertRoutes(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit
             }
         }
     }
-    if (defaultTargetEditor) {
-        ExpertDefaultTargetEditor(tree, state, { defaultTargetEditor = false }, pendingPolicy != null) { target ->
-            commitEditor(
-                ExpertPolicyEditing.ensureTargetTree(
-                    ExpertPolicyEditing.replaceTree(
-                        state.draft,
-                        tree.copy(defaultTarget = target)
-                    ),
-                    target
-                )
-            ) {
-                defaultTargetEditor = false
-            }
-        }
-    }
 }
 
 @Composable
@@ -366,6 +408,8 @@ private fun ExpertRouteList(
     addChild: (PolicyNode) -> Unit,
     delete: (PolicyNode) -> Unit,
     channelEdit: (PolicyChannel) -> Unit,
+    rootSelect: () -> Unit,
+    addRoot: () -> Unit,
 ) {
     val ordered = remember(tree.nodes) {
         val children = tree.nodes.groupBy { it.parentId }
@@ -385,6 +429,12 @@ private fun ExpertRouteList(
         output
     }
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            ExpertPanel("Весь трафик", trailing = { TextButton(onClick = rootSelect) { Text("Выбрать корень") } }) {
+                Text("Проверка условий → ИНАЧЕ", color = ExpertColors.blue)
+                TextButton(onClick = addRoot) { Text("+ Дочернее правило") }
+            }
+        }
         if (ordered.isEmpty()) {
             item {
                 ExpertEmpty(
@@ -406,7 +456,7 @@ private fun ExpertRouteList(
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
-                            node.title.ifBlank { "Без названия" }, Modifier.weight(1f), color = ExpertColors.text,
+                            policyNodeTitle(node), Modifier.weight(1f), color = ExpertColors.text,
                             fontWeight = FontWeight.Medium
                         )
                         if (node.protected || ExpertPolicyEditing.inheritedProtection(tree, node.parentId)) {
@@ -417,12 +467,13 @@ private fun ExpertRouteList(
                         }
                         if (!node.enabled || node.detached || reason != null) ExpertTag("Неактивно", ExpertColors.muted)
                         if (channel != null && ExpertPolicyEditing.channelReferenceCount(state.draft, channel.id) > 1) {
-                            ExpertTag("Общий канал", ExpertColors.amber)
+                            val references = ExpertPolicyEditing.channelReferenceCount(state.draft, channel.id)
+                            ExpertTag("Канал · $references входов", ExpertColors.amber)
                         }
                     }
                     Text(ExpertPolicyEditing.conditionSummary(node), color = ExpertColors.muted, fontSize = 13.sp)
                     Text(
-                        ExpertPolicyEditing.targetName(node.target, state),
+                        policyNodeTargetLabel(node, tree, state),
                         color =
                         if (channel != null) ExpertColors.amber else ExpertColors.blue
                     )
@@ -435,14 +486,13 @@ private fun ExpertRouteList(
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TextButton(onClick = { edit(node) }) { Text("Свойства") }
-                        if (node.target !is PolicyTarget.Profile &&
-                            node.target !is PolicyTarget.Folder &&
-                            node.target !is PolicyTarget.Channel
-                        ) {
+                        if (canAddPolicyChild(node)) {
                             TextButton(onClick = { addChild(node) }) { Text("Добавить ребёнка") }
                         }
                         channel?.let { TextButton(onClick = { channelEdit(it) }) { Text("Открыть канал") } }
-                        TextButton(onClick = { delete(node) }) { Text("Удалить", color = ExpertColors.red) }
+                        if (!PolicyOtherwise.isOtherwise(node)) {
+                            TextButton(onClick = { delete(node) }) { Text("Удалить", color = ExpertColors.red) }
+                        }
                     }
                 }
             }
@@ -464,59 +514,49 @@ private fun ExpertRouteList(
 }
 
 @Composable
-private fun ExpertGraph(
-    tree: PolicyTree,
+internal fun ExpertGraph(
+    sourceTree: PolicyTree,
     state: ExpertUiState,
     selectedId: String?,
     modifier: Modifier,
     select: (PolicyNode) -> Unit,
-    edit: (PolicyNode) -> Unit,
-    addChild: (PolicyNode) -> Unit,
     channelEdit: (PolicyChannel) -> Unit,
     defaultEdit: () -> Unit,
-    updateLayout: (PolicyTree) -> Unit,
+    addChild: ((PolicyNode) -> Unit)? = null,
+    addRoot: (() -> Unit)? = null,
+    highlightedNodeIds: Set<String> = emptySet(),
+    selectedRoot: Boolean = false,
+    highlightedRoot: Boolean = false,
+    highlightedDefaultTarget: Boolean = false,
+    possiblePath: Boolean = false,
+    readOnly: Boolean = false,
+    updateLayout: (Map<String, PolicyCanvasPoint>, Boolean) -> Unit = { _, _ -> },
 ) {
-    val density = LocalDensity.current
+    val tree = PolicyBranchEditing.displayTree(sourceTree)
+    val defaultNode = tree.nodes.first { it.parentId == null && !it.detached && PolicyOtherwise.isOtherwise(it) }
+    val highlightedNodes = if (highlightedDefaultTarget) highlightedNodeIds + defaultNode.id else highlightedNodeIds
+    val pathTone = if (possiblePath) ExpertColors.amber else ExpertColors.green
+    val density = LocalDensity.current.density
     val positions = remember(tree.scope) { mutableStateMapOf<String, Offset>() }
     var draggingKey by remember(tree.scope) { mutableStateOf<String?>(null) }
     var aligning by remember(tree.scope) { mutableStateOf(false) }
-    var origin by remember(tree.scope) {
-        mutableStateOf(
-            Offset(
-                (12f - (tree.positions.values.filter { it.isValid() }.minOfOrNull { it.x } ?: 40f)).coerceAtLeast(0f),
-                (12f - (tree.positions.values.filter { it.isValid() }.minOfOrNull { it.y } ?: 40f)).coerceAtLeast(0f),
-            )
-        )
-    }
-    var zoom by remember(tree.scope) { mutableStateOf(1f) }
-    var centerAnchor by remember(tree.scope) { mutableStateOf<Float?>(null) }
-    var fitted by remember(tree.scope) { mutableStateOf(false) }
-    var viewport by remember { mutableStateOf(IntSize.Zero) }
-    val horizontal = rememberScrollState()
-    val vertical = rememberScrollState()
     LaunchedEffect(tree.positions) {
         if (draggingKey == null) positions.clear()
         aligning = false
     }
     fun position(key: String, automatic: Offset): Offset = positions[key]
         ?: tree.positions[key]?.takeIf { !aligning && it.isValid() }?.let { Offset(it.x, it.y) } ?: automatic
-    fun drag(key: String, point: Offset, delta: Offset) {
+    fun drag(key: String, point: Offset, delta: Offset, transform: RouteCanvasTransform) {
         val current = positions[key] ?: point
+        val next = current + transform.canvasDelta(delta, density)
         positions[key] = Offset(
-            (current.x + delta.x / density.density / zoom).coerceIn(12f - origin.x, PolicyCanvasPoint.MAX_COORDINATE),
-            (current.y + delta.y / density.density / zoom).coerceIn(12f - origin.y, PolicyCanvasPoint.MAX_COORDINATE),
+            next.x.coerceIn(-PolicyCanvasPoint.MAX_COORDINATE, PolicyCanvasPoint.MAX_COORDINATE),
+            next.y.coerceIn(-PolicyCanvasPoint.MAX_COORDINATE, PolicyCanvasPoint.MAX_COORDINATE)
         )
     }
     fun commitDrag() {
-        if (positions.isNotEmpty()) {
-            updateLayout(
-                tree.copy(
-                    positions = tree.positions + positions.mapValues { (_, value) ->
-                        PolicyCanvasPoint(value.x, value.y)
-                    }
-                )
-            )
-        }
+        val point = draggingKey?.let { key -> positions[key]?.let { key to PolicyCanvasPoint(it.x, it.y) } }
+        if (point != null) updateLayout(mapOf(point), false)
         draggingKey = null
     }
     fun cancelDrag() {
@@ -524,264 +564,199 @@ private fun ExpertGraph(
         draggingKey = null
     }
     val nodes = tree.nodes.sortedWith(compareBy<PolicyNode> { it.sortIndex }.thenBy { it.id })
-    val layout = remember(nodes) { RouteTreeLayout.vertical(nodes.map { RouteLayoutNode(it.id, it.parentId) }, 250f, 200f) }
+    val layout = remember(nodes) { RouteTreeLayout.vertical(nodes.map { RouteLayoutNode(it.id, it.parentId) }, 274f, 146f) }
     val pointMap = layout.nodes.mapValues { (id, point) -> position(PolicyCanvasKeys.node(id), Offset(point.x, point.y)) }
     val root = position(PolicyCanvasKeys.ROOT, Offset(layout.root.x, layout.root.y))
     val channels = state.draft.channels.filter { it.owner == tree.scope }.distinctBy { it.id }
-    val channelTop = (pointMap.values.maxOfOrNull { it.y } ?: root.y) + 230f
-    val channelPoints = channels.mapIndexed { index, channel ->
-        channel.id to
-            position(PolicyCanvasKeys.channel(channel.id), Offset(40f + index * 250f, channelTop))
-    }.toMap()
-    val width = maxOf(760f, (pointMap.values + channelPoints.values + root).maxOf { it.x } + origin.x + 265f)
-    val height = maxOf(380f, (pointMap.values + channelPoints.values + root).maxOf { it.y } + origin.y + 195f)
-    fun fitZoom(minimum: Float): Float {
-        if (viewport.width == 0 || viewport.height == 0) return 1f
-        val availableWidth = viewport.width / density.density - 24f
-        val availableHeight = viewport.height / density.density - 24f
-        return minOf(1f, availableWidth / width, availableHeight / height).coerceAtLeast(minimum)
-    }
-    LaunchedEffect(viewport, width, height) {
-        if (!fitted && viewport.width > 0 && viewport.height > 0) {
-            zoom = fitZoom(.7f)
-            fitted = true
+    val highlightedChannels = mutableSetOf<String>()
+    fun collectChannels(target: PolicyTarget) {
+        var current = target
+        while (current is PolicyTarget.Channel && highlightedChannels.add(current.id)) {
+            val channelId = current.id
+            current = channels.firstOrNull { it.id == channelId }?.target ?: break
         }
     }
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = {
-                zoom = (zoom - .15f).coerceAtLeast(.35f)
-                fitted = true
-                centerAnchor = null
-            }) { Text("Уменьшить") }
-            Text("${(zoom * 100).roundToInt()}%", color = ExpertColors.muted, fontSize = 12.sp)
-            TextButton(onClick = {
-                zoom = (zoom + .15f).coerceAtMost(1.3f)
-                fitted = true
-                centerAnchor = null
-            }) { Text("Увеличить") }
-            TextButton(onClick = {
-                zoom = fitZoom(.35f)
-                fitted = true
-                centerAnchor = null
-            }) { Text("Вписать") }
-            TextButton(onClick = {
+    nodes.filter { it.id in highlightedNodes }.forEach { collectChannels(it.target) }
+    val channelTop = (pointMap.values.maxOfOrNull { it.y } ?: root.y) + 146f
+    val channelPoints = channels.mapIndexed { index, channel ->
+        channel.id to position(PolicyCanvasKeys.channel(channel.id), Offset(40f + index * 274f, channelTop))
+    }.toMap()
+    val points = pointMap.values + channelPoints.values + root
+    val bounds = Rect(points.minOf { it.x }, points.minOf { it.y }, points.maxOf { it.x } + 304f, points.maxOf { it.y } + 134f)
+    RouteEditorCanvas(
+        tree.scope, bounds, modifier.fillMaxSize(),
+        onArrange = if (readOnly) {
+            null
+        } else {
+            fun() {
                 positions.clear()
                 aligning = true
-                origin = Offset.Zero
-                zoom = 1f
-                fitted = false
-                centerAnchor = null
-                updateLayout(tree.copy(positions = emptyMap()))
-            }) { Text("Выровнять") }
-            Text("Перетаскивайте за любую часть карточки", color = ExpertColors.muted, fontSize = 12.sp)
-        }
-        Box(
-            Modifier.weight(1f).fillMaxWidth().onSizeChanged { viewport = it }
-                .clip(RoundedCornerShape(16.dp)).background(ExpertColors.panel)
-        ) {
-            Box(Modifier.fillMaxSize().padding(end = 12.dp, bottom = 12.dp).horizontalScroll(horizontal).verticalScroll(vertical)) {
-                val center = centerAnchor ?: ((viewport.width / density.density / zoom - width - 12f / zoom) / 2f).coerceAtLeast(0f)
-                val displayOrigin = origin + Offset(center, 0f)
-                Box(Modifier.width(maxOf(width * zoom, viewport.width / density.density - 12f).dp).height((height * zoom).dp)) {
-                    Canvas(Modifier.fillMaxSize()) {
-                        fun px(point: Offset): Offset = Offset(
-                            (point.x + displayOrigin.x) * zoom * density.density,
-                            (point.y + displayOrigin.y) * zoom * density.density
-                        )
-                        fun line(from: Offset, to: Offset, lane: Int = 0) {
-                            val start = px(from + Offset(105f, 150f))
-                            val end = px(to + Offset(105f, 0f))
-                            val middle = if (end.y > start.y + 20.dp.toPx()) {
-                                (start.y + end.y) / 2f + lane * 3.dp.toPx()
-                            } else {
-                                maxOf(start.y, end.y) + 18.dp.toPx() + lane * 8.dp.toPx()
-                            }
-                            val path = Path().apply {
-                                moveTo(start.x, start.y)
-                                lineTo(start.x, middle)
-                                lineTo(
-                                    end.x,
-                                    middle
-                                )
-                                lineTo(end.x, end.y)
-                            }
-                            drawPath(path, ExpertColors.border, style = Stroke(1.5.dp.toPx()))
+                updateLayout(emptyMap(), true)
+            }
+        },
+        connections = { transform ->
+            fun px(point: Offset) = transform.project(point, density)
+            fun line(from: Offset, to: Offset, lane: Int = 0, highlighted: Boolean = false) {
+                val start = px(from + Offset(105f, 76f))
+                val end = px(to + Offset(105f, 0f))
+                val middle = if (end.y > start.y + 20.dp.toPx()) {
+                    (start.y + end.y) / 2f + lane * 3.dp.toPx()
+                } else {
+                    maxOf(start.y, end.y) + 18.dp.toPx() + lane * 8.dp.toPx()
+                }
+                val path = Path().apply {
+                    moveTo(start.x, start.y)
+                    lineTo(start.x, middle)
+                    lineTo(end.x, middle)
+                    lineTo(end.x, end.y)
+                }
+                drawPath(
+                    path, if (highlighted) pathTone else ExpertColors.border,
+                    style = Stroke(
+                        (if (highlighted) 2.5.dp else 1.5.dp).toPx(),
+                        pathEffect = if (highlighted && possiblePath) {
+                            PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 5.dp.toPx()))
+                        } else {
+                            null
                         }
-                        nodes.forEach { node ->
-                            val from = node.parentId?.let { pointMap[it] } ?: root
-                            pointMap[node.id]?.let { line(from, it) }
-                        }
-                        nodes.forEachIndexed { index, node ->
-                            val target = node.target as? PolicyTarget.Channel
-                            val destination = target?.id?.let { channelPoints[it] }
-                            if (destination != null) pointMap[node.id]?.let { line(it, destination, index % 6) }
-                        }
-                        (tree.defaultTarget as? PolicyTarget.Channel)?.id?.let { id ->
-                            channelPoints[id]?.let { destination ->
-                                val start = px(root + Offset(105f, 150f))
-                                val end = px(destination + Offset(105f, 0f))
-                                val outsideX = (width + center - 20f) * zoom * density.density
-                                val path = Path().apply {
-                                    moveTo(start.x, start.y)
-                                    lineTo(start.x, start.y + 16.dp.toPx())
-                                    lineTo(outsideX, start.y + 16.dp.toPx())
-                                    lineTo(outsideX, end.y - 16.dp.toPx())
-                                    lineTo(end.x, end.y - 16.dp.toPx())
-                                    lineTo(end.x, end.y)
-                                }
-                                drawPath(path, ExpertColors.border, style = Stroke(1.5.dp.toPx()))
-                            }
-                        }
-                        channels.forEachIndexed { index, channel ->
-                            val linked = (channel.target as? PolicyTarget.Channel)?.id?.let { channelPoints[it] }
-                            if (linked != null) line(channelPoints.getValue(channel.id), linked, index)
-                        }
-                    }
-                    GraphCard(
-                        root + displayOrigin, zoom, "Всё в этой схеме",
-                        ExpertPolicyEditing.targetName(tree.defaultTarget, state), false, false, null,
-                        defaultEdit, defaultEdit, { drag(PolicyCanvasKeys.ROOT, root, it) }, onDragEnd = ::commitDrag,
-                        onDragStart = {
-                            draggingKey = PolicyCanvasKeys.ROOT
-                            centerAnchor = center
-                        }, onDragCancel = ::cancelDrag
                     )
-                    nodes.forEach { node ->
-                        val point = pointMap.getValue(node.id)
-                        GraphCard(
-                            point + displayOrigin, zoom, node.title.ifBlank { "Без названия" },
-                            ExpertPolicyEditing.conditionSummary(node),
-                            selectedId == node.id, node.target is PolicyTarget.Channel,
-                            ExpertPolicyEditing.inactiveReason(node, tree, state)
-                                ?: if (!node.enabled) {
-                                    "Выключена"
-                                } else if (node.detached) {
-                                    "Отсоединена"
-                                } else {
-                                    null
-                                },
-                            { select(node) }, { edit(node) }, { drag(PolicyCanvasKeys.node(node.id), point, it) },
-                            target = ExpertPolicyEditing.targetName(node.target, state),
-                            addChild = if (node.target !is PolicyTarget.Profile &&
-                                node.target !is PolicyTarget.Folder &&
-                                node.target !is PolicyTarget.Channel
-                            ) {
-                                ({ addChild(node) })
-                            } else {
-                                null
-                            },
-                            onDragEnd = ::commitDrag,
-                            onDragStart = {
-                                draggingKey = PolicyCanvasKeys.node(node.id)
-                                centerAnchor = center
-                            }, onDragCancel = ::cancelDrag
-                        )
-                    }
-                    channels.forEach { channel ->
-                        val point = channelPoints.getValue(channel.id)
-                        GraphCard(
-                            point + displayOrigin, zoom, "Канал: ${channel.name}",
-                            "Входов: ${ExpertPolicyEditing.channelReferenceCount(state.draft, channel.id)}", false, true, null,
-                            { channelEdit(channel) }, { channelEdit(channel) }, { drag(PolicyCanvasKeys.channel(channel.id), point, it) },
-                            target = ExpertPolicyEditing.targetName(channel.target, state), onDragEnd = ::commitDrag,
-                            onDragStart = {
-                                draggingKey = PolicyCanvasKeys.channel(channel.id)
-                                centerAnchor = center
-                            },
-                            onDragCancel = ::cancelDrag
-                        )
-                    }
+                )
+            }
+            nodes.forEach { node ->
+                pointMap[node.id]?.let { line(node.parentId?.let { pointMap[it] } ?: root, it, highlighted = node.id in highlightedNodes) }
+            }
+            nodes.forEachIndexed { index, node ->
+                val destination = (node.target as? PolicyTarget.Channel)?.id?.let { channelPoints[it] }
+                if (destination != null) pointMap[node.id]?.let { line(it, destination, index % 6, node.id in highlightedNodes) }
+            }
+            channels.forEachIndexed { index, channel ->
+                (channel.target as? PolicyTarget.Channel)?.id?.let { channelPoints[it] }?.let {
+                    line(channelPoints.getValue(channel.id), it, index, channel.id in highlightedChannels)
                 }
             }
-            VerticalScrollbar(
-                rememberScrollbarAdapter(vertical),
-                Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(bottom = 12.dp)
+        }, content = { transform ->
+            GraphCard(
+                root, transform, "Весь трафик", "Корень маршрутизации", selectedRoot, false, null,
+                defaultEdit, { drag(PolicyCanvasKeys.ROOT, root, it, transform) },
+                target = "Проверка условий → ИНАЧЕ",
+                highlightTone = pathTone, onAdd = addRoot, draggable = !readOnly,
+                highlighted = highlightedRoot || highlightedNodes.isNotEmpty(),
+                onDragStart = { draggingKey = PolicyCanvasKeys.ROOT }, onDragEnd = ::commitDrag, onDragCancel = ::cancelDrag
             )
-            HorizontalScrollbar(
-                rememberScrollbarAdapter(horizontal),
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(end = 12.dp)
-            )
+            nodes.forEach { node ->
+                val point = pointMap.getValue(node.id)
+                GraphCard(
+                    point, transform, policyNodeTitle(node), ExpertPolicyEditing.conditionSummary(node),
+                    selectedId == node.id, false,
+                    ExpertPolicyEditing.inactiveReason(node, tree, state)
+                        ?: if (!node.enabled) {
+                            "Выключена"
+                        } else if (node.detached) {
+                            "Отсоединена"
+                        } else {
+                            null
+                        },
+                    { select(node) }, { drag(PolicyCanvasKeys.node(node.id), point, it, transform) },
+                    target = policyNodeTargetLabel(node, tree, state),
+                    onAdd = if (canAddPolicyChild(node) && addChild != null) {
+                        fun() {
+                            addChild(node)
+                        }
+                    } else {
+                        null
+                    },
+                    highlightTone = pathTone, draggable = !readOnly, highlighted = node.id in highlightedNodes,
+                    onDragStart = { draggingKey = PolicyCanvasKeys.node(node.id) },
+                    onDragEnd = ::commitDrag, onDragCancel = ::cancelDrag
+                )
+            }
+            channels.forEach { channel ->
+                val point = channelPoints.getValue(channel.id)
+                GraphCard(
+                    point, transform, "Канал: ${channel.name}",
+                    "Входов: ${ExpertPolicyEditing.channelReferenceCount(state.draft, channel.id)}", false, true, null,
+                    { channelEdit(channel) }, { drag(PolicyCanvasKeys.channel(channel.id), point, it, transform) },
+                    target = ExpertPolicyEditing.targetName(channel.target, state),
+                    draggable = !readOnly,
+                    highlightTone = pathTone, highlighted = channel.id in highlightedChannels,
+                    onDragStart = { draggingKey = PolicyCanvasKeys.channel(channel.id) },
+                    onDragEnd = ::commitDrag, onDragCancel = ::cancelDrag
+                )
+            }
         }
-    }
+    )
 }
 
 @Composable
 private fun GraphCard(
     point: Offset,
-    zoom: Float,
+    transform: RouteCanvasTransform,
     title: String,
     description: String,
     selected: Boolean,
     channel: Boolean,
     inactive: String?,
     onClick: () -> Unit,
-    onEdit: () -> Unit,
-    onDrag: ((Offset) -> Unit)?,
+    onDrag: (Offset) -> Unit,
     target: String = "Путь по умолчанию",
-    addChild: (() -> Unit)? = null,
     onDragEnd: () -> Unit = {},
     onDragStart: () -> Unit = {},
     onDragCancel: () -> Unit = {},
+    onAdd: (() -> Unit)? = null,
+    draggable: Boolean = true,
+    highlighted: Boolean = false,
+    highlightTone: androidx.compose.ui.graphics.Color = ExpertColors.green,
 ) {
-    val color = when {
+    val tone = when {
         inactive != null -> ExpertColors.muted
         channel -> ExpertColors.amber
-        selected -> ExpertColors.blue
-        else -> ExpertColors.border
+        else -> ExpertColors.blue
     }
-    val density = LocalDensity.current
-    val currentDrag by rememberUpdatedState(onDrag)
-    val currentDragEnd by rememberUpdatedState(onDragEnd)
-    val currentDragStart by rememberUpdatedState(onDragStart)
-    val currentDragCancel by rememberUpdatedState(onDragCancel)
-    val dragModifier = if (onDrag == null) {
-        Modifier
-    } else {
-        Modifier.pointerInput(Unit) {
-            detectDragGestures(
-                onDrag = { change, delta ->
-                    change.consume()
-                    currentDrag?.invoke(delta)
-                },
-                onDragStart = { currentDragStart() }, onDragEnd = { currentDragEnd() }, onDragCancel = { currentDragCancel() }
-            )
-        }
-    }
-    Card(
-        Modifier.offset { IntOffset((point.x * zoom * density.density).roundToInt(), (point.y * zoom * density.density).roundToInt()) }
-            .width((210f * zoom).dp).height((150f * zoom).dp).then(dragModifier).clickable(onClick = onClick)
-            .semantics {
-                this.selected = selected
-                contentDescription = "$title. $description. $target.${inactive?.let { " Неактивно: $it" }.orEmpty()}"
-            },
-        colors = CardDefaults.cardColors(containerColor = if (channel) ExpertColors.amber.copy(alpha = .08f) else ExpertColors.background),
-        border = BorderStroke(if (selected) 2.dp else 1.dp, color), shape = RoundedCornerShape(12.dp),
-    ) {
-        Column(Modifier.padding((11f * zoom).dp), verticalArrangement = Arrangement.spacedBy((5f * zoom).dp)) {
-            Text(
-                title, color = if (inactive != null) ExpertColors.muted else ExpertColors.text,
-                fontWeight = FontWeight.SemiBold, fontSize = (14f * zoom).sp, maxLines = 1, overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                inactive ?: description, color = ExpertColors.muted, fontSize = (11f * zoom).sp, maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                target, color = if (channel) ExpertColors.amber else ExpertColors.blue,
-                fontSize = (11f * zoom).sp, maxLines = 1, overflow = TextOverflow.Ellipsis
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                TextButton(onClick = onEdit, modifier = Modifier.height((36f * zoom).dp)) { Text("Свойства", fontSize = (11f * zoom).sp) }
-                addChild?.let {
-                    TextButton(onClick = it, modifier = Modifier.height((36f * zoom).dp)) {
-                        Text(
-                            "+",
-                            fontSize = (15f * zoom).sp
-                        )
+    RouteEditorPositioned(point, transform) {
+        RouteEditorNodeActions(selected, onAdd) {
+            RouteEditorNodeFace(
+                title, inactive ?: description, target, tone, selected,
+                Modifier.then(
+                    if (draggable) {
+                        Modifier.routeEditorDrag(title, transform.zoom, { onDragStart() }, onDrag, onDragEnd, onDragCancel)
+                    } else {
+                        Modifier
                     }
-                }
-            }
+                )
+                    .then(if (draggable) Modifier.clickable(onClick = onClick) else Modifier).semantics {
+                        this.selected = selected
+                        contentDescription = "$title. $description. $target.${inactive?.let { " Неактивно: $it" }.orEmpty()}"
+                    },
+                muted = inactive != null, channel = channel, highlighted = highlighted, highlightTone = highlightTone
+            )
         }
     }
+}
+
+private fun canAddPolicyChild(node: PolicyNode): Boolean = PolicyOtherwise.isOtherwise(node) ||
+    (node.target !is PolicyTarget.Profile && node.target !is PolicyTarget.Folder && node.target !is PolicyTarget.Channel)
+
+private fun policyNodeTitle(node: PolicyNode): String = if (PolicyOtherwise.isOtherwise(node)) {
+    node.title.takeIf { it.isNotBlank() && it != "ИНАЧЕ" }?.let { "ИНАЧЕ · $it" } ?: "ИНАЧЕ"
+} else {
+    node.title.ifBlank { "Без названия" }
+}
+
+private fun policyNodeTargetLabel(node: PolicyNode, tree: PolicyTree, state: ExpertUiState): String =
+    if (tree.nodes.any { it.parentId == node.id && !it.detached }) {
+        "Продолжить по дочерним веткам"
+    } else {
+        ExpertPolicyEditing.targetName(node.target, state)
+    }
+
+private fun canMovePolicyNode(tree: PolicyTree, node: PolicyNode, delta: Int): Boolean {
+    if (PolicyOtherwise.isOtherwise(node)) return false
+    val siblings = tree.nodes.filter { it.parentId == node.parentId }.sortedWith(compareBy<PolicyNode> { it.sortIndex }.thenBy { it.id })
+    val destination = siblings.getOrNull(siblings.indexOfFirst { it.id == node.id } + delta)
+    return destination != null && !PolicyOtherwise.isOtherwise(destination)
+}
+
+private fun canAddMissingOtherwise(tree: PolicyTree, parent: PolicyNode): Boolean {
+    val children = tree.nodes.filter { it.parentId == parent.id && !it.detached }
+    return children.isNotEmpty() && children.none { PolicyOtherwise.isOtherwise(it) }
 }

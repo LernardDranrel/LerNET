@@ -60,6 +60,35 @@ draining `exits`, selected `folders`, real `flows`, `network_epoch` and Windows
 `latency_ms`, `last_check_ms`, `failures`, pending/active/draining counts and a
 finite reason code. Provider construction does not mean healthy HTTPS.
 
+`direct_families` optionally reports local `ipv4`/`ipv6` evidence using only
+`available`, `limited`, `unavailable`, `unknown`, plus `source` and optional
+underlay `interface`. Windows inspects routes outside the owned ingress;
+Android reports source-address evidence and never upgrades it into a routing
+or Internet reachability promise. The enclosing identity, revision and
+`network_epoch` fence these facts. A missing/unknown family never means absent.
+These facts do not describe remote proxy capability. AAAA may receive
+NOERROR/NODATA only when IPv6 absence is known and every possible first matching
+traffic rule for the queried name uses unprotected Direct. Mixed generations
+can prove this for one name while preserving proxy IPv6 for another. Domain
+predicates use native matchers; unknown IP/country/owner predicates remain unknown.
+A possible protected, proxy, Block or redirect action prevents adaptation.
+This runs in the shared DNS client after resolver selection, so both sync/async
+and legacy/current DNS rule paths obey it. Rejection, predefined responses,
+protected resolvers, response checkers and DNSSEC/signed queries are preserved.
+Synthetic NODATA is not stored in the native DNS cache and family facts are
+invalidated on network epoch changes. Application caches and bypassing DoH
+remain outside this adaptation.
+The transparent Direct compiler omits payload sniffing so a lazy TCP handshake
+can be rejected before an external dial succeeds. History wrappers preserve
+native handshake callbacks without bypassing byte accounting.
+
+New finite errors distinguish `system_route_ipv4_unavailable`,
+`system_route_ipv6_unavailable`, `system_route_manager_unavailable`,
+`system_route_snapshot_failed`, `system_route_bind_failed`, `ingress_not_ready`
+and `ingress_ready_timeout`. Startup flows are admitted within the existing
+512-flow bound and wait at most five seconds for capture proof. Stop or failed
+startup cancels them before ingress cleanup.
+
 `close_confirmed` is true only after full ingress cleanup succeeded. A failed
 close result is retained on repeated calls, including failed-Start cleanup;
 `running:false` alone does not prove that the native TUN descriptor is drained.
@@ -81,11 +110,42 @@ catchall before ordinary DNS rules. Remote resolvers must detour through
 manifest exits/folders. The exception never relaxes ordinary unknown-owner
 TCP/UDP traffic or Windows process guards.
 
-Flows contain monotonic `id`, `revision`, `started_ms`, original `source`,
+Flows contain monotonic numeric int64 `id` (positive, not a JSON string), `revision`, `started_ms`, original `source`,
 `destination`, `network`, factual process/packages, actual `outbound`,
 `node_ids`, `state`, `reason`, `closed`, upload/download byte counts. Denied
 decisions contain no invented traffic. Ordinary direct flows become active on
 proven positive transfer.
+
+Additive observation fields preserve facts separately: `source_ip`, `source_port`,
+`destination_ip`, `destination_port`, `domain`, `protocol` (sniffed application
+protocol; `network` remains TCP/UDP), `process_name` (basename of the actual
+process path), and `geo_country` only when native metadata already contains it.
+`started_ms`, `updated_ms`, and factual `closed_ms` are Unix milliseconds.
+Missing optional fields remain unknown in clients, including with older cores.
+The legacy display `destination` may be a domain; it is never parsed back into
+invented address/port facts. Flow IDs are scoped to `instance_id`.
+
+`error_stage` is `dns`, `route`, `dial`, `transfer`, or `connection`; `error_reason` is
+`timeout`, `name_not_found`, `resolution_failed`, or `network_error`. Typed DNS
+errors and exact UDP DNS exchange failures report DNS; `net.OpError.Op` reports
+dial/read/write stages. A generic failure retains the unknown connection stage.
+Exact reviewed `system_route_unavailable`, `system_route_destination_invalid`,
+`system_route_changed`, `interface_binding_invalid`, `interface_binding_unavailable`,
+`interface_binding_identity_changed`, and `interface_binding_owned_ingress`
+errors retain that finite reason and report the `route` stage.
+EOF, local closed sockets, and cancellation are clean close observations. Raw
+error strings never enter flow JSON. Kernel `close_reason` is separately
+`finished`, `idle_timeout`, or `reset`; these are not proof of TLS/HTTP failure.
+Encrypted application errors require the application's own evidence.
+
+Status includes `flow_history_limit:500` and cumulative `flow_dropped_count`
+for this native session. Completed records yield before active records. If all
+slots are active, a new completed decision is omitted; a new live flow replaces
+the oldest retained live flow. The counter makes either omission explicit.
+Shared history likewise prefers current active records, scopes IDs by identity,
+and marks a previously active row absent from a native snapshot as activity
+unknown, with no invented close time. Clearing shared closed history suppresses
+those retained native rows on later polls; it does not stop active connections.
 
 An HTTP transport failure can occur after commit. The caller must reconcile the
 actual revision with status; an unavailable acknowledgment is not evidence that
@@ -223,3 +283,60 @@ Terminal route actions retain `lernet_node_ids`, `lernet_protected`, and
 fallback. Reject actions retain `lernet_node_ids`. `route.lernet_owner_guard`
 (`package`/`process`) fails closed when required owner attribution is unknown.
 Missing protected DNS context never grants direct fallback.
+
+## Windows capture-update failure details
+
+HTTP422 with `error: "expert_capture_route_update_failed"` may include
+`route_update_stage` and `win32_code` (unsigned integer; zero means unavailable).
+Stages are finite: configuration, previous_ranges, next_ranges, existing_metric,
+read_route, add_route, read_obsolete_route, obsolete_metric, delete_route.
+Raw syscall/provider text, profile secrets and route addresses are not exposed by
+these fields. Existing clients may ignore them. Android does not perform this
+Windows route-table update and its JNI contract is unchanged.
+
+Expert ensures the next capture routes before removing only obsolete own capture
+rows. It never flushes every route of its adapter during a network-change update;
+address-created on-link rows remain intact. Final capture verification is required
+before success. Failure still closes unproved ingress rather than claiming a live TUN.
+
+
+## Bounded content observation (6 October 2026)
+
+Each flow may expose optional `inspection`: `upload_prefix`/`download_prefix` are JSON base64
+byte arrays (at most 512 decoded bytes each); `transfers` is a tail of at most eight successful
+observations with numeric `sequence`, `at_ms`, `bytes` and boolean `upload`; `transfer_count`
+is cumulative. `payload_available` distinguishes copied socket data from kernel counters.
+TCP observations are stream I/O fragments, not packets or HTTP messages; UDP wrapper
+observations are datagrams. Counter-only observations do not claim packet boundaries.
+Snapshots deep-copy buffers. Prefix capture performs no extra reads or sniffing and cannot
+alter forwarded traffic. Payload stays in session memory and authenticated loopback/JNI
+status, not ordinary logs or profile/network-report exports. This is not TLS decryption,
+complete body recording, or packet reconstruction. Existing readers may ignore these fields.
+
+## Original-network DNS (6 October 2026)
+
+Portable `NetworkPolicy.dns` defaults to `mode: SYSTEM`; `CUSTOM` accepts an explicit
+IPv4 UDP server. This additive field defaults to SYSTEM when absent from old policies.
+It is separate from the ordinary VPN's legacy direct DNS setting.
+
+Expert generations use separate `dns-bootstrap` (endpoint resolution) and
+`dns-direct` (ordinary Direct queries). Windows local transports set the overlay
+option `lernet_preserve_destination:true`: the intercepted original DNS endpoint
+is retained before destination matching clears it, and forwarded over a verified
+non-owned route, retaining TCP/UDP and IPv6 interface scope. A failed original
+resolver never switches to a public resolver. Missing/synthetic endpoints use
+original-network discovery only for service lookups. Windows TUN `dns_mode` is
+disabled to retain Windows DNS Client selection; DNS capture/rule evaluation
+remains enabled. Windows generation-wide DNS caching is disabled to avoid mixing
+answers from independently selected system resolvers; the OS cache is retained.
+
+Explicit Windows CUSTOM remote DNS sets `lernet_system_route:true` on its
+`RemoteDNSServerOptions`. This is a DNS transport option, distinct from the same
+named Direct outbound option. A configured outbound detour continues to take
+precedence over socket binding; protected DNS remains through its assigned exit.
+
+Android local DNS uses the platform `LocalDNSTransport` bridge with an explicit
+underlying non-VPN `Network`: `DnsResolver.rawQuery` on Android 10+, or bounded
+A/AAAA lookups on supported Android 8–9. Private DNS changes participate in the
+network fingerprint. The bridge never resolves against the process-wide active
+VPN or substitutes a public resolver. Application-managed DoH is independent.

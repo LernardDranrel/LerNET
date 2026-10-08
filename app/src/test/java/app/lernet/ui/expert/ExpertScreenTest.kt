@@ -16,6 +16,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -57,14 +58,14 @@ class ExpertScreenTest {
     @Test
     fun compactSchemaKeepsItsRootVisibleInSmallRemainingViewport() {
         rule.setContent {
-            LerNetTheme {
+            FixtureTheme {
                 Box(Modifier.fillMaxWidth().height(360.dp)) {
                     ExpertSchema(ExpertRuntimeState(saved = NetworkPolicy()), bundle, {}, Modifier.height(360.dp))
                 }
             }
         }
-        rule.onNodeWithText("Путь по умолчанию").assertIsDisplayed()
-        rule.onNodeWithText("Справка").assertIsDisplayed()
+        rule.onNodeWithText("Проверить дочерние ветки").assertIsDisplayed()
+        rule.onNodeWithContentDescription(rule.activity.getString(app.lernet.R.string.expert_schema_help)).assertIsDisplayed()
         capture("android-expert-schema-compact.png")
     }
 
@@ -73,7 +74,7 @@ class ExpertScreenTest {
         var dismissed = false
         var requested: PolicyHealthSettings? = null
         rule.setContent {
-            LerNetTheme {
+            FixtureTheme {
                 ExpertHealthEditor(PolicyHealthSettings(), { dismissed = true }) {
                     requested = it
                     "Ошибка записи настроек"
@@ -95,7 +96,7 @@ class ExpertScreenTest {
         val commands = mutableListOf<ExpertIntent>()
         val runtime = ExpertRuntimeState(saved = NetworkPolicy(), phase = ExpertSessionPhase.STARTING)
         rule.setContent {
-            LerNetTheme {
+            FixtureTheme {
                 ExpertScreen(
                     ExpertUiState(runtime, bundle), remember { SnackbarHostState() }, {}, commands::add,
                     { starts++ }, {}, {}, false
@@ -116,8 +117,8 @@ class ExpertScreenTest {
         var committed: PolicyNode? = null
         val node = PolicyNode("new-rule")
         rule.setContent {
-            LerNetTheme {
-                ExpertRuleEditor(node, app.lernet.routing.policy.PolicyScope.Device, bundle, NetworkPolicy(), { committed = it }, {})
+            FixtureTheme {
+                ExpertRuleEditor(node, app.lernet.routing.policy.PolicyScope.Device, bundle, NetworkPolicy(), { committed = it; null }, {})
             }
         }
         rule.onNodeWithText("✓ Готово").assertIsDisplayed().performClick()
@@ -138,7 +139,7 @@ class ExpertScreenTest {
         var density = 1f
         rule.setContent {
             density = LocalDensity.current.density
-            LerNetTheme {
+            FixtureTheme {
                 ExpertGraph(
                     tree, bundle, NetworkPolicy(device = tree), emptySet(), {}, {}, {},
                     { key, point -> committed = key to point }, {}
@@ -166,7 +167,7 @@ class ExpertScreenTest {
         var committed: ExternalExitRequest? = null
         var dismissed = false
         rule.setContent {
-            LerNetTheme {
+            FixtureTheme {
                 ExpertExternalExitEditor(null, { dismissed = true }) { request, existing ->
                     assertThat(existing).isNull()
                     committed = request
@@ -191,7 +192,7 @@ class ExpertScreenTest {
         val commands = mutableListOf<ExpertIntent>()
         var starts = 0
         rule.setContent {
-            LerNetTheme {
+            FixtureTheme {
                 ExpertScreen(
                     ExpertUiState(ExpertRuntimeState(saved = NetworkPolicy(), phase = ExpertSessionPhase.FAILED), bundle),
                     remember { SnackbarHostState() }, {}, commands::add, { starts++ }, {}, {}, false
@@ -215,7 +216,7 @@ class ExpertScreenTest {
         ).copy(dnsJson = "{}")
         assertThat(ExternalExitProfiles.describe(profile)).isNull()
         rule.setContent {
-            LerNetTheme { ExpertExternalExitDetails(profile, {}, {}) }
+            FixtureTheme { ExpertExternalExitDetails(profile, {}, {}) }
         }
         rule.onNodeWithText("Fixture adapter").assertIsDisplayed()
         rule.onNodeWithText("Изменить внешний прокси").assertDoesNotExist()
@@ -226,7 +227,7 @@ class ExpertScreenTest {
     fun existingExternalProxyEditorKeepsItsTransportKind() {
         val profile = ExternalExitProfiles.build(ExternalExitRequest(ExternalExitKind.SOCKS5, "Fixture proxy", "127.0.0.1", 1080))
         rule.setContent {
-            LerNetTheme { ExpertExternalExitEditor(profile, {}) { _, _ -> null } }
+            FixtureTheme { ExpertExternalExitEditor(profile, {}) { _, _ -> null } }
         }
         rule.onNodeWithText("SOCKS5").assertIsDisplayed()
         rule.onNodeWithText("HTTP-прокси").assertDoesNotExist()
@@ -257,5 +258,15 @@ class ExpertScreenTest {
             file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
             bitmap.recycle()
         }
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun FixtureTheme(content: @androidx.compose.runtime.Composable () -> Unit) {
+    LerNetTheme {
+        androidx.compose.material3.Surface(
+            color = androidx.compose.material3.MaterialTheme.colorScheme.background,
+            contentColor = androidx.compose.material3.MaterialTheme.colorScheme.onBackground,
+        ) { content() }
     }
 }

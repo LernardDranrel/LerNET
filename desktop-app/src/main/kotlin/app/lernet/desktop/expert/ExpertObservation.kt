@@ -1,7 +1,6 @@
 package app.lernet.desktop.expert
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,10 +8,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -165,7 +162,7 @@ internal fun ExpertExits(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit,
         })
     }
     state.exits.firstOrNull { it.id == selected }?.let { exit ->
-        ExpertModal("Выход: ${exit.name}", { selected = null }, { selected = null }, true, "Закрыть") {
+        ExpertModal("Выход: ${exit.name}", { selected = null }, { selected = null }, true, "Закрыть", showCancel = false) {
             ExpertTag(exitDisplayName(exit, state), exitDisplayColor(exit, state))
             ReadingRow("Цель", exit.targetDescription)
             exit.profileId?.let { id ->
@@ -247,135 +244,6 @@ internal fun ExpertExits(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit,
             commit(state.draft.copy(folderPolicies = state.draft.folderPolicies.filterNot { it.folderId == id } + changed))
         }
     }
-}
-
-@Composable
-internal fun ExpertTraffic(
-    state: ExpertUiState,
-    onIntent: (ExpertIntent) -> Unit,
-    modifier: Modifier,
-    openRoutes: () -> Unit = {},
-) {
-    var query by remember { mutableStateOf("") }
-    var onlyActive by remember { mutableStateOf(false) }
-    var onlyProtected by remember { mutableStateOf(false) }
-    var selected by remember { mutableStateOf<String?>(null) }
-    val connections = state.connections.filter { connection ->
-        (!onlyActive || connection.active == true) &&
-            (!onlyProtected || connection.protected) &&
-            (
-                query.isBlank() ||
-                    listOf(connection.application, connection.destination, connection.decision)
-                        .any { it.contains(query, true) }
-                )
-    }
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), label = {
-            Text("Программа, сайт, адрес или решение")
-        }, singleLine = true)
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(onlyActive, { onlyActive = !onlyActive }, label = { Text("Активные") })
-            FilterChip(onlyProtected, { onlyProtected = !onlyProtected }, label = { Text("Защищённые") })
-            OutlinedButton(onClick = { onIntent(ExpertIntent.Refresh) }, enabled = !state.busy) { Text("Обновить") }
-        }
-        Text(
-            "Наблюдаем назначения и решения маршрутизации. Содержание шифрованных запросов не раскрывается.",
-            color = ExpertColors.muted, fontSize = 12.sp
-        )
-        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (connections.isEmpty()) {
-                item {
-                    ExpertEmpty(
-                        if (state.connections.isEmpty()) "Пока нет соединений" else "Под фильтром ничего нет",
-                        if (state.phase == ExpertPhase.RUNNING) {
-                            "Здесь появятся соединения, которые передаст обработчик сети."
-                        } else {
-                            "Включите Экспертный режим для наблюдения."
-                        }
-                    )
-                }
-            }
-            items(connections, key = { it.id }) { connection ->
-                ExpertPanel(connection.destination, Modifier.fillMaxWidth().clickable { selected = connection.id }, trailing = {
-                    ExpertTag(connection.decision, if (connection.protected) ExpertColors.green else ExpertColors.blue)
-                }) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Column(Modifier.weight(1f)) {
-                            Text(connection.application.ifBlank { "Программа не определена" }, color = ExpertColors.text)
-                            Text(
-                                "${connection.protocol} · ${connectionActivity(connection.active)}",
-                                color =
-                                ExpertColors.muted,
-                                fontSize = 12.sp
-                            )
-                        }
-                        Text(
-                            "↑ ${formatTraffic(connection.uploadedBytes)}  ↓ ${formatTraffic(connection.downloadedBytes)}",
-                            color = ExpertColors.muted, fontSize = 12.sp
-                        )
-                    }
-                    Text(connection.explanation, color = ExpertColors.muted, fontSize = 13.sp)
-                    TextButton(onClick = { selected = connection.id }) { Text("Путь решения") }
-                }
-            }
-        }
-    }
-    state.connections.firstOrNull { it.id == selected }?.let { connection ->
-        ExpertModal(connection.destination, { selected = null }, { selected = null }, true, "Закрыть") {
-            ReadingRow("Программа", connection.application.ifBlank { "Обработчик не смог определить владельца соединения" })
-            ReadingRow("Протокол", connection.protocol)
-            ReadingRow("Состояние", connectionActivity(connection.active))
-            ReadingRow("Версия схемы", connection.policyRevision?.toString() ?: "Обработчик не передал версию")
-            ReadingRow("Решение", connection.decision)
-            ReadingRow(
-                "Трафик",
-                "Отправлено ${formatTraffic(connection.uploadedBytes)}, получено ${formatTraffic(connection.downloadedBytes)}"
-            )
-            ExpertMessage("Почему выбран этот путь", connection.explanation)
-            Text("Совпавшие шаги схемы", color = ExpertColors.text, fontWeight = FontWeight.SemiBold)
-            if (connection.routeNodeIds.isEmpty()) {
-                Text(
-                    "Применён путь по умолчанию или цепочка правил не передана обработчиком.", color = ExpertColors.muted
-                )
-            }
-            connection.routeNodeIds.forEachIndexed { index, nodeId ->
-                val applied = state.applied?.takeIf { it.revision == connection.policyRevision }
-                    ?: state.saved.takeIf { it.revision == connection.policyRevision }
-                val owner = applied?.let { policy ->
-                    (listOf(policy.device) + policy.trees)
-                        .firstOrNull { tree -> tree.nodes.any { it.id == nodeId } }
-                }
-                val node = owner?.nodes?.firstOrNull { it.id == nodeId }
-                ReadingRow(
-                    "Шаг ${index + 1}",
-                    node?.title?.ifBlank { "Без названия" }
-                        ?: if (connection.policyRevision == null) "Правило: версия не передана" else "Правило из предыдущей версии"
-                )
-                if (owner != null) {
-                    TextButton(onClick = {
-                        onIntent(ExpertIntent.SelectScope(owner.scope))
-                        selected = null
-                        openRoutes()
-                    }) { Text("Открыть эту схему") }
-                }
-            }
-            connection.exitId?.let { id ->
-                ReadingRow("Выход", state.exits.firstOrNull { it.id == id }?.name ?: "Выход предыдущей версии")
-            }
-            if (connection.protected) {
-                ExpertMessage(
-                    "Защищённая ветка",
-                    "При отказе выбранного выхода прямой путь этому соединению не разрешён."
-                )
-            }
-        }
-    }
-}
-
-private fun connectionActivity(active: Boolean?): String = when (active) {
-    true -> "активно"
-    false -> "завершено"
-    null -> "состояние не передано"
 }
 
 @Composable

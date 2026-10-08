@@ -8,6 +8,10 @@ import kotlinx.serialization.json.longOrNull
 
 /** Bounded native evidence; provider error strings are never accepted as cleanup reasons. */
 object ExpertNativeStatusEvidence {
+    /** Native history.go exports a positive int64, never a JSON string. Both platform bridges use this identity. */
+    fun flowId(row: JsonObject): String? =
+        (row["id"] as? JsonPrimitive)?.takeUnless { it.isString }?.longOrNull?.takeIf { it > 0 }?.toString()
+
     fun exitPhase(phase: String?, health: String?): ExitPhase {
         val resource = when (phase?.uppercase(Locale.ROOT)) {
             "STOPPING" -> ExitPhase.DRAINING

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sagernet/sing-box/option"
+	tun "github.com/sagernet/sing-tun"
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 )
@@ -116,15 +117,22 @@ func (s *Session) refreshPlatformUnderlay(name string) error {
 		s.underlay.Store(nil)
 		return err
 	}
-	s.underlay.Store(underlay)
 	for _, inbound := range s.ingress.Inbound().Inbounds() {
 		if actual, ok := inbound.(interface{ LerNETUpdateCaptureRoutes([]netip.Prefix) error }); ok {
 			if err = actual.LerNETUpdateCaptureRoutes(tunOptions.RouteAddress); err != nil {
 				s.underlay.Store(nil)
+				var detail *tun.LerNETCaptureRouteUpdateError
+				if errors.As(err, &detail) {
+					return err
+				}
 				return errors.New("expert_capture_route_update_failed")
 			}
 		}
 	}
 	s.capturePrefixes = append([]netip.Prefix(nil), tunOptions.RouteAddress...)
-	return s.verifyPlatformCapture(s.ack.InterfaceID)
+	if err := s.verifyPlatformCapture(s.ack.InterfaceID); err != nil {
+		return err
+	}
+	s.underlay.Store(underlay)
+	return nil
 }

@@ -27,9 +27,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -135,9 +132,7 @@ fun RouteEditorScreen(
             }
         },
         bottomBar = {
-            if (!state.routesLocked) {
-                RouteSaveBar(capture, state.saving, onIntent)
-            }
+            if (!state.routesLocked) RouteSaveBar(capture, state.saving, onIntent)
         },
     ) { padding ->
         RouteBody(state, capture, onIntent, { helpOpen = true }, Modifier.padding(padding))
@@ -230,19 +225,25 @@ private fun RouteBody(
     onHelp: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier.fillMaxSize()) {
-        RouteModeToggle(state.asList, capture, onIntent)
+    RouteEditorWorkspace(
+        asList = state.asList,
+        onListChange = {
+            if (capture.latest.isNotEmpty()) onIntent(RouteEditorIntent.SetLayout(capture.latest))
+            onIntent(RouteEditorIntent.ToggleList)
+        },
+        modifier = modifier,
+    ) {
         if (state.routesLocked) {
             RoutesLockedCard(state, onIntent)
-            return
-        }
-        OrphanHotbar(state, onIntent, Modifier.weight(1f)) {
-            when {
-                state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+        } else {
+            OrphanHotbar(state, onIntent, Modifier.fillMaxSize()) {
+                when {
+                    state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                    state.asList -> RouteFolderList(state, onIntent, Modifier.fillMaxSize())
+                    else -> RouteCanvas(state, capture, onIntent, onHelp, Modifier.fillMaxSize())
                 }
-                state.asList -> RouteFolderList(state, onIntent, Modifier.fillMaxSize())
-                else -> RouteCanvas(state, capture, onIntent, onHelp, Modifier.fillMaxSize())
             }
         }
     }
@@ -289,51 +290,6 @@ private fun SchemaHelpSheet(onDismiss: () -> Unit) {
             TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End).lernetButton()) {
                 Text(stringResource(R.string.done))
             }
-        }
-    }
-}
-
-@Composable
-private fun RouteModeToggle(
-    asList: Boolean,
-    capture: LayoutCapture,
-    onIntent: (RouteEditorIntent) -> Unit,
-) {
-    val modes = listOf(false, true)
-    SingleChoiceSegmentedButtonRow(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = LerNetDimens.screenPadding, vertical = LerNetDimens.itemGap),
-    ) {
-        modes.forEachIndexed { index, listMode ->
-            val selected = asList == listMode
-            SegmentedButton(
-                selected = selected,
-                onClick = {
-                    if (asList != listMode) {
-                        if (capture.latest.isNotEmpty()) {
-                            onIntent(RouteEditorIntent.SetLayout(capture.latest))
-                        }
-                        onIntent(RouteEditorIntent.ToggleList)
-                    }
-                },
-                shape = SegmentedButtonDefaults.itemShape(index, modes.size),
-                icon = {
-                    if (selected) {
-                        Icon(LerNetSymbols.check(), contentDescription = null)
-                    }
-                },
-                label = {
-                    Text(
-                        if (listMode) {
-                            stringResource(R.string.route_list)
-                        } else {
-                            stringResource(R.string.route_schema)
-                        },
-                    )
-                },
-                modifier = Modifier.lernetButton(),
-            )
         }
     }
 }
@@ -530,8 +486,10 @@ private fun RuleEditorSheet(
             }
             RuleTitleField(node, onIntent)
             if (node.id in androidInactiveRuleIds(nodes)) {
-                Text(stringResource(R.string.route_windows_only_explanation),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    stringResource(R.string.route_windows_only_explanation),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             PriorityControls(
                 rank = rank,

@@ -32,7 +32,9 @@ class DesktopRouteTreeTest {
         try {
             controller.dropProfile("c", "a", null, false)
             assertThat(controller.state.value.saved.profiles.map { it.id }).containsExactly("c", "a", "b").inOrder()
+            assertThat(controller.state.value.saved.groups.map { it.id }).contains("folder")
             controller.dropProfile("a", null, "folder", false)
+            assertThat(controller.state.value.message).isEmpty()
             assertThat(controller.state.value.saved.profiles.single { it.id == "a" }.groupId).isEqualTo("folder")
             controller.setGroup("b", "folder")
             assertThat(controller.state.value.saved.profiles.single { it.id == "b" }.groupId).isEqualTo("folder")
@@ -64,7 +66,11 @@ class DesktopRouteTreeTest {
         val parent = rule("parent")
         val root = DesktopRouteTree.save(emptyList(), parent)
         assertThat(root.error).isNull()
-        assertThat(DesktopRouteTree.siblings(root.rules, "profile", null).map { it.id }).containsExactly("parent", root.rules.last().id).inOrder()
+        assertThat(
+            DesktopRouteTree.siblings(root.rules, "profile", null).map {
+                it.id
+            }
+        ).containsExactly("parent", root.rules.last().id).inOrder()
 
         val child = rule("child", "parent")
         val nested = DesktopRouteTree.save(root.rules, child)

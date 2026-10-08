@@ -23,3 +23,14 @@ func (r *Router) LerNETObserveDecision(ctx context.Context, m adapter.InboundCon
 		}
 	}
 }
+
+// Resolver failures are observed at the exchange callback, before any response write.
+func (r *Router) LerNETObserveFailure(ctx context.Context, m adapter.InboundContext, stage string, err error) {
+	for _, tracker := range r.trackers {
+		if observer, ok := tracker.(interface {
+			LerNETFailure(context.Context, adapter.InboundContext, string, error)
+		}); ok {
+			observer.LerNETFailure(ctx, m, stage, err)
+		}
+	}
+}

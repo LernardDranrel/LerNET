@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="expert_edit_conflict">Схема уже изменена. Откройте свойства заново, чтобы сохранить свои изменения.</string>
+    <string name="expert_cancel_start">Отменить запуск</string>
+    <string name="expert_notification_waiting">Нет исходной сети. Туннель включён; ожидаем восстановление.</string>
+    <string name="expert_notification_recovering">Восстанавливаем работу туннеля. Проверьте состояние в приложении.</string>
+    <string name="expert_notification_stopping">Останавливаем туннель…</string>
+    <string name="expert_notification_failed">Туннелю нужна проверка. Откройте LerNET.</string>
+</resources>

@@ -42,6 +42,7 @@ type Session struct {
 	closeErr             error
 	closeConfirmed       bool
 	stopReason           string
+	networkReason        string
 	ingressCloseErr      error
 	ingressCloseFinished bool
 	initial              *generation
@@ -50,6 +51,7 @@ type Session struct {
 	baseTun              option.TunInboundOptions
 	ingressIdentity      *dialer.LerNETIngressIdentityHolder
 	capturePrefixes      []netip.Prefix
+	directFamilies       *directFamilySnapshot
 }
 
 func New(ctx context.Context, ingressJSON string) (*Session, error) {
@@ -103,7 +105,7 @@ func New(ctx context.Context, ingressJSON string) (*Session, error) {
 	}
 	s.ingress, err = box.New(box.Options{Options: options, Context: service.ExtendContext(ctx),
 		RouterFactory: func(router adapter.Router) adapter.Router {
-			s.mux = &switchRouter{Router: router, dnsIngress: &dnsIngressRegistry{}}
+			s.mux = &switchRouter{Router: router, dnsIngress: &dnsIngressRegistry{}, ready: newIngressReadiness(s.ctx)}
 			return s.mux
 		},
 		BeforeInboundStart: func() error {
@@ -238,6 +240,10 @@ func (s *Session) prepare(revision int64, policyJSON, manifestJSON string) (*gen
 	if runtime.GOOS == "windows" {
 		borrowed.underlay = &s.underlay
 	}
+	if plan := compileDirectDNSPolicy(policyJSON, manifest.DirectTag); plan != nil {
+		families := &directFamilySnapshot{manager: borrowed, epoch: s.mux.networkEpoch.Load, policy: plan}
+		ctx = service.ContextWith[adapter.LerNETDirectIPv6Policy](ctx, families)
+	}
 	prepared, err := box.New(box.Options{Options: options, Context: ctx, ExistingNetwork: borrowed})
 	if err != nil {
 		return nil, errors.New("policy_prepare_failed")
@@ -282,6 +288,7 @@ func (s *Session) Start(ctx context.Context, revision int64, policyJSON, manifes
 	}
 	s.initial = g
 	if err = s.ingress.Start(); err != nil {
+		s.cancel()
 		s.initial = nil
 		_ = s.mux.discard(g)
 		_ = s.closeIngress()
@@ -295,6 +302,7 @@ func (s *Session) Start(ctx context.Context, revision int64, policyJSON, manifes
 		err = ctx.Err()
 	}
 	if err != nil {
+		s.cancel()
 		s.mux.stop()
 		_ = s.closeIngress()
 		s.stateMu.Lock()
@@ -317,6 +325,7 @@ func (s *Session) Start(ctx context.Context, revision int64, policyJSON, manifes
 		validIdentity = indexErr == nil && fdErr == nil && (index > 0 || fd > 0)
 	}
 	if !validIdentity {
+		s.cancel()
 		s.mux.stop()
 		_ = s.closeIngress()
 		s.stateMu.Lock()
@@ -349,6 +358,8 @@ func (s *Session) Start(ctx context.Context, revision int64, policyJSON, manifes
 	s.ack.InterfaceID, s.ack.Revision, s.running = identity, revision, true
 	s.ack.InterfaceIndex, _ = strconv.Atoi(parts[1])
 	s.stateMu.Unlock()
+	s.mux.ready.complete()
+	s.directFamilies = &directFamilySnapshot{manager: &borrowedNetwork{NetworkManager: s.ingress.Network(), ingressIdentity: s.ingressIdentity}, epoch: s.mux.networkEpoch.Load}
 	s.initial = nil
 	go s.idleLoop()
 	s.startPlatformNetworkWatch()
@@ -569,27 +580,36 @@ func (s *Session) NetworkChangedToAt(instanceID, interfaceID string, revision in
 	if err := s.ctx.Err(); err != nil {
 		return err
 	}
-	if err := s.refreshPlatformUnderlay(underlay); err != nil {
-		s.stateMu.Lock()
-		s.stopReason = ErrorCode(err)
-		s.stateMu.Unlock()
-		s.failIngressLocked()
+	return s.refreshNetworkLocked(underlay, s.refreshPlatformUnderlay)
+}
+
+// Caller owns s.mu. The platform refresh must prove capture before unpausing.
+func (s *Session) refreshNetworkLocked(underlay string, refresh func(string) error) error {
+	// Pause new TCP, UDP and DNS admission before changing the physical path.
+	// Retain ingress/routes across transient failures; never fall back to Windows.
+	s.mux.networkPaused.Store(true)
+	if err := refresh(underlay); err != nil {
+		s.setNetworkReasonLocked(ErrorCode(err))
 		return err
 	}
 	s.mux.ResetNetwork()
+	s.setNetworkReasonLocked("")
 	return nil
 }
 
-// Caller owns s.mu. An unproved ingress cannot remain advertised as running;
-// sticky cleanup errors still prevent a false descriptor-drained acknowledgment.
-func (s *Session) failIngressLocked() {
-	s.cancel()
-	s.mux.stop()
+// Caller owns s.mu. Recovery preserves the same ingress and policy generation.
+func (s *Session) setNetworkReasonLocked(code string) {
 	s.stateMu.Lock()
-	s.running = false
-	s.closed = true
+	changed := s.networkReason != code
+	s.networkReason = code
 	s.stateMu.Unlock()
-	_ = s.closeIngress()
+	s.mux.networkPaused.Store(code != "")
+	if code != "" {
+		s.underlay.Store(nil)
+	}
+	if changed {
+		fmt.Printf("LERNET_NETWORK reason=%s retained_tun=true\n", code)
+	}
 }
 
 func (s *Session) Status() string {
@@ -601,7 +621,7 @@ func (s *Session) Status() string {
 	}
 	s.mu.Unlock()
 	s.stateMu.Lock()
-	ack, running, closeConfirmed, stopReason, cleanupReason := s.ack, s.running, s.closeConfirmed, s.stopReason, ErrorCode(s.closeErr)
+	ack, running, closeConfirmed, stopReason, cleanupReason, networkReason := s.ack, s.running, s.closeConfirmed, s.stopReason, ErrorCode(s.closeErr), s.networkReason
 	var exits []ExitStatus
 	var folders []any
 	var retirementFailures []RetiredCleanupStatus
@@ -678,19 +698,31 @@ func (s *Session) Status() string {
 	if underlay := s.underlay.Load(); underlay != nil {
 		underlayName = underlay.Name
 	}
+	flows, dropped := s.flows.snapshotStatus()
+	var directFamilies *dialer.LerNETDirectFamilies
+	s.mu.Lock()
+	if running && s.directFamilies != nil {
+		value := s.directFamilies.snapshot()
+		directFamilies = &value
+	}
+	s.mu.Unlock()
 	return Encode(struct {
 		Ack
-		Running                bool                   `json:"running"`
-		CloseConfirmed         bool                   `json:"close_confirmed"`
-		CleanupReason          string                 `json:"cleanup_reason,omitempty"`
-		StopReason             string                 `json:"stop_reason,omitempty"`
-		RetiredCleanupFailures []RetiredCleanupStatus `json:"retired_cleanup_failures"`
-		Exits                  []ExitStatus           `json:"exits"`
-		Folders                []any                  `json:"folders"`
-		Flows                  []Flow                 `json:"flows"`
-		UnderlayInterface      string                 `json:"underlay_interface,omitempty"`
-		NetworkEpoch           int64                  `json:"network_epoch"`
-	}{ack, running, closeConfirmed, cleanupReason, stopReason, retirementFailures, exits, folders, s.flows.snapshot(), underlayName, s.mux.networkEpoch.Load()})
+		Running                bool                         `json:"running"`
+		CloseConfirmed         bool                         `json:"close_confirmed"`
+		CleanupReason          string                       `json:"cleanup_reason,omitempty"`
+		StopReason             string                       `json:"stop_reason,omitempty"`
+		NetworkReason          string                       `json:"network_reason,omitempty"`
+		RetiredCleanupFailures []RetiredCleanupStatus       `json:"retired_cleanup_failures"`
+		Exits                  []ExitStatus                 `json:"exits"`
+		Folders                []any                        `json:"folders"`
+		Flows                  []Flow                       `json:"flows"`
+		FlowHistoryLimit       int                          `json:"flow_history_limit"`
+		FlowDroppedCount       int64                        `json:"flow_dropped_count"`
+		UnderlayInterface      string                       `json:"underlay_interface,omitempty"`
+		NetworkEpoch           int64                        `json:"network_epoch"`
+		DirectFamilies         *dialer.LerNETDirectFamilies `json:"direct_families,omitempty"`
+	}{ack, running, closeConfirmed, cleanupReason, stopReason, networkReason, retirementFailures, exits, folders, flows, s.flows.limit, dropped, underlayName, s.mux.networkEpoch.Load(), directFamilies})
 }
 
 func (s *Session) ProbeExit(ctx context.Context, tag, address string, timeoutMs int64) ProbeResult {

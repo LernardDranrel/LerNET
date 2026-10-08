@@ -11,7 +11,7 @@ import app.lernet.R
 import app.lernet.vpn.LerNetVpnService
 
 internal object ExpertVpnNotification {
-    fun build(service: LerNetVpnService, channelId: String, active: Boolean = false): Notification {
+    fun build(service: LerNetVpnService, channelId: String, status: ExpertNotificationStatus = ExpertNotificationStatus.STARTING): Notification {
         service.getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(channelId, service.getString(R.string.app_name), NotificationManager.IMPORTANCE_LOW),
         )
@@ -21,15 +21,24 @@ internal object ExpertVpnNotification {
             Intent(service, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val message = if (active) R.string.expert_platform_notification_text else R.string.expert_platform_notification_starting
+        val message = when (status) {
+            ExpertNotificationStatus.ACTIVE -> R.string.expert_platform_notification_text
+            ExpertNotificationStatus.OFFLINE -> R.string.expert_notification_waiting
+            ExpertNotificationStatus.RECOVERING -> R.string.expert_notification_recovering
+            ExpertNotificationStatus.STOPPING -> R.string.expert_notification_stopping
+            ExpertNotificationStatus.FAILED -> R.string.expert_notification_failed
+            ExpertNotificationStatus.STOPPED -> R.string.state_disconnected
+            ExpertNotificationStatus.STARTING -> R.string.expert_platform_notification_starting
+        }
         return NotificationCompat.Builder(service, channelId)
-            .setSmallIcon(R.drawable.ic_status_l)
+            .setSmallIcon(if (status == ExpertNotificationStatus.FAILED) R.drawable.ic_status_l_alert else R.drawable.ic_status_l)
             .setContentTitle(service.getString(R.string.expert_platform_notification_title))
             .setContentText(service.getString(message))
             .setContentIntent(openApp)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setShowWhen(false)
             .build()
     }

@@ -2,27 +2,36 @@
 
 package app.lernet.desktop.expert
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,28 +41,34 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.lernet.routing.policy.PolicyScope
+import app.lernet.desktop.DesktopWorkspaceSidebar
+import app.lernet.desktop.WorkspaceNavigationItem
 
 private enum class ExpertPage(val title: String) {
     OVERVIEW("Обзор"),
     ROUTES("Схема"),
-    PREVIEW("Проверка пути"),
-    EXITS("Выходы"),
-    TRAFFIC("Соединения"),
+    PREVIEW("Симулятор"),
+    EXITS("Наши подключения"),
     EVENTS("События"),
-    PROTECTION("Защита")
+    PROTECTION("Настройки Expert")
 }
 
 /** The controller alone starts networking and acknowledges applied revisions. */
 @Composable
 fun DesktopExpert(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, modifier: Modifier = Modifier) {
-    var page by remember { mutableStateOf(ExpertPage.OVERVIEW) }
+    var page by rememberSaveable { mutableStateOf(ExpertPage.OVERVIEW) }
+    val pageStates = rememberSaveableStateHolder()
     var confirmation by remember { mutableStateOf<ExpertIntent?>(null) }
+    var recordedFlow by remember { mutableStateOf<ExpertConnection?>(null) }
+    var recordedPathOnly by remember { mutableStateOf(false) }
+    var previewRequest by remember { mutableStateOf(0L) }
     val validation = remember(state.draft, state.profiles, state.folders) { ExpertPolicyEditing.validation(state) }
-    Column(
+    Row(
         modifier.fillMaxSize().background(ExpertColors.background).onPreviewKeyEvent { event ->
             if (event.type == KeyEventType.KeyDown &&
                 event.isCtrlPressed &&
@@ -68,41 +83,67 @@ fun DesktopExpert(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, modifi
                 false
             }
         },
-        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            NetworkGlyph()
-            Column(Modifier.weight(1f)) {
-                Text("Управление сетью", color = ExpertColors.text, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
-                Text("Один TUN. Ваши правила для каждого соединения.", color = ExpertColors.muted, fontSize = 13.sp)
+        DesktopWorkspaceSidebar({ onIntent(ExpertIntent.OpenNetworkObservation) }) {
+            ExpertPage.entries.forEach { item -> WorkspaceNavigationItem(item.title, page == item, { page = item }) }
+        }
+        Column(Modifier.weight(1f).fillMaxHeight().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (page == ExpertPage.OVERVIEW) "Управление сетью" else page.title,
+                        style = MaterialTheme.typography.headlineMedium
+                    )
+                    Text(
+                        if (page == ExpertPage.ROUTES) {
+                            "Правила устройства, профилей и папок"
+                        } else {
+                            "Экспертный режим · ваши правила для каждого соединения"
+                        },
+                        color = ExpertColors.muted
+                    )
+                }
+                ExpertTag(phaseName(state.phase), if (state.phase == ExpertPhase.RUNNING) ExpertColors.green else ExpertColors.muted)
+                ExpertWorkspaceMenu(state, onIntent)
             }
-            ExpertTag(phaseName(state.phase), if (state.phase == ExpertPhase.RUNNING) ExpertColors.green else ExpertColors.muted)
-            TextButton(onClick = { onIntent(ExpertIntent.OpenNetworkObservation) }) { Text("Сеть устройства") }
-        }
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ExpertPage.entries.forEach { item ->
-                FilterChip(selected = page == item, onClick = { page = item }, label = { Text(item.title) })
+            state.error?.let { ExpertMessage("Операция не завершена", it, error = true) }
+            state.notice?.let { ExpertMessage("Состояние сети", it) }
+            if (state.busy) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                    Text("Ожидаем подтверждение обработчика…", color = ExpertColors.muted)
+                }
             }
-        }
-        state.error?.let { ExpertMessage("Операция не завершена", it, error = true) }
-        state.notice?.let { ExpertMessage("Состояние сети", it) }
-        if (state.busy) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                CircularProgressIndicator()
-                Text("Ожидаем подтверждение обработчика…", color = ExpertColors.muted)
+            pageStates.SaveableStateProvider(page.name) {
+                when (page) {
+                    ExpertPage.OVERVIEW -> ExpertLiveOverview(
+                        state, onIntent, Modifier.weight(1f), { confirmation = it },
+                        {
+                            recordedFlow = it
+                            recordedPathOnly = false
+                            previewRequest++
+                            page = ExpertPage.PREVIEW
+                        },
+                        {
+                            recordedFlow = it
+                            recordedPathOnly = true
+                            previewRequest++
+                            page = ExpertPage.PREVIEW
+                        },
+                    )
+                    ExpertPage.ROUTES -> ExpertRoutes(state, onIntent, Modifier.weight(1f))
+                    ExpertPage.PREVIEW -> ExpertRoutePreview(
+                        state, Modifier.weight(1f), onIntent, { page = ExpertPage.ROUTES }, recordedFlow = recordedFlow,
+                        showRecordedPath = recordedPathOnly, requestToken = previewRequest,
+                    )
+                    ExpertPage.EXITS -> ExpertExits(state, onIntent, Modifier.weight(1f)) { page = ExpertPage.ROUTES }
+                    ExpertPage.EVENTS -> ExpertEvents(state, onIntent, Modifier.weight(1f))
+                    ExpertPage.PROTECTION -> ExpertProtectionPage(state, onIntent, Modifier.weight(1f)) { confirmation = it }
+                }
             }
-        }
-        when (page) {
-            ExpertPage.OVERVIEW -> ExpertOverview(state, onIntent, Modifier.weight(1f), { page = ExpertPage.ROUTES }, { confirmation = it })
-            ExpertPage.ROUTES -> ExpertRoutes(state, onIntent, Modifier.weight(1f))
-            ExpertPage.PREVIEW -> ExpertRoutePreview(state, Modifier.weight(1f), onIntent) { page = ExpertPage.ROUTES }
-            ExpertPage.EXITS -> ExpertExits(state, onIntent, Modifier.weight(1f)) { page = ExpertPage.ROUTES }
-            ExpertPage.TRAFFIC -> ExpertTraffic(state, onIntent, Modifier.weight(1f)) { page = ExpertPage.ROUTES }
-            ExpertPage.EVENTS -> ExpertEvents(state, onIntent, Modifier.weight(1f))
-            ExpertPage.PROTECTION -> ExpertProtectionPage(state, onIntent, Modifier.weight(1f)) { confirmation = it }
-        }
-        if (state.hasDraftChanges || (state.phase == ExpertPhase.RUNNING && state.hasUnappliedChanges)) {
-            DraftActions(state, validation, onIntent) { confirmation = it }
+            if (state.hasDraftChanges || (state.phase == ExpertPhase.RUNNING && state.hasUnappliedChanges)) {
+                DraftActions(state, validation, onIntent) { confirmation = it }
+            }
         }
     }
     when (confirmation) {
@@ -122,7 +163,7 @@ fun DesktopExpert(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, modifi
             }, { confirmation = null },
         )
         ExpertIntent.DiscardDraft -> ExpertConfirm(
-            "Отменить изменения?", "Черновик будет заменён последней сохранённой схемой. Активная версия сети не изменится.",
+            "Отменить изменения?", "Черновик будет заменён последней сохранённой схемой. Работающая сеть не изменится.",
             "Отменить изменения", {
                 confirmation = null
                 onIntent(ExpertIntent.DiscardDraft)
@@ -130,7 +171,7 @@ fun DesktopExpert(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, modifi
         )
         ExpertIntent.ApplySaved -> ExpertConfirm(
             "Применить сохранённую схему?",
-            "После подтверждения новые соединения будут использовать версию ${state.saved.revision} на том же TUN. " +
+            "После подтверждения новые соединения будут использовать сохранённую схему на том же TUN. " +
                 "Если ответ обработчика потеряется, состояние правил нельзя считать известным: " +
                 "приложение покажет ошибку и проверит состояние либо остановит TUN.",
             "Применить", {
@@ -140,7 +181,7 @@ fun DesktopExpert(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, modifi
         )
         ExpertIntent.RestoreAppliedToDraft -> ExpertConfirm(
             "Вернуть применённую схему в редактор?",
-            "Текущий черновик будет заменён схемой версии ${state.appliedRevision}. " +
+            "Текущий черновик будет заменён схемой, которая сейчас применяется к сети. " +
                 "Сохранённая версия и работающий TUN не изменятся. Затем схему можно отредактировать или сохранить.",
             "Вернуть в черновик", {
                 confirmation = null
@@ -157,8 +198,10 @@ fun DesktopExpert(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, modifi
             }, { confirmation = null },
         )
         null -> Unit
-        is ExpertIntent.EditPolicy, is ExpertIntent.SelectScope, ExpertIntent.SaveDraft, ExpertIntent.Start,
-        ExpertIntent.Refresh, ExpertIntent.OpenNetworkObservation, ExpertIntent.Import, ExpertIntent.Export,
+        is ExpertIntent.EditPolicy, is ExpertIntent.UpdateLayout, is ExpertIntent.SelectScope,
+        ExpertIntent.SaveDraft, ExpertIntent.Start,
+        ExpertIntent.Refresh, ExpertIntent.ClearConnectionHistory, ExpertIntent.OpenNetworkObservation,
+        ExpertIntent.Import, ExpertIntent.Export,
         ExpertIntent.ChooseExecutable, ExpertIntent.EnableSystemGuard, ExpertIntent.RecoverSystemGuard,
         ExpertIntent.RefreshInterfaces, is ExpertIntent.SaveExternalExit,
         is ExpertIntent.WakeExit, is ExpertIntent.SleepExit -> Unit
@@ -166,125 +209,48 @@ fun DesktopExpert(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, modifi
 }
 
 @Composable
-private fun ExpertOverview(
-    state: ExpertUiState,
-    onIntent: (ExpertIntent) -> Unit,
-    modifier: Modifier,
-    openRoutes: () -> Unit,
-    confirm: (ExpertIntent) -> Unit,
-) {
-    var healthSettings by remember { mutableStateOf(false) }
-    ExpertScrollableColumn(modifier.fillMaxWidth()) {
-        ExpertPanel("Путь всего устройства", reducedMotion = state.reducedMotion) {
-            Text(
-                when (state.phase) {
-                    ExpertPhase.STOPPED -> "Включите управление, когда схема готова"
-                    ExpertPhase.STARTING -> "Проверяем обработчик и создаём TUN"
-                    ExpertPhase.RUNNING, ExpertPhase.APPLYING -> "Сеть проходит через LerNET"
-                    ExpertPhase.STOPPING -> "Завершаем управление сетью"
-                    ExpertPhase.FAILED -> "Работа обработчика не подтверждена"
-                },
-                color = ExpertColors.text, fontSize = 23.sp, fontWeight = FontWeight.Medium,
-            )
-            Text(
-                "Правила определяют, какие соединения идут напрямую, блокируются или направляются " +
-                    "в отдельный профиль, папку либо общий канал. Обычный VPN и Эксперт используют один сетевой обработчик.",
-                color = ExpertColors.muted, fontSize = 14.sp, lineHeight = 21.sp,
-            )
-            if (!state.administrator) {
-                ExpertMessage(
-                    "Нужны права администратора",
-                    "Windows требует их для создания TUN. Запуск предложит повышение прав; отказ сохранит текущую сеть.",
-                    warning = true,
-                )
-            }
-            val hotApply = state.capabilities.preservesTun && state.capabilities.atomicRules && state.capabilities.independentExits
-            if (!hotApply) {
-                ExpertMessage(
-                    "Подтверждение обработчика требуется при запуске",
-                    "Перед созданием TUN LerNET проверит независимые выходы и атомарную смену схемы. " +
-                        "Если обработчик их не поддерживает, запуск будет отклонён с объяснением.",
-                    warning = true,
-                )
-            }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                val running = state.phase in setOf(ExpertPhase.RUNNING, ExpertPhase.APPLYING)
-                Button(
-                    onClick = { if (running) confirm(ExpertIntent.Stop) else onIntent(ExpertIntent.Start) },
-                    enabled = running || (!state.busy && state.phase in setOf(ExpertPhase.STOPPED, ExpertPhase.FAILED)),
-                ) { Text(if (running) "Остановить TUN" else "Включить управление") }
-                OutlinedButton(onClick = openRoutes) { Text("Настроить схему") }
-                TextButton(onClick = { onIntent(ExpertIntent.Refresh) }, enabled = !state.busy) { Text("Обновить состояния") }
-                if (state.phase == ExpertPhase.STARTING) {
-                    OutlinedButton(onClick = { onIntent(ExpertIntent.Stop) }) {
-                        Text("Отменить запуск")
-                    }
-                }
-            }
+private fun ExpertWorkspaceMenu(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit) {
+    var menu by remember { mutableStateOf(false) }
+    var health by remember { mutableStateOf(false) }
+    var dns by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { menu = true }, modifier = Modifier.semantics { contentDescription = "Настройки экспертного режима" }) {
+            Text("⋮", fontSize = 24.sp)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            ExpertPanel("Схема", Modifier.weight(1f)) {
-                val count = state.draft.device.nodes.size
-                Text("$count правил устройства", color = ExpertColors.text, fontSize = 22.sp)
-                Text(
-                    "Сохранена: ${state.saved.revision} · применена: ${state.appliedRevision?.toString() ?: "нет"}",
-                    color = ExpertColors.muted
-                )
-                TextButton(onClick = {
-                    onIntent(ExpertIntent.SelectScope(PolicyScope.Device))
-                    openRoutes()
-                }) { Text("Открыть дерево") }
-            }
-            ExpertPanel("Выходы", Modifier.weight(1f)) {
-                Text("${state.exits.count { it.activeFlows > 0 }} используются", color = ExpertColors.text, fontSize = 22.sp)
-                Text("${state.exits.size} выходов с подтверждённым состоянием", color = ExpertColors.muted)
-                Text(
-                    "Спящие выходы поднимаются по запросу, если для них задан холодный старт.",
-                    color =
-                    ExpertColors.muted,
-                    fontSize = 13.sp
-                )
-            }
-        }
-        ExpertMessage(
-            "Как читать состояния",
-            "«Сохранена» означает запись на диск. «Применена» — подтверждение обработчика. " +
-                "Изменение черновика не меняет активную сеть. Зелёное состояние появляется только после фактического подтверждения.",
-        )
-        ExpertPanel("Проверки связи", reducedMotion = state.reducedMotion) {
-            val health = state.draft.health
-            Text(
-                "В черновике: случайный интервал ${healthSeconds(health.minimumIntervalMs)}–" +
-                    "${healthSeconds(health.maximumIntervalMs)} с · ожидание ${healthSeconds(health.activeTimeoutMs)} с · " +
-                    "неудач подряд: ${health.failedChecksBeforeRecovery}",
-                color = ExpertColors.text,
+        DropdownMenu(menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(
+                text = { Text("Очистить завершённую историю") },
+                onClick = {
+                    menu = false
+                    onIntent(ExpertIntent.ClearConnectionHistory)
+                }, enabled = !state.busy
             )
-            if (state.phase in setOf(ExpertPhase.RUNNING, ExpertPhase.APPLYING)) {
-                val active = state.applied?.health
-                Text(
-                    if (active == null) {
-                        "Действующие значения не переданы обработчиком. Черновик не подтверждает активные настройки."
-                    } else {
-                        "Применена версия ${state.appliedRevision}: интервал ${healthSeconds(active.minimumIntervalMs)}–" +
-                            "${healthSeconds(active.maximumIntervalMs)} с · ожидание ${healthSeconds(active.activeTimeoutMs)} с · " +
-                            "неудач подряд: ${active.failedChecksBeforeRecovery}"
-                    },
-                    color = ExpertColors.muted,
-                )
-            }
-            Text(
-                "Проверяем путь через выход; серия неудач запускает восстановление. Интервал и время ожидания " +
-                    "настраиваются отдельно от ручной проверки сервера.",
-                color = ExpertColors.muted,
+            DropdownMenuItem(text = { Text("DNS Expert") }, onClick = {
+                menu = false
+                dns = true
+            }, enabled = !state.busy)
+            DropdownMenuItem(text = { Text("Проверки связи") }, onClick = {
+                menu = false
+                health = true
+            }, enabled = !state.busy)
+            DropdownMenuItem(
+                text = { Text("Импортировать схему") },
+                onClick = {
+                    menu = false
+                    onIntent(ExpertIntent.Import)
+                }, enabled = !state.busy
             )
-            OutlinedButton(onClick = { healthSettings = true }, enabled = !state.busy) { Text("Настроить проверки связи") }
-        }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { onIntent(ExpertIntent.Import) }, enabled = !state.busy) { Text("Импортировать схему") }
-            OutlinedButton(onClick = { onIntent(ExpertIntent.Export) }, enabled = !state.busy) { Text("Экспортировать") }
+            DropdownMenuItem(
+                text = { Text("Экспортировать схему") },
+                onClick = {
+                    menu = false
+                    onIntent(ExpertIntent.Export)
+                }, enabled = !state.busy
+            )
         }
     }
-    if (healthSettings) ExpertHealthSettings(state, onIntent) { healthSettings = false }
+    if (dns) ExpertDnsSettings(state, onIntent) { dns = false }
+    if (health) ExpertHealthSettings(state, onIntent) { health = false }
 }
 
 @Composable
@@ -295,44 +261,51 @@ private fun DraftActions(
     confirm: (ExpertIntent) -> Unit,
 ) {
     var allErrors by remember { mutableStateOf(false) }
-    ExpertPanel(if (state.hasDraftChanges) "Черновик" else "Сохранённая схема ещё не применена") {
-        if (validation.isNotEmpty()) {
-            ExpertMessage(
-                "Исправьте схему перед сохранением", validation.first(), error = true, bodyMaxLines = 2,
-            )
-        }
-        if (validation.isNotEmpty()) TextButton(onClick = { allErrors = true }) { Text("Показать замечания · ${validation.size}") }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (state.hasDraftChanges) {
-                Button(onClick = { onIntent(ExpertIntent.SaveDraft) }, enabled = validation.isEmpty() && !state.busy) {
-                    Text("Сохранить · Ctrl+S")
-                }
-                OutlinedButton(onClick = { confirm(ExpertIntent.DiscardDraft) }, enabled = !state.busy) { Text("Отменить изменения") }
-            } else if (state.phase == ExpertPhase.RUNNING) {
-                Button(
-                    onClick = { confirm(ExpertIntent.ApplySaved) },
-                    enabled = !state.busy &&
-                        state.capabilities.atomicRules &&
-                        state.capabilities.preservesTun &&
-                        state.capabilities.independentExits,
-                ) { Text("Применить к работающему TUN") }
+    Surface(color = ExpertColors.panel, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, ExpertColors.border)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (validation.isNotEmpty()) {
+                ExpertMessage(
+                    "Исправьте схему перед сохранением", validation.first(), error = true, bodyMaxLines = 2,
+                )
             }
-            Text("Активна версия ${state.appliedRevision?.toString() ?: "не подтверждена"}", color = ExpertColors.muted, fontSize = 12.sp)
-        }
-        if (!state.hasDraftChanges &&
-            state.phase == ExpertPhase.RUNNING &&
-            (!state.capabilities.atomicRules || !state.capabilities.preservesTun || !state.capabilities.independentExits)
-        ) {
-            Text("Обработчик не подтвердил безопасную смену схемы на работающем TUN.", color = ExpertColors.amber, fontSize = 12.sp)
-        }
-        if (state.appliedRevision != null) {
-            TextButton(
-                onClick = { confirm(ExpertIntent.RestoreAppliedToDraft) }, enabled = !state.busy,
-            ) { Text("Вернуть применённую версию в черновик") }
+            if (validation.isNotEmpty()) TextButton(onClick = { allErrors = true }) { Text("Показать замечания · ${validation.size}") }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (state.hasDraftChanges) {
+                    Button(onClick = { onIntent(ExpertIntent.SaveDraft) }, enabled = validation.isEmpty() && !state.busy) {
+                        Text("Сохранить · Ctrl+S")
+                    }
+                    OutlinedButton(onClick = { confirm(ExpertIntent.DiscardDraft) }, enabled = !state.busy) { Text("Отменить изменения") }
+                } else if (state.phase == ExpertPhase.RUNNING) {
+                    Button(
+                        onClick = { confirm(ExpertIntent.ApplySaved) },
+                        enabled = !state.busy &&
+                            state.capabilities.atomicRules &&
+                            state.capabilities.preservesTun &&
+                            state.capabilities.independentExits,
+                    ) { Text("Применить к работающему TUN") }
+                }
+                val schemaStatus = when {
+                    state.hasDraftChanges || (state.appliedRevision != null && state.hasUnappliedChanges) -> "Есть неприменённые изменения"
+                    state.appliedRevision != null -> "Схема применена"
+                    else -> "Схема сохранена · туннель выключен"
+                }
+                Text(schemaStatus, color = ExpertColors.muted, fontSize = 12.sp)
+            }
+            if (!state.hasDraftChanges &&
+                state.phase == ExpertPhase.RUNNING &&
+                (!state.capabilities.atomicRules || !state.capabilities.preservesTun || !state.capabilities.independentExits)
+            ) {
+                Text("Обработчик не подтвердил безопасную смену схемы на работающем TUN.", color = ExpertColors.amber, fontSize = 12.sp)
+            }
+            if (state.appliedRevision != null) {
+                TextButton(
+                    onClick = { confirm(ExpertIntent.RestoreAppliedToDraft) }, enabled = !state.busy,
+                ) { Text("Вернуть работающую схему в редактор") }
+            }
         }
     }
     if (allErrors) {
-        ExpertModal("Проверка схемы", { allErrors = false }, { allErrors = false }, true, "Закрыть") {
+        ExpertModal("Проверка схемы", { allErrors = false }, { allErrors = false }, true, "Закрыть", showCancel = false) {
             validation.forEachIndexed { index, error ->
                 ExpertMessage("Замечание ${index + 1}", error, error = true)
             }
@@ -347,6 +320,7 @@ private fun ExpertProtectionPage(
     modifier: Modifier,
     confirm: (ExpertIntent) -> Unit,
 ) {
+    var details by remember { mutableStateOf(false) }
     ExpertScrollableColumn(modifier) {
         ExpertPanel("Защита при отказе") {
             ProtectionRow(
@@ -364,6 +338,25 @@ private fun ExpertProtectionPage(
                 "Требуется независимая защита Windows, которая переживает процесс LerNET."
             )
             ExpertMessage("Границы гарантии", state.protection.explanation, warning = !state.protection.systemGuardEnforced)
+            TextButton(onClick = { details = true }) { Text("Что защищено и какие есть ограничения") }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!state.protection.systemGuardEnforced) {
+                    Button(onClick = { onIntent(ExpertIntent.EnableSystemGuard) }, enabled = !state.busy) {
+                        Text("Настроить системную защиту")
+                    }
+                } else {
+                    OutlinedButton(onClick = { confirm(ExpertIntent.DisableSystemGuard) }, enabled = !state.busy) {
+                        Text("Отключить защиту")
+                    }
+                }
+                TextButton(onClick = { onIntent(ExpertIntent.RecoverSystemGuard) }, enabled = !state.busy) {
+                    Text("Проверить и восстановить защиту")
+                }
+            }
+        }
+    }
+    if (details) {
+        ExpertModal("Границы системной защиты", { details = false }, { details = false }, true, "Понятно", showCancel = false) {
             ExpertMessage(
                 "Когда Windows меняет путь",
                 "Правила схемы действуют на трафик, захваченный TUN. Чужой VPN может добавить более приоритетный маршрут. " +
@@ -387,20 +380,6 @@ private fun ExpertProtectionPage(
                 warning = true,
             )
             DomainRecognitionQualification()
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (!state.protection.systemGuardEnforced) {
-                    Button(onClick = { onIntent(ExpertIntent.EnableSystemGuard) }, enabled = !state.busy) {
-                        Text("Настроить системную защиту")
-                    }
-                } else {
-                    OutlinedButton(onClick = { confirm(ExpertIntent.DisableSystemGuard) }, enabled = !state.busy) {
-                        Text("Отключить защиту")
-                    }
-                }
-                TextButton(onClick = { onIntent(ExpertIntent.RecoverSystemGuard) }, enabled = !state.busy) {
-                    Text("Проверить и восстановить защиту")
-                }
-            }
         }
     }
 }

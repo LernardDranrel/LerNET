@@ -16,6 +16,7 @@ import app.lernet.ui.expert.ExpertCoordinator
 @HiltAndroidApp
 class LerNetApp : Application() {
     @Inject lateinit var expertCoordinator: ExpertCoordinator
+    @Inject lateinit var simpleSessionCoordinator: app.lernet.vpn.SimpleSessionCoordinator
     lateinit var logStore: AppLogStore
         private set
 
@@ -28,6 +29,7 @@ class LerNetApp : Application() {
             appContext = applicationContext,
         )
         logStore.install()
+        app.lernet.vpn.DefaultNetworkMonitor.attach(getSystemService(android.net.ConnectivityManager::class.java))
         CrashGuard.install(logStore)
         LerNetLog.i(TAG, "app start sdk=${Build.VERSION.SDK_INT} debugger=${Debug.isDebuggerConnected()}")
         CrashTrail.mark(

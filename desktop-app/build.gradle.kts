@@ -20,6 +20,10 @@ java {
 }
 
 kotlin {
+    // Keep the Android and desktop lever identical without importing the Android UI module.
+    sourceSets.main {
+        kotlin.srcDir("../core-ui/src/main/java/app/lernet/ui/controls")
+    }
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }

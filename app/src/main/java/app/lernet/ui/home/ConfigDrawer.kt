@@ -110,6 +110,7 @@ fun ConfigDrawer(
     probes: Map<String, ProfileProbe>,
     actions: DrawerActions,
     onDragActiveChange: (Boolean) -> Unit = {},
+    header: @Composable () -> Unit = {},
 ) {
     var editingId by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
@@ -257,12 +258,13 @@ fun ConfigDrawer(
     }
     ModalDrawerSheet(drawerContainerColor = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxHeight()) {
+            header()
             Column(Modifier.padding(horizontal = LerNetDimens.screenPadding, vertical = LerNetDimens.contentPadding)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.drawer_title), style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                 }
                 Text(
-                    stringResource(R.string.drawer_subtitle),
+                    stringResource(if (actions.managementOnly) R.string.expert_profiles_hint else R.string.drawer_subtitle),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -411,7 +413,7 @@ fun ConfigDrawer(
                                             onClick = {
                                                 val moving = movingId
                                                 if (moving == null) {
-                                                    actions.onSelect(profile.id)
+                                                    actions.openProfile(profile.id)
                                                 } else {
                                                     val targetIndex = group.profileIds.indexOf(profile.id)
                                                     val sourceIndex = group.profileIds.indexOf(moving)
@@ -483,7 +485,7 @@ fun ConfigDrawer(
                                 onClick = {
                                     val moving = movingId
                                     if (moving == null) {
-                                        actions.onSelect(profile.id)
+                                        actions.openProfile(profile.id)
                                     } else {
                                         if (moving in ungrouped.map { it.id }) {
                                             actions.onReorderUngrouped(moving, profile.id)
@@ -881,11 +883,11 @@ private fun ProfileOverflow(
                     onMoveRequested()
                 },
             )
-            DropdownMenuItem(
+            if (!actions.managementOnly) DropdownMenuItem(
                 text = { Text(stringResource(R.string.select_profile)) },
                 onClick = {
                     onExpanded(false)
-                    actions.onSelect(profile.id)
+                    actions.openProfile(profile.id)
                 },
             )
             DropdownMenuItem(

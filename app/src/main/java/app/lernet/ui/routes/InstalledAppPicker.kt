@@ -1,6 +1,7 @@
 package app.lernet.ui.routes
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,6 +12,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -21,6 +23,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,6 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.lernet.R
+import app.lernet.ui.icons.LerNetSymbols
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -36,8 +40,9 @@ private data class InstalledApp(val label: String, val packageName: String)
 @Composable
 internal fun AppSelectionField(values: List<String>, onChange: (List<String>) -> Unit) {
     var pickerOpen by remember { mutableStateOf(false) }
-    OutlinedButton(onClick = { pickerOpen = true }) {
-        Text(stringResource(R.string.rule_pick_app))
+    OutlinedButton(onClick = { pickerOpen = true }, modifier = Modifier.fillMaxWidth()) {
+        Text(stringResource(R.string.rule_pick_app), Modifier.weight(1f))
+        Icon(LerNetSymbols.expandMore(), contentDescription = null)
     }
     if (pickerOpen) {
         InstalledAppDialog(values, onChange, onDismiss = { pickerOpen = false })
@@ -48,7 +53,7 @@ internal fun AppSelectionField(values: List<String>, onChange: (List<String>) ->
 private fun InstalledAppDialog(values: List<String>, onChange: (List<String>) -> Unit, onDismiss: () -> Unit) {
     val context = LocalContext.current
     var apps by remember { mutableStateOf<List<InstalledApp>?>(null) }
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(Unit) {
         apps = withContext(Dispatchers.IO) {
             @Suppress("DEPRECATION")
@@ -88,7 +93,9 @@ private fun InstalledAppDialog(values: List<String>, onChange: (List<String>) ->
                                     onChange(if (selected) values - app.packageName else values + app.packageName)
                                 }.padding(vertical = 5.dp),
                                 verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
+                                InstalledApplicationIcon(app.packageName)
                                 Column(Modifier.weight(1f)) {
                                     Text(app.label, style = MaterialTheme.typography.bodyMedium)
                                     Text(

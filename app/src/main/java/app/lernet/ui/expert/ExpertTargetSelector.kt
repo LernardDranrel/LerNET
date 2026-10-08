@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -21,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import app.lernet.R
 import app.lernet.config.policy.PolicyMigration
@@ -29,6 +32,7 @@ import app.lernet.routing.policy.NetworkPolicy
 import app.lernet.routing.policy.PolicyScope
 import app.lernet.routing.policy.PolicyTarget
 import app.lernet.routing.policy.UnavailableFallback
+import app.lernet.ui.icons.LerNetSymbols
 
 @Composable
 internal fun ExpertTargetSelector(
@@ -44,8 +48,13 @@ internal fun ExpertTargetSelector(
     var chooseTree by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) {
-            Text(targetTitle(target, bundle, policy))
+            Text(targetTitle(target, bundle, policy), Modifier.weight(1f))
+            Icon(LerNetSymbols.expandMore(), contentDescription = null)
         }
+        if (target == PolicyTarget.Direct) {
+            ExpertHint(if (protected) R.string.expert_direct_forbidden else R.string.expert_direct_route_hint)
+        }
+        if (protected && target == PolicyTarget.Block) ExpertHint(R.string.expert_protected_block_target)
         val routeScope = when (target) {
             is PolicyTarget.Profile -> target.routeScope
             is PolicyTarget.Folder -> target.routeScope
@@ -54,9 +63,20 @@ internal fun ExpertTargetSelector(
         if (target is PolicyTarget.Profile || target is PolicyTarget.Folder) {
             Text(stringResource(R.string.expert_use_target_tree), style = MaterialTheme.typography.labelLarge)
             OutlinedButton({ chooseTree = true }, Modifier.fillMaxWidth()) {
-                Text(routeScope?.let { scopeTitle(it, bundle) } ?: stringResource(R.string.expert_no_child_tree))
+                Text(routeScope?.let { scopeTitle(it, bundle) } ?: stringResource(R.string.expert_no_child_tree), Modifier.weight(1f))
+                Icon(LerNetSymbols.expandMore(), contentDescription = null)
             }
-            Text(stringResource(R.string.expert_target_tree_hint), style = MaterialTheme.typography.bodySmall)
+            if (routeScope != null) {
+                ExpertHint(if (protected) R.string.expert_protected_child_tree_hint else R.string.expert_target_tree_hint)
+                TextButton(onClick = {
+                    onChange(when (target) {
+                        is PolicyTarget.Profile -> target.copy(routeScope = null)
+                        is PolicyTarget.Folder -> target.copy(routeScope = null)
+                    })
+                }) { Text(stringResource(R.string.expert_skip_child_tree)) }
+            } else {
+                ExpertHint(R.string.expert_only_selected_exit_hint)
+            }
             if (chooseTree) {
                 val scopes = when (target) {
                     is PolicyTarget.Profile -> listOf(PolicyScope.Profile(target.id)) +
@@ -89,25 +109,33 @@ internal fun ExpertTargetSelector(
                 is PolicyTarget.Profile -> target.fallback
                 is PolicyTarget.Folder -> target.fallback
             }
-            Text(stringResource(R.string.expert_fallback), style = MaterialTheme.typography.labelLarge)
-            UnavailableFallback.entries.forEach { choice ->
-                val title = if (choice == UnavailableFallback.BLOCK) R.string.expert_fallback_block else R.string.expert_fallback_direct
-                ListItem(
-                    headlineContent = { Text(stringResource(title)) },
-                    leadingContent = {
-                        RadioButton(
-                            selected = fallback == choice, enabled = !protected || choice == UnavailableFallback.BLOCK,
-                            onClick = {
-                                onChange(
-                                    when (target) {
-                                        is PolicyTarget.Profile -> target.copy(fallback = choice)
-                                        is PolicyTarget.Folder -> target.copy(fallback = choice)
-                                    }
-                                )
-                            }
-                        )
-                    },
-                )
+            fun selectFallback(choice: UnavailableFallback) {
+                onChange(when (target) {
+                    is PolicyTarget.Profile -> target.copy(fallback = choice)
+                    is PolicyTarget.Folder -> target.copy(fallback = choice)
+                })
+            }
+            if (protected) {
+                if (fallback == UnavailableFallback.BLOCK) {
+                    ExpertHint(R.string.expert_fallback_locked)
+                } else {
+                    ExpertHint(R.string.expert_fallback_conflict)
+                    TextButton({ selectFallback(UnavailableFallback.BLOCK) }) {
+                        Text(stringResource(R.string.expert_fix_fallback))
+                    }
+                }
+            } else {
+                Text(stringResource(R.string.expert_fallback), style = MaterialTheme.typography.labelLarge)
+                UnavailableFallback.entries.forEach { choice ->
+                    val title = if (choice == UnavailableFallback.BLOCK) R.string.expert_fallback_block else R.string.expert_fallback_direct
+                    ListItem(
+                        modifier = Modifier.selectable(selected = fallback == choice, role = Role.RadioButton,
+                            onClick = { selectFallback(choice) }),
+                        headlineContent = { Text(stringResource(title)) },
+                        leadingContent = { RadioButton(selected = fallback == choice, onClick = null) },
+                    )
+                }
+                if (fallback == UnavailableFallback.DIRECT) ExpertHint(R.string.expert_fallback_direct_hint)
             }
         }
     }

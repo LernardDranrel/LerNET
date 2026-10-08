@@ -4,10 +4,12 @@ import app.lernet.routing.ConditionBlock
 import app.lernet.routing.ConditionKind
 import app.lernet.routing.RuleConditions
 import app.lernet.routing.policy.NetworkPolicy
+import app.lernet.routing.policy.PolicyBranchEditing
 import app.lernet.routing.policy.PolicyCanvasKeys
 import app.lernet.routing.policy.PolicyCanvasPoint
 import app.lernet.routing.policy.PolicyChannel
 import app.lernet.routing.policy.PolicyNode
+import app.lernet.routing.policy.PolicyOtherwise
 import app.lernet.routing.policy.PolicyScope
 import app.lernet.routing.policy.PolicyTarget
 import app.lernet.routing.policy.PolicyTree
@@ -134,8 +136,8 @@ class ExpertPolicyEditingTest {
             )
         )
         val changed = ExpertPolicyEditing.putNode(NetworkPolicy(), PolicyScope.Device, portable)
-        assertThat(changed.device.nodes.single().conditions.blocks).hasSize(2)
-        assertThat(changed.device.nodes.single().enabled).isTrue()
+        assertThat(changed.device.nodes.first { it.id == "mixed" }.conditions.blocks).hasSize(2)
+        assertThat(changed.device.nodes.first { it.id == "mixed" }.enabled).isTrue()
     }
 
     @Test
@@ -156,7 +158,8 @@ class ExpertPolicyEditingTest {
         val scope = PolicyScope.Folder("folder")
         val added = ExpertPolicyEditing.putNode(policy, scope, PolicyNode("folder-rule", target = PolicyTarget.CurrentExit))
         assertThat(added.device.defaultTarget).isEqualTo(PolicyTarget.Block)
-        assertThat(ExpertPolicyEditing.tree(added, scope).nodes.single().id).isEqualTo("folder-rule")
+        val rule = ExpertPolicyEditing.tree(added, scope).nodes.filterNot(PolicyOtherwise::isOtherwise).single()
+        assertThat(rule.id).isEqualTo("folder-rule")
     }
 
     @Test
@@ -238,5 +241,51 @@ class ExpertPolicyEditingTest {
         assertThat(references.map { it.title })
             .containsExactly("Путь по умолчанию", "Рабочий сайт", "Канал: Общий рабочий выход").inOrder()
         assertThat(externalProfileReferences(ExpertUiState(policy), "other-profile")).isEmpty()
+    }
+
+    @Test
+    fun `adding conditions under visible otherwise preserves its physical exit for remaining traffic`() {
+        val exit = PolicyTarget.Profile("profile")
+        val original = NetworkPolicy(device = PolicyTree(PolicyScope.Device, defaultTarget = exit))
+        val otherwise = PolicyBranchEditing.displayTree(original.device).nodes.single()
+        val conditional = PolicyNode(
+            "local", parentId = otherwise.id,
+            conditions = RuleConditions(blocks = listOf(ConditionBlock(ConditionKind.PRIVATE, listOf("private")))),
+            target = PolicyTarget.Direct,
+        )
+        val changed = ExpertPolicyEditing.putNode(original, PolicyScope.Device, conditional)
+        val branch = changed.device.nodes.first { it.id == otherwise.id }
+        assertThat(PolicyOtherwise.isOtherwise(branch)).isTrue()
+        assertThat(branch.target).isEqualTo(PolicyTarget.Direct)
+        val remainder = changed.device.nodes.single { it.parentId == branch.id && PolicyOtherwise.isOtherwise(it) }
+        assertThat(remainder.target).isEqualTo(exit)
+        assertThat(changed.device.nodes.first { it.id == "local" }.parentId).isEqualTo(branch.id)
+        assertThat(original.device.nodes).isEmpty()
+    }
+
+    @Test
+    fun `editing an otherwise exit retains its marker and places new siblings before it`() {
+        val original = NetworkPolicy()
+        val otherwise = PolicyBranchEditing.displayTree(original.device).nodes.single()
+        val changed = ExpertPolicyEditing.putNode(original, PolicyScope.Device, otherwise.copy(target = PolicyTarget.Block))
+        val withRule = ExpertPolicyEditing.putNode(
+            changed, PolicyScope.Device,
+            PolicyNode("rule", conditions = RuleConditions(blocks = listOf(ConditionBlock(ConditionKind.GEOIP, listOf("ru"))))),
+        )
+        val finalBranch = withRule.device.nodes.first { it.id == otherwise.id }
+        assertThat(PolicyOtherwise.isOtherwise(finalBranch)).isTrue()
+        assertThat(finalBranch.target).isEqualTo(PolicyTarget.Block)
+        assertThat(withRule.device.nodes.sortedBy { it.sortIndex }.map { it.id }).containsExactly("rule", otherwise.id).inOrder()
+        assertThat(ExpertPolicyEditing.moveNode(withRule, PolicyScope.Device, otherwise.id, -1)).isEqualTo(withRule)
+        assertThat(ExpertPolicyEditing.deleteNode(withRule, PolicyScope.Device, otherwise.id)).isEqualTo(withRule)
+    }
+
+    @Test
+    fun `materialized root otherwise counts one incoming channel branch rather than obsolete default too`() {
+        val target = PolicyTarget.Channel("shared")
+        val original = NetworkPolicy(device = PolicyTree(PolicyScope.Device, defaultTarget = target))
+        val otherwise = PolicyBranchEditing.displayTree(original.device).nodes.single()
+        val changed = ExpertPolicyEditing.putNode(original, PolicyScope.Device, otherwise)
+        assertThat(ExpertPolicyEditing.channelReferenceCount(changed, "shared")).isEqualTo(1)
     }
 }

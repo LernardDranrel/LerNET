@@ -4,8 +4,21 @@ import com.sun.net.httpserver.HttpServer
 import java.net.InetSocketAddress
 import org.junit.Assert.*
 import org.junit.Test
+import kotlinx.serialization.json.jsonObject
 
 class ProbeDiagnosticsTest {
+    @Test fun failoverProbeEscapesActiveTunWithoutMovingItsLocalListener() {
+        val raw = """{"inbounds":[{"listen":"127.0.0.1","listen_port":4321}],"outbounds":[{"tag":"proxy","type":"vless"}],"route":{"final":"proxy","auto_detect_interface":true}}"""
+        val before = kotlinx.serialization.json.Json.parseToJsonElement(raw).jsonObject
+        val after = kotlinx.serialization.json.Json.parseToJsonElement(OutboundProbe.bindProbeUnderlay(raw, "Ethernet")).jsonObject
+        assertEquals(before["inbounds"], after["inbounds"])
+        assertEquals(before["outbounds"], after["outbounds"])
+        val route = after.getValue("route").jsonObject
+        assertEquals(before.getValue("route").jsonObject["final"], route["final"])
+        assertEquals(kotlinx.serialization.json.JsonPrimitive("Ethernet"), route["default_interface"])
+        assertEquals(kotlinx.serialization.json.JsonPrimitive(false), route["auto_detect_interface"])
+    }
+
     @Test fun privateValuesAndAnsiAreRemovedButSocketFailureIsKept() {
         val line = ProbeDiagnostics.clean("\u001B[36mERROR password=fixture-secret uuid=fixture-uuid https://user:pass@example.org/check?token=fixture-token#private connection refused")
         assertFalse(line.contains("fixture"))

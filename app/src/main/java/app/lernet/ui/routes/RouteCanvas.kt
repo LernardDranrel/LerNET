@@ -12,24 +12,20 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconToggleButton
-import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,16 +39,14 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.IntOffset
-import kotlin.math.roundToInt
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import app.lernet.R
 import app.lernet.config.repo.RuleNodeRecord
 import app.lernet.ui.icons.LerNetSymbols
@@ -66,10 +60,8 @@ import io.github.xingray.compose.infinitecanvas.CanvasMode
 import io.github.xingray.compose.infinitecanvas.CanvasNode
 import io.github.xingray.compose.infinitecanvas.CanvasNodeState
 import io.github.xingray.compose.infinitecanvas.Connection
-import io.github.xingray.compose.infinitecanvas.InfiniteCanvas
-import io.github.xingray.compose.infinitecanvas.InfiniteCanvasConfig
 import io.github.xingray.compose.infinitecanvas.InfiniteCanvasState
-import io.github.xingray.compose.infinitecanvas.rememberInfiniteCanvasState
+import kotlin.math.roundToInt
 
 internal class LayoutCapture {
     var latest: Map<String, CanvasPoint> = emptyMap()
@@ -85,9 +77,10 @@ internal fun RouteCanvas(
     onHelp: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val canvasState = rememberInfiniteCanvasState()
+    val canvasState = rememberSchemaCanvasState(state.ownerId)
+    var centerRequest by remember { mutableStateOf(0) }
+    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     val holders = remember { mutableMapOf<String, CanvasNodeState>() }
-    var panning by remember { mutableStateOf(false) }
     val visible = remember(state.nodes) { RouteFolders.attached(state.nodes) }
     val pipes = remember(visible, state.extraPipes) { CanvasGraph.pipeNames(visible, state.extraPipes) }
     val density = LocalDensity.current
@@ -102,12 +95,15 @@ internal fun RouteCanvas(
     var dragGhost by remember { mutableStateOf<RuleDragGhost?>(null) }
     var openChannel by remember(state.ownerId) { mutableStateOf<String?>(null) }
     val freePipes = state.extraPipes.filter { name -> state.nodes.none { it.pipeName == name } }.toSet()
-    val nodes = canvasNodes(visible, pipes, freePipes, points, holders, board, state.canvasSelection,
-        canvasState.viewport.scale, state.routesLocked, onIntent, onDragGhost = { dragGhost = it },
+    val nodes = canvasNodes(
+        visible, pipes, freePipes, points, holders, board, state.canvasSelection,
+        canvasState.viewport.scale, state.routesLocked, canvasState.canvasMode == CanvasMode.Pan,
+        onIntent, onDragGhost = { dragGhost = it },
         onOpenChannel = { name ->
             onIntent(RouteEditorIntent.SelectCanvas(CanvasIds.pipe(name)))
             openChannel = name
-        })
+        }
+    )
     SyncCanvasLinks(
         canvasState,
         state.nodes,
@@ -135,16 +131,11 @@ internal fun RouteCanvas(
         }
     }
     Column(modifier.fillMaxSize()) {
-        CanvasToolbar(
-            panning = panning,
-            onHelp = onHelp,
-            onPan = { enabled ->
-                panning = enabled
-                canvasState.switchMode(if (enabled) CanvasMode.Pan else CanvasMode.Select)
-            },
-        )
+        SchemaCanvasControls(canvasState, onHelp = onHelp, onCenter = { centerRequest++ },
+            modifier = Modifier.padding(horizontal = LerNetDimens.screenPadding),
+            zoomAnchor = Offset(canvasSize.width / 2f, canvasSize.height / 2f))
         CanvasNotices(state, onIntent)
-        CanvasBoard(canvasState, nodes, board, points, visible, panning, state, dragGhost, onIntent)
+        CanvasBoard(canvasState, nodes, board, points, visible, canvasState.canvasMode == CanvasMode.Pan, state, dragGhost, centerRequest, canvasSize, { canvasSize = it }, onIntent)
     }
     openChannel?.let { name ->
         ChannelDetailsDialog(name, state.nodes) {
@@ -164,6 +155,9 @@ private fun ColumnScope.CanvasBoard(
     panning: Boolean,
     state: RouteEditorUiState,
     dragGhost: RuleDragGhost?,
+    centerRequest: Int,
+    canvasSize: IntSize,
+    onSize: (IntSize) -> Unit,
     onIntent: (RouteEditorIntent) -> Unit,
 ) {
     val vertical = CanvasGraph.isVertical(state.layout)
@@ -171,16 +165,20 @@ private fun ColumnScope.CanvasBoard(
     val scale = viewport.scale
     val offset = viewport.offset
     val rects = canvasScreenRects(board, scale, offset.x, offset.y)
-    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
+    var handledCenterRequest by remember { mutableStateOf(0) }
     var centered by remember(state.ownerId) { mutableStateOf(false) }
     val density = LocalDensity.current
-    LaunchedEffect(canvasSize, state.loading, points[CanvasIds.ROOT]) {
+    LaunchedEffect(canvasSize, state.loading, points[CanvasIds.ROOT], centerRequest) {
         val root = points[CanvasIds.ROOT] ?: return@LaunchedEffect
-        if (!state.loading && !centered && canvasSize.width > 0) {
+        if (!centered && viewport.offset != Offset.Zero) centered = true
+        if (!state.loading && (!centered || centerRequest != handledCenterRequest) && canvasSize.width > 0) {
             val halfCard = with(density) { 105.dp.toPx() }
-            viewport.offset = Offset(canvasSize.width / 2f - (root.x + halfCard) * viewport.scale,
-                22f - root.y * viewport.scale)
+            viewport.offset = Offset(
+                canvasSize.width / 2f - (root.x + halfCard) * viewport.scale,
+                22f - root.y * viewport.scale
+            )
             centered = true
+            handledCenterRequest = centerRequest
         }
     }
     Box(
@@ -188,7 +186,7 @@ private fun ColumnScope.CanvasBoard(
             .weight(1f)
             .fillMaxWidth()
             .clipToBounds()
-            .onSizeChanged { canvasSize = it }
+            .onSizeChanged(onSize)
             .schemaEdgeInput(
                 rects = rects,
                 nodes = visible,
@@ -199,10 +197,9 @@ private fun ColumnScope.CanvasBoard(
                 onSelect = { edge -> onIntent(RouteEditorIntent.SelectEdge(edge)) },
             ),
     ) {
-        InfiniteCanvas(
+        SchemaCanvas(
             modifier = Modifier.fillMaxSize(),
             state = canvasState,
-            config = canvasConfig(),
             nodes = nodes,
         )
         SchemaEdgeLayer(
@@ -236,9 +233,11 @@ private fun ColumnScope.CanvasBoard(
                     .width(210.dp)
                     .border(3.dp, LerNetAccent, RoundedCornerShape(8.dp)),
             ) {
-                RuleNodeContent(draggedNode, RouteFolders.priorityRank(visible, draggedNode), branching,
+                RuleNodeContent(
+                    draggedNode, RouteFolders.priorityRank(visible, draggedNode), branching,
                     unavailable = draggedNode.id in androidInactiveRuleIds(visible),
-                    onEdit = {}, onDelete = {})
+                    onEdit = {}, onDelete = {}
+                )
             }
         }
         val selectedNode = visible.firstOrNull { CanvasIds.rule(it.id) == state.canvasSelection }
@@ -256,8 +255,10 @@ private fun ColumnScope.CanvasBoard(
         }
         if (!state.routesLocked && dragGhost == null && selectedNode != null && selectedRect != null) {
             val buttonTop = selectedRect.bottom + buttonGap
-            if (selectedRect.bottom > 0f && selectedRect.right > 0f &&
-                selectedRect.left < canvasSize.width && buttonTop + buttonSize <= canvasSize.height
+            if (selectedRect.bottom > 0f &&
+                selectedRect.right > 0f &&
+                selectedRect.left < canvasSize.width &&
+                buttonTop + buttonSize <= canvasSize.height
             ) {
                 IconButton(
                     onClick = { onIntent(RouteEditorIntent.AddChild(selectedNode.id)) },
@@ -272,8 +273,10 @@ private fun ColumnScope.CanvasBoard(
                         .size(LerNetDimens.iconButtonSize)
                         .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
                 ) {
-                    Icon(LerNetSymbols.add(), contentDescription = stringResource(R.string.route_add_child),
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Icon(
+                        LerNetSymbols.add(), contentDescription = stringResource(R.string.route_add_child),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
                 }
             }
         }
@@ -307,44 +310,6 @@ private fun CanvasNotices(state: RouteEditorUiState, onIntent: (RouteEditorInten
 }
 
 @Composable
-private fun CanvasToolbar(
-    panning: Boolean,
-    onPan: (Boolean) -> Unit,
-    onHelp: () -> Unit,
-) {
-    val label = stringResource(R.string.canvas_pan)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = LerNetDimens.screenPadding),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap),
-    ) {
-        IconToggleButton(checked = panning, onCheckedChange = onPan) {
-            Icon(LerNetSymbols.pan(), contentDescription = label)
-        }
-        Text(label, style = MaterialTheme.typography.labelLarge)
-        Text(stringResource(R.string.canvas_auto_vertical), style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.weight(1f))
-        IconButton(onClick = onHelp) {
-            Icon(LerNetSymbols.help(), contentDescription = stringResource(R.string.canvas_help))
-        }
-    }
-}
-
-@Composable
-private fun canvasConfig(): InfiniteCanvasConfig {
-    val scheme = MaterialTheme.colorScheme
-    return InfiniteCanvasConfig(
-        showGrid = true,
-        showBottomControls = false,
-        backgroundColor = scheme.surface,
-        gridColor = scheme.outline.copy(alpha = 0.35f),
-    )
-}
-
-@Composable
 private fun canvasNodes(
     nodes: List<RuleNodeRecord>,
     pipes: List<String>,
@@ -355,6 +320,7 @@ private fun canvasNodes(
     selectedId: String?,
     scale: Float,
     locked: Boolean,
+    panning: Boolean,
     onIntent: (RouteEditorIntent) -> Unit,
     onDragGhost: (RuleDragGhost?) -> Unit,
     onOpenChannel: (String) -> Unit,
@@ -367,6 +333,7 @@ private fun canvasNodes(
         modifier = Modifier
             .width(210.dp)
             .then(selectionBorder(selectedId == CanvasIds.ROOT))
+            .clickable { onIntent(RouteEditorIntent.SelectCanvas(CanvasIds.ROOT)) }
             .trackNode(board, CanvasIds.ROOT),
         state = rootState,
         content = { RootNode() },
@@ -385,6 +352,7 @@ private fun canvasNodes(
             points = points,
             scale = scale,
             locked = locked,
+            panning = panning,
             onDragGhost = onDragGhost,
         )
     }
@@ -401,7 +369,7 @@ private fun canvasNodes(
                 .trackNode(board, CanvasIds.pipe(name)),
             state = pipeState,
             content = {
-                SchemaCard(modifier = Modifier.clickable { onOpenChannel(name) }) {
+                SchemaNodeSurface(modifier = Modifier.clickable { onOpenChannel(name) }) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             name.ifBlank { stringResource(R.string.route_pipe_default) },
@@ -434,28 +402,8 @@ private fun canvasNodes(
 }
 
 @Composable
-private fun SchemaCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    val onCard = MaterialTheme.colorScheme.onSurface
-    // The canvas library provides light text defaults. Restore our dark theme
-    // explicitly inside each node so cards match the rest of the editor.
-    CompositionLocalProvider(
-        LocalContentColor provides onCard,
-        LocalTextStyle provides TextStyle(color = onCard),
-    ) {
-        Column(
-            modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                .padding(LerNetDimens.contentPadding),
-            verticalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap),
-            content = content,
-        )
-    }
-}
-
-@Composable
 private fun RootNode() {
-    SchemaCard {
+    SchemaNodeSurface {
         Text(
             stringResource(R.string.route_parent_root),
             color = MaterialTheme.colorScheme.onSurface,
@@ -522,6 +470,7 @@ private fun ruleNode(
     points: Map<String, CanvasPoint>,
     scale: Float,
     locked: Boolean,
+    panning: Boolean,
     onDragGhost: (RuleDragGhost?) -> Unit,
 ): CanvasNode {
     var dragging by remember(node.id) { mutableStateOf(false) }
@@ -529,38 +478,42 @@ private fun ruleNode(
     val latestIntent by rememberUpdatedState(onIntent)
     val latestGhost by rememberUpdatedState(onDragGhost)
     val siblingIds = siblings.filterNot { it.isElseRule() }.map { it.id }
-    val drag = if (locked || node.isElseRule()) Modifier else Modifier.pointerInput(node.id, siblingIds, scale) {
-        var origin = Offset.Zero
-        detectDragGestures(
-            onDragStart = {
-                origin = Offset(nodeState.x, nodeState.y)
-                dragDelta = Offset.Zero
-                dragging = true
-                latestGhost(RuleDragGhost(node.id, dragDelta))
-                latestIntent(RouteEditorIntent.SelectCanvas(CanvasIds.rule(node.id)))
-            },
-            onDrag = { change, amount ->
-                change.consume()
-                dragDelta += amount
-                latestGhost(RuleDragGhost(node.id, dragDelta))
-            },
-            onDragEnd = {
-                val landedX = origin.x + dragDelta.x
-                val to = siblingIds.filterNot { it == node.id }.count { id ->
-                    (points[CanvasIds.rule(id)]?.x ?: Float.MAX_VALUE) < landedX
-                }
-                dragging = false
-                latestGhost(null)
-                val from = siblingIds.indexOf(node.id)
-                if (from != to) {
-                    latestIntent(RouteEditorIntent.ReorderSiblings(node.parentId, movedIds(siblingIds, from, to)))
-                }
-            },
-            onDragCancel = {
-                dragging = false
-                latestGhost(null)
-            },
-        )
+    val drag = if (locked || panning || node.isElseRule()) {
+        Modifier
+    } else {
+        Modifier.pointerInput(node.id, siblingIds, scale) {
+            var origin = Offset.Zero
+            detectDragGestures(
+                onDragStart = {
+                    origin = Offset(nodeState.x, nodeState.y)
+                    dragDelta = Offset.Zero
+                    dragging = true
+                    latestGhost(RuleDragGhost(node.id, dragDelta))
+                    latestIntent(RouteEditorIntent.SelectCanvas(CanvasIds.rule(node.id)))
+                },
+                onDrag = { change, amount ->
+                    change.consume()
+                    dragDelta += amount
+                    latestGhost(RuleDragGhost(node.id, dragDelta))
+                },
+                onDragEnd = {
+                    val landedX = origin.x + dragDelta.x
+                    val to = siblingIds.filterNot { it == node.id }.count { id ->
+                        (points[CanvasIds.rule(id)]?.x ?: Float.MAX_VALUE) < landedX
+                    }
+                    dragging = false
+                    latestGhost(null)
+                    val from = siblingIds.indexOf(node.id)
+                    if (from != to) {
+                        latestIntent(RouteEditorIntent.ReorderSiblings(node.parentId, movedIds(siblingIds, from, to)))
+                    }
+                },
+                onDragCancel = {
+                    dragging = false
+                    latestGhost(null)
+                },
+            )
+        }
     }
     board.bind(CanvasIds.rule(node.id), nodeState)
     return CanvasNode(
@@ -568,72 +521,104 @@ private fun ruleNode(
         modifier = Modifier
             .width(210.dp)
             .graphicsLayer { alpha = if (dragging) .35f else 1f }
-            .border(2.dp, if (unavailable || !node.enabled) MaterialTheme.colorScheme.outline else if (branching) LerNetAccent else routeTone(node.action, node.pipeName).ink(), RoundedCornerShape(8.dp))
+            .border(
+                2.dp,
+                if (unavailable ||
+                    !node.enabled
+                ) {
+                    MaterialTheme.colorScheme.outline
+                } else if (branching) {
+                    LerNetAccent
+                } else {
+                    routeTone(node.action, node.pipeName).ink()
+                },
+                RoundedCornerShape(8.dp)
+            )
             .then(selectionBorder(selected || dragging))
             .then(drag)
+            .clickable { onIntent(RouteEditorIntent.SelectCanvas(CanvasIds.rule(node.id))) }
             .trackNode(board, CanvasIds.rule(node.id)),
         state = nodeState,
         content = {
-            RuleNodeContent(node, rank, branching,
+            RuleNodeContent(
+                node, rank, branching,
                 unavailable = unavailable,
                 onEdit = { onIntent(RouteEditorIntent.Edit(node.id)) },
-                onDelete = { onIntent(RouteEditorIntent.RequestDelete(node.id)) })
+                onDelete = { onIntent(RouteEditorIntent.RequestDelete(node.id)) }
+            )
         },
     )
 }
 
 @Composable
-private fun RuleNodeContent(node: RuleNodeRecord, rank: Int, branching: Boolean,
-    onEdit: () -> Unit, onDelete: () -> Unit, unavailable: Boolean = false) {
-    SchemaCard {
-                Row(verticalAlignment = Alignment.Top) {
-                    Text(
-                        ruleHeadline(node),
-                        color = if (unavailable || !node.enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (!node.isElseRule()) {
-                        Text(
-                            rank.toString(),
-                            color = if (unavailable) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
-                            style = MaterialTheme.typography.labelLarge,
-                            modifier = Modifier.padding(start = 6.dp),
-                        )
-                    }
-                }
-                if (node.isElseRule() && node.title.isNotBlank()) {
-                    Text(
-                        node.title.trim(),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                RulePreviewLines(node, MaterialTheme.colorScheme.onSurfaceVariant)
-                if (unavailable) Text(stringResource(R.string.route_windows_only),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                else OutcomeStub(node.action, node.pipeName, branching)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(
-                        onClick = onEdit,
-                        modifier = Modifier.weight(1f).lernetButton(),
-                    ) {
-                        Icon(LerNetSymbols.edit(), contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.canvas_properties))
-                    }
-                    IconButton(onClick = onDelete) {
-                        Icon(
-                            LerNetSymbols.delete(),
-                            contentDescription = stringResource(R.string.rule_delete_node),
-                            tint = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                }
+private fun RuleNodeContent(
+    node: RuleNodeRecord,
+    rank: Int,
+    branching: Boolean,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    unavailable: Boolean = false
+) {
+    SchemaNodeSurface {
+        Row(verticalAlignment = Alignment.Top) {
+            Text(
+                ruleHeadline(node),
+                color = if (unavailable ||
+                    !node.enabled
+                ) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (!node.isElseRule()) {
+                Text(
+                    rank.toString(),
+                    color = if (unavailable) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(start = 6.dp),
+                )
+            }
+        }
+        if (node.isElseRule() && node.title.isNotBlank()) {
+            Text(
+                node.title.trim(),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        RulePreviewLines(node, MaterialTheme.colorScheme.onSurfaceVariant)
+        if (unavailable) {
+            Text(
+                stringResource(R.string.route_windows_only),
+                color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall
+            )
+        } else {
+            OutcomeStub(node.action, node.pipeName, branching)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(
+                onClick = onEdit,
+                modifier = Modifier.weight(1f).lernetButton(),
+            ) {
+                Icon(LerNetSymbols.edit(), contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.canvas_properties))
+            }
+            IconButton(onClick = onDelete) {
+                Icon(
+                    LerNetSymbols.delete(),
+                    contentDescription = stringResource(R.string.rule_delete_node),
+                    tint = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
     }
 }
 

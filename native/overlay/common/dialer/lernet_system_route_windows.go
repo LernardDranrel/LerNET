@@ -17,7 +17,7 @@ import (
 func LerNETSystemRouteContext(ctx context.Context) (context.Context, error) {
 	manager := service.FromContext[adapter.NetworkManager](ctx)
 	if manager == nil {
-		return nil, errors.New("system_route_unavailable")
+		return nil, errors.New("system_route_manager_unavailable")
 	}
 	guard := func(network, address string, raw syscall.RawConn) error {
 		host, _, err := net.SplitHostPort(address)
@@ -34,7 +34,7 @@ func LerNETSystemRouteContext(ctx context.Context) (context.Context, error) {
 		}
 		bind := control.BindToInterface(manager.InterfaceFinder(), selected.name, selected.index)
 		if err = bind(network, address, raw); err != nil {
-			return err
+			return errors.New("system_route_bind_failed")
 		}
 		current, err := resolveLerNETSystemRoute(manager, destination)
 		if err != nil {
@@ -51,7 +51,7 @@ func LerNETSystemRouteContext(ctx context.Context) (context.Context, error) {
 func resolveLerNETSystemRoute(manager adapter.NetworkManager, destination netip.Addr) (lernetRouteCandidate, error) {
 	holder, ok := manager.(interface{ LerNETIngressIdentity() *LerNETIngressIdentity })
 	if !ok || holder.LerNETIngressIdentity() == nil {
-		return lernetRouteCandidate{}, errors.New("system_route_unavailable")
+		return lernetRouteCandidate{}, errors.New("ingress_not_ready")
 	}
 	own := holder.LerNETIngressIdentity()
 	family := winipcfg.AddressFamily(windows.AF_INET)
@@ -60,13 +60,13 @@ func resolveLerNETSystemRoute(manager adapter.NetworkManager, destination netip.
 	}
 	rows, err := winipcfg.GetIPForwardTable2(family)
 	if err != nil {
-		return lernetRouteCandidate{}, errors.New("system_route_unavailable")
+		return lernetRouteCandidate{}, errors.New("system_route_snapshot_failed")
 	}
 	interfaceRows := make(map[winipcfg.LUID]lernetRouteCandidate)
 	var candidates []lernetRouteCandidate
 	for _, row := range rows {
 		prefix := row.DestinationPrefix.Prefix()
-		if !prefix.Contains(destination) {
+		if !prefix.Contains(destination.WithZone("")) {
 			continue
 		}
 		candidate, cached := interfaceRows[row.InterfaceLUID]

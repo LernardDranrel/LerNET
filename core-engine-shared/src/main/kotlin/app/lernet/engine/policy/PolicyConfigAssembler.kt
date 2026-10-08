@@ -19,6 +19,7 @@ import app.lernet.routing.policy.ExitLifecyclePolicy
 import app.lernet.routing.policy.FolderPolicy
 import app.lernet.routing.policy.FolderSelection
 import app.lernet.routing.policy.PolicyDestinationAddress
+import app.lernet.routing.policy.PolicyDnsMode
 import app.lernet.routing.policy.PolicyExit
 import app.lernet.routing.policy.PolicyProgram
 import app.lernet.routing.policy.PolicyProgramCompiler
@@ -85,6 +86,7 @@ class PolicyAssembledConfig(
 object PolicyConfigAssembler {
     const val DIRECT_TAG = "direct"
     const val BOOTSTRAP_DNS_TAG = "dns-bootstrap"
+    const val DIRECT_DNS_TAG = "dns-direct"
     const val IPV6_TUN_ADDRESS = "fdfe:dcba:9876::1/126"
     private val json = Json
     private val DNS_ACTION_FIELDS = setOf(
@@ -128,7 +130,6 @@ object PolicyConfigAssembler {
         return try {
             PolicyWorkspaceCodec.validate(workspace)
             require(program.revision == workspace.saved.revision) { "Версия программы не совпадает с сохранённой схемой" }
-            require(EngineDefaults.validIpv4(defaults.directDnsServer)) { "Некорректный DNS-сервер" }
             require(underlayInterface == null || underlayInterface.isNotBlank() && underlayInterface.none { it.isISOControl() }) {
                 "Некорректное имя физического адаптера"
             }
@@ -183,14 +184,39 @@ object PolicyConfigAssembler {
                 if (platform == EnginePlatform.WINDOWS) put("lernet_system_route", true)
             }
             dnsServers[BOOTSTRAP_DNS_TAG] = buildJsonObject {
-                put("type", "udp")
+                put("type", "local")
                 put("tag", BOOTSTRAP_DNS_TAG)
-                put("server", defaults.directDnsServer)
+                if (platform == EnginePlatform.WINDOWS) put("lernet_preserve_destination", true)
             }
+            dnsServers[DIRECT_DNS_TAG] = buildJsonObject {
+                put("tag", DIRECT_DNS_TAG)
+                if (workspace.saved.dns.mode == PolicyDnsMode.CUSTOM) {
+                    put("type", "udp")
+                    put("server", workspace.saved.dns.server)
+                    if (platform == EnginePlatform.WINDOWS) put("lernet_system_route", true)
+                } else {
+                    put("type", "local")
+                    if (platform == EnginePlatform.WINDOWS) put("lernet_preserve_destination", true)
+                }
+            }
+            notes += if (workspace.saved.dns.mode == PolicyDnsMode.SYSTEM) {
+                "DNS прямого трафика: исходная сеть; публичный сервер автоматически не подставляется."
+            } else {
+                "DNS прямого трафика: ${workspace.saved.dns.server}, выбран в настройках Expert. Резервная подмена отключена."
+            }
+            notes += "Адреса VPN-серверов разрешаются через исходную сеть; защищённые ветки используют DNS своего выхода."
             val rules = mutableListOf<JsonObject>()
-            rules += buildJsonObject {
-                put("action", "sniff")
-                put("timeout", ConfigAssembler.SNIFF_TIMEOUT)
+            // Reading a ClientHello acknowledges the local TCP handshake before an external
+            // route is known. A transparent policy needs no payload to choose its only exit.
+            val transparentDirect = program.rules.isNotEmpty() &&
+                program.rules.all {
+                    it.condition.isEmpty() && it.target.target == PolicyTarget.Direct && !it.protected && it.redirect == null
+                }
+            if (!transparentDirect) {
+                rules += buildJsonObject {
+                    put("action", "sniff")
+                    put("timeout", ConfigAssembler.SNIFF_TIMEOUT)
+                }
             }
             val guardedOwner = program.rules.any {
                 (it.protected || it.target.target == PolicyTarget.Block) && ownerPredicate(it.condition)
@@ -253,7 +279,10 @@ object PolicyConfigAssembler {
             val dns = buildJsonObject {
                 put("servers", JsonArray(dnsServers.values.toList()))
                 put("rules", JsonArray(dnsRules))
-                put("final", BOOTSTRAP_DNS_TAG)
+                put("final", DIRECT_DNS_TAG)
+                // Windows can select different upstreams for the same name (NRPT/multiple adapters).
+                // The OS keeps its own cache; never mix those answers in a generation-wide cache.
+                if (platform == EnginePlatform.WINDOWS) put("disable_cache", true)
                 put("timeout", "30s")
                 put("reverse_mapping", true)
             }
@@ -543,8 +572,8 @@ object PolicyConfigAssembler {
         }
 
         private fun dnsBinding(resolution: Resolution, protected: Boolean): DnsBinding {
-            val tag = resolution.tag ?: return DnsBinding(BOOTSTRAP_DNS_TAG)
-            if (tag == DIRECT_TAG) return DnsBinding(BOOTSTRAP_DNS_TAG)
+            val tag = resolution.tag ?: return DnsBinding(DIRECT_DNS_TAG)
+            if (tag == DIRECT_TAG) return DnsBinding(DIRECT_DNS_TAG)
             val profile = resolution.profile ?: profiles.getValue(physical.getValue(tag).profileId)
             val profileDns = DnsPolicy.fromStorage(profile.dnsPolicy)
             if (resolution.folder) {
@@ -560,7 +589,7 @@ object PolicyConfigAssembler {
                     )
                 }
             }
-            if (!protected && profileDns == DnsPolicy.UNDERLAY) return DnsBinding(BOOTSTRAP_DNS_TAG)
+            if (!protected && profileDns == DnsPolicy.UNDERLAY) return DnsBinding(DIRECT_DNS_TAG)
             val prefix = "dns-$tag-${if (protected) "protected" else "profile"}"
             dnsBindings[prefix]?.let { return it }
             val prepared = preparedDns(profile)
@@ -577,29 +606,33 @@ object PolicyConfigAssembler {
             if (final == null || final !in names || names.size != sources.size) {
                 throw AssemblyProblem("DNS: некорректные ссылки серверов профиля")
             }
+            if (!protected && platform == EnginePlatform.WINDOWS && profileDns == DnsPolicy.PROFILE && !profile.dnsJson.isNullOrBlank()) {
+                val original = json.parseToJsonElement(requireNotNull(profile.dnsJson)) as? JsonObject
+                if (original != null) {
+                    val used = reachableDnsServers(original)
+                    if (DnsDependency.dnsServers(original).any {
+                            it["type"]?.jsonPrimitive?.contentOrNull == "dhcp" && DnsDependency.tagOf(it) in used
+                        }
+                    ) {
+                        throw AssemblyProblem("DNS: для DHCP DNS профиля Windows укажите адрес сервера явно или выберите DNS исходной сети")
+                    }
+                }
+            }
             validateDnsGroups(sources)
             val reachable = reachableDnsServers(prepared)
             sources.forEach { source ->
                 val oldTag = DnsDependency.tagOf(source) ?: throw AssemblyProblem("DNS: сервер профиля без идентификатора")
                 val type = (source["type"] as? JsonPrimitive)?.contentOrNull
                 if (!protected && platform == EnginePlatform.WINDOWS && type in setOf("local", "dhcp")) {
-                    if (oldTag in explicitServers && oldTag in reachable) {
-                        throw AssemblyProblem(
-                            "DNS: системный DNS профиля недоступен в защищённом сетевом режиме Windows. " +
-                                "Укажите IP DNS-сервера корпоративной или обычной сети и нужный выход; " +
-                                "исключение для системной службы не создаётся."
-                        )
+                    if (type == "dhcp" && oldTag in explicitServers && oldTag in reachable) {
+                        throw AssemblyProblem("DNS: для DHCP DNS профиля Windows укажите адрес сервера явно или выберите DNS исходной сети")
                     }
-                    // DnsBlock inserts a local helper for remote DNS hostnames. It must resolve through
-                    // the core's own numeric socket, not Windows DnsClient outside the owned TUN.
                     dnsServers[names.getValue(oldTag)] = buildJsonObject {
-                        put("type", "udp")
+                        put("type", "local")
                         put("tag", names.getValue(oldTag))
-                        put("server", defaults.directDnsServer)
+                        put("lernet_preserve_destination", true)
                     }
-                    if (oldTag in reachable) {
-                        notes += "Имя DNS-сервера разрешается встроенным DNS через обычную сеть, без системной службы Windows."
-                    }
+                    if (oldTag in reachable) notes += "Имя DNS-сервера разрешается через DNS исходной сети, без публичной подмены."
                     return@forEach
                 }
                 if (protected && type in setOf("local", "dhcp", "fakeip")) {
@@ -883,6 +916,8 @@ object PolicyConfigAssembler {
                         put("stack", ConfigAssembler.TUN_STACK)
                         put("auto_route", true)
                         put("strict_route", platform == EnginePlatform.WINDOWS)
+                        // Keep Windows DNS Client/NRPT/DoH selection. Queries still enter routing.
+                        if (platform == EnginePlatform.WINDOWS) put("dns_mode", "disabled")
                     }
                 )
             }

@@ -32,6 +32,12 @@ object PolicyMigration {
             val rules = bundle.rules.filter { it.ownerId == owner }
             val structuralIds = rules.filter { it.enabled && it.parentId != TransferCodec.ORPHAN_PARENT }
                 .mapNotNull { it.parentId }.toSet()
+            val otherwiseIds = rules.filter { it.parentId != TransferCodec.ORPHAN_PARENT }.groupBy { it.parentId }.values
+                .mapNotNull { siblings ->
+                    siblings.sortedWith(compareBy<TransferRule> { it.sortIndex }.thenBy { it.id }).lastOrNull()?.takeIf {
+                        it.enabled && it.blocksJson.isBlank() && conditions(it).blocks.isEmpty()
+                    }?.id
+                }.toSet()
             val channelIds = rules.filter { it.action.equals("PROXY", true) && it.pipeName.isNotBlank() }
                 .map { it.pipeName.trim() }.distinct().associateWith { name ->
                     val id = channelId(owner, name)
@@ -57,6 +63,7 @@ object PolicyMigration {
                             else -> error("Validated action must be supported")
                         },
                         detached = rule.parentId == TransferCodec.ORPHAN_PARENT,
+                        otherwise = rule.id in otherwiseIds,
                     )
                 },
                 PolicyTarget.CurrentExit,

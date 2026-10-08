@@ -19,6 +19,7 @@ import app.lernet.routing.policy.ExitLifecyclePolicy
 import app.lernet.routing.policy.FolderPolicy
 import app.lernet.routing.policy.FolderSelection
 import app.lernet.routing.policy.NetworkPolicy
+import app.lernet.routing.policy.PolicyBranchEditing
 import app.lernet.routing.policy.PolicyChannel
 import app.lernet.routing.policy.PolicyHealthSettings
 import app.lernet.routing.policy.PolicyNode
@@ -40,6 +41,106 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PolicyConfigAssemblerTest {
+    @Test
+    fun `visible otherwise keeps empty Direct transparent on both platforms`() {
+        val policy = NetworkPolicy(device = PolicyBranchEditing.displayTree(PolicyTree(PolicyScope.Device)))
+        EnginePlatform.entries.forEach { platform ->
+            val config = PolicyConfigAssembler.assemble(workspace(policy), platform)
+            assertTrue(config.errors.toString(), config.isValid)
+            assertFalse(rules(config).any { it["action"]?.jsonPrimitive?.content == "sniff" })
+            assertTrue(rules(config).filter { it.containsKey("outbound") }.all { it["outbound"]?.jsonPrimitive?.content == "direct" })
+        }
+    }
+
+    @Test
+    fun `nested otherwise emits the same ordered routing trace and preserved physical exit on both platforms`() {
+        var tree = PolicyBranchEditing.displayTree(PolicyTree(PolicyScope.Device, defaultTarget = PolicyTarget.Profile("de")))
+        val outer = tree.nodes.single()
+        tree = PolicyBranchEditing.putNode(tree, PolicyNode("local", outer.id, conditions = domain("local.example")))
+        val remainder = tree.nodes.single { it.otherwise && it.parentId == outer.id }
+        EnginePlatform.entries.forEach { platform ->
+            val config = PolicyConfigAssembler.assemble(workspace(NetworkPolicy(device = tree)), platform)
+            assertTrue(config.errors.toString(), config.isValid)
+            val traced = rules(config).filter { (it["lernet_node_ids"] as? JsonArray)?.isNotEmpty() == true }
+            assertEquals(2, traced.size)
+            assertEquals(JsonArray(listOf(JsonPrimitive(outer.id), JsonPrimitive("local"))), traced[0]["lernet_node_ids"])
+            assertEquals("direct", traced[0]["outbound"]?.jsonPrimitive?.content)
+            assertEquals(JsonArray(listOf(JsonPrimitive(outer.id), JsonPrimitive(remainder.id))), traced[1]["lernet_node_ids"])
+            assertEquals(config.exits.single().tag, traced[1]["outbound"]?.jsonPrimitive?.content)
+        }
+    }
+
+    @Test
+    fun `Expert system DNS ignores legacy public default on both platforms`() {
+        EnginePlatform.entries.forEach { platform ->
+            val config = PolicyConfigAssembler.assemble(
+                workspace(NetworkPolicy()), platform,
+                defaults = app.lernet.engine.compile.EngineDefaults(directDnsServer = "9.9.9.9")
+            )
+            assertTrue(config.errors.toString(), config.isValid)
+            val dns = root(config.policyJson).getValue("dns").jsonObject
+            val servers = (dns.getValue("servers") as JsonArray).map { it.jsonObject }
+            assertEquals(setOf("local"), servers.map { it.getValue("type").jsonPrimitive.content }.toSet())
+            assertFalse(servers.any { it.containsKey("server") })
+            assertEquals(PolicyConfigAssembler.DIRECT_DNS_TAG, dns.getValue("final").jsonPrimitive.content)
+            assertFalse(config.policyJson.contains("9.9.9.9"))
+            val inbound = (root(config.ingressJson).getValue("inbounds") as JsonArray).single().jsonObject
+            if (platform == EnginePlatform.WINDOWS) {
+                assertEquals("disabled", inbound.getValue("dns_mode").jsonPrimitive.content)
+                assertTrue(servers.all { it["lernet_preserve_destination"]?.jsonPrimitive?.content == "true" })
+                assertEquals("true", dns.getValue("disable_cache").jsonPrimitive.content)
+            } else {
+                assertFalse(config.policyJson.contains("lernet_preserve_destination"))
+            }
+        }
+    }
+
+    @Test
+    fun `custom business DNS is explicit and never changes service bootstrap DNS`() {
+        val policy = NetworkPolicy(
+            dns = app.lernet.routing.policy.PolicyDnsSettings(
+                app.lernet.routing.policy.PolicyDnsMode.CUSTOM, "10.0.0.53"
+            )
+        )
+        EnginePlatform.entries.forEach { platform ->
+            val config = PolicyConfigAssembler.assemble(workspace(policy), platform)
+            assertTrue(config.errors.toString(), config.isValid)
+            val servers = (root(config.policyJson).getValue("dns").jsonObject.getValue("servers") as JsonArray)
+                .map { it.jsonObject }.associateBy { it.getValue("tag").jsonPrimitive.content }
+            assertEquals("10.0.0.53", servers.getValue(PolicyConfigAssembler.DIRECT_DNS_TAG).getValue("server").jsonPrimitive.content)
+            assertEquals("local", servers.getValue(PolicyConfigAssembler.BOOTSTRAP_DNS_TAG).getValue("type").jsonPrimitive.content)
+            assertFalse(servers.getValue(PolicyConfigAssembler.BOOTSTRAP_DNS_TAG).containsKey("server"))
+        }
+    }
+
+    @Test
+    fun `custom direct DNS cannot become the resolver for a protected VPN branch`() {
+        val policy = NetworkPolicy(
+            device = PolicyTree(
+                PolicyScope.Device,
+                listOf(
+                    PolicyNode(
+                        "protected", conditions = domain("private.example"),
+                        target = PolicyTarget.Profile("de"), protected = true
+                    )
+                )
+            ),
+            dns = app.lernet.routing.policy.PolicyDnsSettings(app.lernet.routing.policy.PolicyDnsMode.CUSTOM, "10.0.0.53"),
+        )
+        EnginePlatform.entries.forEach { platform ->
+            val config = PolicyConfigAssembler.assemble(workspace(policy), platform)
+            assertTrue(config.errors.toString(), config.isValid)
+            val dns = root(config.policyJson).getValue("dns").jsonObject
+            val protectedRule = (dns.getValue("rules") as JsonArray).first().jsonObject
+            val selectedTag = protectedRule.getValue("server").jsonPrimitive.content
+            assertNotEquals(PolicyConfigAssembler.DIRECT_DNS_TAG, selectedTag)
+            assertNotEquals(PolicyConfigAssembler.BOOTSTRAP_DNS_TAG, selectedTag)
+            val selected = (dns.getValue("servers") as JsonArray).map { it.jsonObject }
+                .single { it["tag"]?.jsonPrimitive?.content == selectedTag }
+            assertTrue(selected.containsKey("detour"))
+        }
+    }
+
     private fun profile(id: String) = TransferProfile(
         id, id, "JSON",
         listOf(
@@ -72,6 +173,7 @@ class PolicyConfigAssemblerTest {
             val inbound = (root(config.ingressJson).getValue("inbounds") as JsonArray).single().jsonObject
             assertEquals(2, (inbound.getValue("address") as JsonArray).size)
             assertEquals("direct", rules(config).last().getValue("outbound").jsonPrimitive.content)
+            assertFalse(rules(config).any { it["action"]?.jsonPrimitive?.content == "sniff" })
             assertFalse(rules(config).any { it.containsKey("ip_is_private") })
             assertEquals(platform == EnginePlatform.WINDOWS, inbound.getValue("strict_route").jsonPrimitive.content.toBoolean())
         }
@@ -87,6 +189,7 @@ class PolicyConfigAssemblerTest {
             workspace(NetworkPolicy(device = PolicyTree(PolicyScope.Device, nodes))), EnginePlatform.WINDOWS
         )
         assertTrue(config.errors.toString(), config.isValid)
+        assertTrue(rules(config).any { it["action"]?.jsonPrimitive?.content == "sniff" })
         assertEquals(2, config.exits.size)
         assertNotEquals(config.exits[0].tag, config.exits[1].tag)
         assertTrue(config.policyJson.contains("private-value"))
@@ -324,7 +427,8 @@ class PolicyConfigAssemblerTest {
             it.jsonObject["tag"]?.jsonPrimitive?.content == PolicyConfigAssembler.BOOTSTRAP_DNS_TAG
         }.jsonObject
         assertFalse(bootstrap.containsKey("detour"))
-        assertEquals("1.1.1.1", bootstrap.getValue("server").jsonPrimitive.content)
+        assertEquals("local", bootstrap.getValue("type").jsonPrimitive.content)
+        assertFalse(bootstrap.containsKey("server"))
         val android = PolicyConfigAssembler.assemble(workspace(policy), EnginePlatform.ANDROID)
         assertTrue(android.errors.toString(), android.isValid)
         assertFalse(android.policyJson.contains("lernet_system_route"))
@@ -422,7 +526,7 @@ class PolicyConfigAssemblerTest {
     }
 
     @Test
-    fun `Windows Expert rejects referenced OS DNS without adding a system service bypass`() {
+    fun `Windows system profile DNS is supported but explicit DHCP binding remains rejected`() {
         val policy = NetworkPolicy(
             device = PolicyTree(
                 PolicyScope.Device,
@@ -449,15 +553,21 @@ class PolicyConfigAssemblerTest {
                 )
             }
             val config = PolicyConfigAssembler.assemble(source, EnginePlatform.WINDOWS)
-            assertFalse(config.isValid)
-            assertTrue(config.dnsSafetyErrors.single().contains("системный DNS"))
-            assertTrue(config.policyJson.isEmpty())
-            assertTrue(config.manifestJson.isEmpty())
+            if (raw.contains("dhcp")) {
+                assertFalse(config.isValid)
+                assertTrue(config.dnsSafetyErrors.single().contains("DHCP"))
+                assertTrue(config.policyJson.isEmpty())
+            } else {
+                assertTrue(config.errors.toString(), config.isValid)
+                assertTrue(config.policyJson.contains("lernet_preserve_destination"))
+                val ingress = (root(config.ingressJson).getValue("inbounds") as JsonArray).single().jsonObject
+                assertEquals("disabled", ingress.getValue("dns_mode").jsonPrimitive.content)
+            }
         }
     }
 
     @Test
-    fun `Windows Expert uses only numeric core bootstrap for injected OS DNS helpers`() {
+    fun `Windows profile DNS helpers use original network without public substitution`() {
         val policy = NetworkPolicy(
             device = PolicyTree(
                 PolicyScope.Device,
@@ -484,14 +594,15 @@ class PolicyConfigAssemblerTest {
             assertTrue(config.errors.toString(), config.isValid)
             val dns = root(config.policyJson).getValue("dns").jsonObject
             val servers = (dns.getValue("servers") as JsonArray).map { it.jsonObject }
-            assertFalse(servers.any { it["type"]?.jsonPrimitive?.content in setOf("local", "dhcp") })
+            assertFalse(servers.any { it["type"]?.jsonPrimitive?.content == "dhcp" })
             val remote = servers.first {
                 it["server"]?.jsonPrimitive?.content in setOf("dns.example", "1.1.1.1") &&
                     it.containsKey("domain_resolver")
             }
             val helper = servers.single { it["tag"] == remote["domain_resolver"] }
-            assertEquals("udp", helper.getValue("type").jsonPrimitive.content)
-            assertEquals("1.1.1.1", helper.getValue("server").jsonPrimitive.content)
+            assertEquals("local", helper.getValue("type").jsonPrimitive.content)
+            assertFalse(helper.containsKey("server"))
+            assertEquals("true", helper.getValue("lernet_preserve_destination").jsonPrimitive.content)
         }
     }
 

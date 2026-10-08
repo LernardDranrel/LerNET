@@ -35,6 +35,7 @@ class WindowsBoxProcess internal constructor(
     private val launchRun: (Path, Path) -> Process,
     private val checkCommand: ((Path, List<String>) -> String)?,
     private val readinessDelayMs: Long,
+    private val retryDelayMs: (Int) -> Long = { (it.coerceAtMost(15) * 2_000L).coerceAtMost(30_000L) },
 ) : AutoCloseable {
     constructor(directory: Path) : this(directory, { executable, configFile ->
         ProcessBuilder(executable.toString(), "run", "-c", configFile.toString())
@@ -88,7 +89,7 @@ class WindowsBoxProcess internal constructor(
                         mutable.update {
                             it.copy(
                                 status = if (attempt == 0) TunnelStatus.STARTING else TunnelStatus.RECONNECTING,
-                                message = if (attempt == 0) "Запускаем туннель" else "Переподключение $attempt/3",
+                                message = if (attempt == 0) "Запускаем туннель" else "VPN включён · восстановление, попытка $attempt",
                                 reconnectAttempt = attempt
                             )
                         }
@@ -140,16 +141,13 @@ class WindowsBoxProcess internal constructor(
                             return@thread
                         }
                         attempt++
-                        if (attempt > 3) {
-                            val detail = lastFatal.get()?.let(SecretRedactor::redact)?.take(180)?.let { ": $it" }.orEmpty()
-                            mutable.update {
-                                it.copy(status = TunnelStatus.FAILED, message = "Ядро завершилось (код $code); попытки исчерпаны$detail")
-                            }
-                            desired = false
-                            return@thread
+                        val detail = lastFatal.get()?.let(SecretRedactor::redact)?.take(180)?.let { ": $it" }.orEmpty()
+                        mutable.update {
+                            it.copy(status = TunnelStatus.RECONNECTING,
+                                message = "VPN включён · ядро завершилось (код $code), восстанавливаем$detail")
                         }
                     }
-                    Thread.sleep((attempt * 2_000L).coerceAtMost(6_000L))
+                    Thread.sleep(retryDelayMs(attempt))
                 }
             } catch (error: Exception) {
                 synchronized(processLock) {

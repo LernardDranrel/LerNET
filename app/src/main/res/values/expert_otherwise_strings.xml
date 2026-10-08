@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="expert_otherwise_title">ИНАЧЕ</string>
+    <string name="expert_otherwise_hint">Если ни одно условие на этом уровне не подошло</string>
+    <string name="expert_branching_root">Проверить дочерние ветки</string>
+    <string name="expert_otherwise_child_exit_hint">Выход для оставшегося трафика задаётся в дочерней ветке «ИНАЧЕ». Её можно продолжить новыми условиями.</string>
+    <string name="expert_otherwise_condition_required">Добавьте условие. Для оставшегося трафика используйте ветку ИНАЧЕ.</string>
+    <string name="expert_add_otherwise">+ ИНАЧЕ</string>
+    <string name="expert_otherwise_new_path_hint">Оставшийся трафик получит выбранный выход и больше не будет проверяться следующими внешними ветками.</string>
+</resources>

@@ -16,19 +16,25 @@ import (
 // their last stream, datagram session, or asynchronous DNS request releases it.
 type switchRouter struct {
 	adapter.Router
-	mu           sync.Mutex
-	current      *generation
-	all          map[*generation]bool
-	closed       bool
-	flows        int
-	dnsIngress   *dnsIngressRegistry
-	networkEpoch atomic.Int64
+	mu            sync.Mutex
+	current       *generation
+	all           map[*generation]bool
+	closed        bool
+	flows         int
+	dnsIngress    *dnsIngressRegistry
+	networkEpoch  atomic.Int64
+	networkPaused atomic.Bool
+	ready         *ingressReadiness
 }
 
 func (r *switchRouter) LerNETPendingPacketLimits() (int, int) { return 32, 256 * 1024 }
 
 func (r *switchRouter) acquireFlow() (*generation, func(), error) {
 	r.mu.Lock()
+	if r.networkPaused.Load() {
+		r.mu.Unlock()
+		return nil, nil, errors.New("expert_underlay_unavailable")
+	}
 	if r.closed || r.current == nil {
 		r.mu.Unlock()
 		return nil, nil, ErrStopped
@@ -314,7 +320,13 @@ func (r *switchRouter) ResetNetwork() {
 
 func (r *switchRouter) RouteConnectionEx(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	g, release, err := r.acquireFlow()
+	if err == nil {
+		err = r.ready.wait(ctx)
+	}
 	if err != nil {
+		if release != nil {
+			release()
+		}
 		N.CloseOnHandshakeFailure(conn, onClose, err)
 		return
 	}
@@ -328,7 +340,13 @@ func (r *switchRouter) RouteConnectionEx(ctx context.Context, conn net.Conn, met
 
 func (r *switchRouter) RoutePacketConnectionEx(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	g, release, err := r.acquireFlow()
+	if err == nil {
+		err = r.ready.wait(ctx)
+	}
 	if err != nil {
+		if release != nil {
+			release()
+		}
 		N.CloseOnHandshakeFailure(conn, onClose, err)
 		return
 	}
@@ -346,6 +364,9 @@ func (r *switchRouter) RouteConnection(ctx context.Context, conn net.Conn, metad
 		return err
 	}
 	defer release()
+	if err = r.ready.wait(ctx); err != nil {
+		return err
+	}
 	return g.router.RouteConnection(ctx, conn, metadata)
 }
 
@@ -355,6 +376,9 @@ func (r *switchRouter) RoutePacketConnection(ctx context.Context, conn N.PacketC
 		return err
 	}
 	defer release()
+	if err = r.ready.wait(ctx); err != nil {
+		return err
+	}
 	return g.router.RoutePacketConnection(ctx, conn, metadata)
 }
 
@@ -367,6 +391,10 @@ func (r *switchRouter) PreMatch(metadata adapter.InboundContext, firstPacket []b
 func (r *switchRouter) HijackDNSPacket(ctx context.Context, payload []byte, writer N.PacketWriter, metadata adapter.InboundContext) {
 	g, release, err := r.acquireFlow()
 	if err != nil {
+		return
+	}
+	if err = r.ready.wait(ctx); err != nil {
+		release()
 		return
 	}
 	// Native router invokes Release after ExchangeAsync has completed, including

@@ -4,9 +4,11 @@ import app.lernet.routing.ConditionKind
 import app.lernet.routing.MatchJoin
 import app.lernet.routing.RoutePlatform
 import app.lernet.routing.policy.NetworkPolicy
+import app.lernet.routing.policy.PolicyBranchEditing
 import app.lernet.routing.policy.PolicyCanvasKeys
 import app.lernet.routing.policy.PolicyChannel
 import app.lernet.routing.policy.PolicyNode
+import app.lernet.routing.policy.PolicyOtherwise
 import app.lernet.routing.policy.PolicyProgramCompiler
 import app.lernet.routing.policy.PolicyScope
 import app.lernet.routing.policy.PolicyTarget
@@ -22,31 +24,20 @@ object ExpertPolicyEditing {
                 ?: PolicyTree(scope, defaultTarget = PolicyTarget.CurrentExit)
         }
 
-    fun replaceTree(policy: NetworkPolicy, tree: PolicyTree): NetworkPolicy =
-        if (tree.scope == PolicyScope.Device) {
+    fun replaceTree(policy: NetworkPolicy, original: PolicyTree): NetworkPolicy {
+        val tree = PolicyBranchEditing.synchronizeDefault(original)
+        return if (tree.scope == PolicyScope.Device) {
             policy.copy(device = tree)
         } else {
             policy.copy(
                 trees = policy.trees.filterNot { it.scope == tree.scope } + tree,
             )
         }
+    }
 
     fun putNode(policy: NetworkPolicy, scope: PolicyScope, node: PolicyNode): NetworkPolicy {
-        val tree = tree(policy, scope)
-        val previous = tree.nodes.firstOrNull { it.id == node.id }
-        if (previous != null && previous.parentId == node.parentId) {
-            return replaceTree(policy, tree.copy(nodes = tree.nodes.map { if (it.id == node.id) node else it }))
-        }
-        val without = tree.nodes.filterNot { it.id == node.id }
-        val siblings = without.filter { it.parentId == node.parentId }
-            .sortedWith(compareBy<PolicyNode> { it.sortIndex }.thenBy { it.id }).toMutableList()
-        // A migrated unconditional Otherwise may have Int.MAX_VALUE. Normalize and insert before it,
-        // rather than overflowing an index or creating an unreachable rule after the catch-all.
-        val insertion = siblings.indexOfFirst { it.conditions.blocks.isEmpty() }.takeIf { it >= 0 } ?: siblings.size
-        siblings.add(insertion, node)
-        val positions = siblings.mapIndexed { index, item -> item.id to index }.toMap()
-        val updated = (without + node).map { item -> positions[item.id]?.let { item.copy(sortIndex = it) } ?: item }
-        return replaceTree(policy, tree.copy(nodes = updated))
+        val updatedTree = PolicyBranchEditing.putNode(tree(policy, scope), node)
+        return replaceTree(policy, updatedTree)
     }
 
     fun ensureTargetTree(policy: NetworkPolicy, target: PolicyTarget): NetworkPolicy {
@@ -64,7 +55,8 @@ object ExpertPolicyEditing {
 
     fun putChannel(policy: NetworkPolicy, channel: PolicyChannel): NetworkPolicy {
         val withOwner = replaceTree(policy, tree(policy, channel.owner))
-        return ensureTargetTree(withOwner.copy(channels = withOwner.channels.filterNot { it.id == channel.id } + channel), channel.target)
+        val updated = withOwner.copy(channels = withOwner.channels.filterNot { it.id == channel.id } + channel)
+        return ensureTargetTree(updated, channel.target)
     }
 
     fun descendants(tree: PolicyTree, nodeId: String): Set<String> {
@@ -100,19 +92,15 @@ object ExpertPolicyEditing {
     }
 
     fun deleteNode(policy: NetworkPolicy, scope: PolicyScope, nodeId: String): NetworkPolicy {
-        val tree = tree(policy, scope)
-        val removed = descendants(tree, nodeId)
-        return replaceTree(
-            policy,
-            tree.copy(
-                nodes = tree.nodes.filterNot { it.id in removed },
-                positions = tree.positions - removed.map(PolicyCanvasKeys::node).toSet()
-            )
-        )
+        val updatedTree = PolicyBranchEditing.removeNode(tree(policy, scope), nodeId)
+        return replaceTree(policy, updatedTree)
     }
 
     fun deleteChannel(policy: NetworkPolicy, channelId: String): NetworkPolicy {
-        if (channelReferenceCount(policy, channelId) > 0) return policy
+        val compatibilityReference = (listOf(policy.device) + policy.trees).any {
+            it.defaultTarget == PolicyTarget.Channel(channelId)
+        }
+        if (channelReferenceCount(policy, channelId) > 0 || compatibilityReference) return policy
         val key = PolicyCanvasKeys.channel(channelId)
         return policy.copy(
             channels = policy.channels.filterNot { it.id == channelId },
@@ -122,24 +110,8 @@ object ExpertPolicyEditing {
     }
 
     fun moveNode(policy: NetworkPolicy, scope: PolicyScope, nodeId: String, delta: Int): NetworkPolicy {
-        val tree = tree(policy, scope)
-        val node = tree.nodes.firstOrNull { it.id == nodeId } ?: return policy
-        val siblings = tree.nodes.filter { it.parentId == node.parentId }.sortedWith(
-            compareBy<PolicyNode> { it.sortIndex }.thenBy { it.id },
-        ).toMutableList()
-        val from = siblings.indexOfFirst { it.id == nodeId }
-        val to = from + delta
-        if (to !in siblings.indices) return policy
-        siblings.add(to, siblings.removeAt(from))
-        val positions = siblings.mapIndexed { index, item -> item.id to index }.toMap()
-        return replaceTree(
-            policy,
-            tree.copy(
-                nodes = tree.nodes.map { item ->
-                    positions[item.id]?.let { item.copy(sortIndex = it) } ?: item
-                }
-            )
-        )
+        val updatedTree = PolicyBranchEditing.moveNode(tree(policy, scope), nodeId, delta)
+        return replaceTree(policy, updatedTree)
     }
 
     fun validation(state: ExpertUiState): List<String> =
@@ -148,21 +120,14 @@ object ExpertPolicyEditing {
     fun channelReferenceCount(policy: NetworkPolicy, channelId: String): Int {
         val target = PolicyTarget.Channel(channelId)
         return (listOf(policy.device) + policy.trees).sumOf { tree ->
-            tree.nodes.count { it.target == target } + if (tree.defaultTarget == target) 1 else 0
+            val explicitDefault = tree.nodes.any { it.parentId == null && !it.detached && PolicyOtherwise.isOtherwise(it) }
+            val defaultReference = if (tree.defaultTarget == target && !explicitDefault) 1 else 0
+            tree.nodes.count { it.target == target } + defaultReference
         } + policy.channels.count { it.target == target }
     }
 
-    fun inheritedProtection(tree: PolicyTree, parentId: String?): Boolean {
-        val byId = tree.nodes.associateBy { it.id }
-        val visited = mutableSetOf<String>()
-        var currentId = parentId
-        while (currentId != null && visited.add(currentId)) {
-            val parent = byId[currentId] ?: return false
-            if (parent.protected) return true
-            currentId = parent.parentId
-        }
-        return false
-    }
+    fun inheritedProtection(tree: PolicyTree, parentId: String?): Boolean =
+        PolicyBranchEditing.inheritedProtection(tree, parentId)
 
     fun inactiveReason(node: PolicyNode, tree: PolicyTree, state: ExpertUiState): String? {
         state.inactiveReasons[node.id]?.let { return it }
@@ -200,7 +165,7 @@ object ExpertPolicyEditing {
 
     fun targetName(target: PolicyTarget, state: ExpertUiState): String = when (target) {
         PolicyTarget.Direct -> "Напрямую"
-        PolicyTarget.Block -> "Запретить"
+        PolicyTarget.Block -> "Блокировать трафик"
         PolicyTarget.CurrentExit -> "Выход этой схемы"
         is PolicyTarget.Profile -> "Профиль: ${state.profiles.firstOrNull { it.id == target.id }?.name ?: "недоступен"}"
         is PolicyTarget.Folder -> "Папка: ${state.folders.firstOrNull { it.id == target.id }?.name ?: "недоступна"}"
@@ -208,6 +173,7 @@ object ExpertPolicyEditing {
     }
 
     fun conditionSummary(node: PolicyNode): String {
+        if (PolicyOtherwise.isOtherwise(node)) return "Трафик, которому не подошли предыдущие ветки"
         if (node.conditions.blocks.isEmpty()) return "Весь трафик этой ветки"
         val join = if (node.conditions.join == MatchJoin.AND) " И " else " ИЛИ "
         return node.conditions.blocks.joinToString(join) { block ->

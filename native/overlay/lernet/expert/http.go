@@ -186,7 +186,13 @@ func (s *ControlServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			code = http.StatusRequestTimeout
 		}
-		http.Error(w, Encode(map[string]string{"error": controlError(err)}), code)
+		body := map[string]any{"error": controlError(err)}
+		var detail *tun.LerNETCaptureRouteUpdateError
+		if errors.As(err, &detail) {
+			body["route_update_stage"] = detail.Stage
+			body["win32_code"] = detail.Code
+		}
+		http.Error(w, Encode(body), code)
 		return
 	}
 	io.WriteString(w, result)
@@ -230,7 +236,9 @@ func ErrorCode(err error) string {
 	// lowercase password, share token or host. Only our finite protocol codes
 	// cross either the HTTP or gomobile boundary.
 	switch err.Error() {
-	case "expert_route_snapshot_failed", "expert_route_capture_collision", "expert_route_capture_not_proven", "tun_identity_changed", "expert_underlay_binding_required", "expert_underlay_binding_invalid", "expert_underlay_must_be_physical", "expert_ingress_capture_exclusions_unsupported", "expert_connected_network_snapshot_failed", "expert_capture_route_update_failed", "expert_requires_gvisor_stack", "expert_elevation_required":
+	case "system_route_ipv4_unavailable", "system_route_ipv6_unavailable", "system_route_manager_unavailable", "system_route_snapshot_failed", "system_route_bind_failed", "ingress_not_ready", "ingress_ready_timeout":
+		return err.Error()
+	case "expert_underlay_unavailable", "expert_route_snapshot_failed", "expert_route_capture_collision", "expert_route_capture_not_proven", "tun_identity_changed", "expert_underlay_binding_required", "expert_underlay_binding_invalid", "expert_underlay_must_be_physical", "expert_ingress_capture_exclusions_unsupported", "expert_connected_network_snapshot_failed", "expert_capture_route_update_failed", "expert_requires_gvisor_stack", "expert_elevation_required":
 		return err.Error()
 	case "system_route_unavailable", "system_route_changed", "system_route_destination_invalid", "system_route_platform_unsupported", "guarded_adapter_invalid", "guarded_adapter_platform_unsupported", "guarded_adapter_identity_changed", "guardian_control_unavailable", "guardian_control_invalid_response", "guardian_control_rejected", "guardian_control_timeout":
 		return err.Error()

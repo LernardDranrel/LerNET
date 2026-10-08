@@ -59,7 +59,8 @@ object OutboundProbe {
         if (!assembled.isValid) return OutboundProbeResult(message = assembled.errors.joinToString("; ").take(180))
         val api = LocalCoreApi()
         val inboundPort = ServerSocket(0).use { it.localPort }
-        val config = api.inject(localInbound(assembled.json, inboundPort))
+        val probeConfig = localInbound(assembled.json, inboundPort)
+        val config = api.inject(bindProbeUnderlay(probeConfig, WindowsPhysicalNetwork.select().name))
         val directory = runCatching {
             Files.createDirectories(workDirectory)
             Files.createTempDirectory(workDirectory, "preflight-")
@@ -121,8 +122,8 @@ object OutboundProbe {
         val inbound = (root["inbounds"] as JsonArray).first().jsonObject
         val local = JsonObject(inbound.toMutableMap().apply { put("listen_port", JsonPrimitive(port)) })
         val route = (root["route"] as JsonObject).toMutableMap().apply {
-            // The temporary check has no TUN route to escape. Binding its
-            // outbound to a physical NIC breaks loopback checks on Windows.
+            // Disable detection before explicitly binding only outbound sockets.
+            // The local listener remains on loopback; probes must escape our TUN.
             put("auto_detect_interface", JsonPrimitive(false))
         }
         return JsonObject(root.toMutableMap().apply {
@@ -142,6 +143,15 @@ object OutboundProbe {
             Thread.sleep(100)
         }
         error("Ядро не открыло порт проверки")
+    }
+
+    internal fun bindProbeUnderlay(config: String, interfaceName: String): String {
+        val root = json.parseToJsonElement(config).jsonObject
+        val route = (root["route"] as? JsonObject).orEmpty()
+        return JsonObject(root + ("route" to JsonObject(route + mapOf(
+            "default_interface" to JsonPrimitive(interfaceName),
+            "auto_detect_interface" to JsonPrimitive(false),
+        )))).toString()
     }
 
     private fun deleteWhenReleased(path: Path) {

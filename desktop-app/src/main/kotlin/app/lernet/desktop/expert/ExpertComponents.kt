@@ -71,13 +71,16 @@ internal fun ExpertPanel(
 ) {
     Card(
         modifier.animateContentSize(tween(if (reducedMotion) 0 else 180)),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = ExpertColors.panel),
         border = BorderStroke(1.dp, ExpertColors.border),
     ) {
-        Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(title, Modifier.weight(1f), color = ExpertColors.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    title, Modifier.weight(1f), color = ExpertColors.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis
+                )
                 trailing()
             }
             content()

@@ -7,22 +7,26 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -33,17 +37,22 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextAlign
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -52,40 +61,65 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.lernet.R
 import app.lernet.config.policy.ExternalExitRequest
 import app.lernet.config.transfer.TransferProfile
+import app.lernet.engine.policy.DirectFamilyAvailability
+import app.lernet.engine.policy.ExpertConnectionObservation
 import app.lernet.engine.policy.ExpertIntent
 import app.lernet.engine.policy.ExpertSessionPhase
+import app.lernet.engine.policy.ExpertTunnelHealth
+import app.lernet.engine.policy.ExpertVpnHandover
+import app.lernet.engine.policy.FlowTrafficRate
+import app.lernet.engine.policy.tunnelHealth
+import app.lernet.routing.policy.NetworkPolicy
+import app.lernet.routing.policy.PolicyDnsSettings
 import app.lernet.routing.policy.PolicyHealthSettings
+import app.lernet.ui.components.LerNetLogo
 import app.lernet.ui.components.PanelCard
+import app.lernet.ui.controls.NetworkLever
+import app.lernet.ui.controls.NetworkLeverLamp
 import app.lernet.ui.icons.LerNetSymbols
 import app.lernet.ui.motion.rememberReduceMotion
 
 internal enum class ExpertSection(val label: Int) {
     OVERVIEW(R.string.expert_section_overview),
     SCHEMA(R.string.expert_section_schema),
-    EXITS(R.string.expert_section_exits),
-    SAFETY(R.string.expert_section_safety),
-    ACTIVITY(R.string.expert_section_activity),
-    JOURNAL(R.string.expert_section_journal),
     SIMULATION(R.string.expert_section_simulation),
+    EXITS(R.string.expert_section_exits),
+    JOURNAL(R.string.expert_section_journal),
+    SAFETY(R.string.expert_section_safety),
 }
 
 @Composable
-fun ExpertRoute(onVpn: () -> Unit, simpleActive: Boolean) {
+internal fun ExpertRoute(
+    onVpn: () -> Unit, simpleActive: Boolean,
+    section: ExpertSection, onSectionChange: (ExpertSection) -> Unit,
+    onOpenDrawer: () -> Unit,
+) {
     val viewModel: ExpertViewModel = hiltViewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val snackbar = remember { SnackbarHostState() }
-    var switchPrompt by remember { mutableStateOf(false) }
-    var exportPrompt by remember { mutableStateOf(false) }
-    var importPrompt by remember { mutableStateOf(false) }
-    var replaceImport by remember { mutableStateOf(false) }
-    var permissionDenied by remember { mutableStateOf(false) }
+    var switchPrompt by rememberSaveable { mutableStateOf(false) }
+    var handover by rememberSaveable(stateSaver = ExpertOptionalJsonSaver<Pair<String, NetworkPolicy>>()) { mutableStateOf<Pair<String, NetworkPolicy>?>(null) }
+    var keepVpn by rememberSaveable { mutableStateOf(false) }
+    var permissionHandover by rememberSaveable(stateSaver = ExpertOptionalJsonSaver<Pair<String, NetworkPolicy>>()) { mutableStateOf<Pair<String, NetworkPolicy>?>(null) }
+    val startConfirmed: () -> Unit = {
+        val selected = permissionHandover
+        if (selected == null) {
+            viewModel.onIntent(ExpertIntent.Start)
+        } else {
+            viewModel.startKeepingVpn(selected.first, selected.second)
+        }
+    }
+    var exportPrompt by rememberSaveable { mutableStateOf(false) }
+    var importPrompt by rememberSaveable { mutableStateOf(false) }
+    var replaceImport by rememberSaveable { mutableStateOf(false) }
+    var permissionDenied by rememberSaveable { mutableStateOf(false) }
     val permission = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
         permissionDenied = result.resultCode != Activity.RESULT_OK
-        if (!permissionDenied) viewModel.onIntent(ExpertIntent.Start)
+        if (!permissionDenied) startConfirmed()
     }
     val prepareStart: () -> Unit = {
         permissionDenied = false
@@ -94,7 +128,7 @@ fun ExpertRoute(onVpn: () -> Unit, simpleActive: Boolean) {
             permissionDenied = true
         } else {
             val prepare = VpnService.prepare(context)
-            if (prepare == null) viewModel.onIntent(ExpertIntent.Start) else permission.launch(prepare)
+            if (prepare == null) startConfirmed() else permission.launch(prepare)
         }
     }
     val export = rememberLauncherForActivityResult(
@@ -116,14 +150,30 @@ fun ExpertRoute(onVpn: () -> Unit, simpleActive: Boolean) {
     if (switchPrompt) {
         AlertDialog(
             onDismissRequest = { switchPrompt = false },
-            title = { Text(stringResource(R.string.expert_switch_title)) },
-            text = { Text(stringResource(R.string.expert_switch_body)) },
+            title = { Text(stringResource(R.string.expert_start_confirm_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(stringResource(R.string.expert_start_confirm_body))
+                    handover?.let { selected ->
+                        val name = state.inventory?.profiles?.firstOrNull { it.id == selected.first }?.name.orEmpty()
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = keepVpn, onCheckedChange = { keepVpn = it })
+                            Text(stringResource(R.string.expert_keep_vpn_option, name))
+                        }
+                        Text(stringResource(if (keepVpn) R.string.expert_keep_vpn_body else R.string.expert_direct_switch_body))
+                    }
+                    if (simpleActive && handover == null) Text(stringResource(R.string.expert_switch_body))
+                    if (state.environment?.anotherVpnVisible == true) Text(stringResource(R.string.expert_platform_other_vpn))
+                    ExpertHint(R.string.expert_start_environment_limit)
+                }
+            },
             confirmButton = {
                 TextButton(onClick = {
                     switchPrompt = false
+                    permissionHandover = handover.takeIf { keepVpn }
                     prepareStart()
                 }) {
-                    Text(stringResource(R.string.expert_tab_expert))
+                    Text(stringResource(if (handover != null && keepVpn) R.string.expert_keep_vpn_start else R.string.expert_tab_expert))
                 }
             },
             dismissButton = {
@@ -179,13 +229,25 @@ fun ExpertRoute(onVpn: () -> Unit, simpleActive: Boolean) {
     }
     ExpertScreen(
         state, snackbar, onVpn, onIntent = viewModel::onIntent,
-        onStart = { if (simpleActive) switchPrompt = true else prepareStart() },
+        onStart = {
+            viewModel.refreshEnvironment()
+            handover = viewModel.connectedVpnProfileId()?.let { profileId ->
+                state.runtime?.takeIf { ExpertVpnHandover.available(it.saved, it.draft) }
+                    ?.let { profileId to it.saved }
+            }
+            keepVpn = false
+            switchPrompt = true
+        },
         onExport = { exportPrompt = true },
         onAndroidSettings = { context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS)) },
         permissionDenied = permissionDenied,
         onImport = { importPrompt = true },
         onSaveExternal = viewModel::saveExternalExit,
         onSaveHealth = viewModel::saveHealthSettings,
+        onSaveDns = viewModel::saveDnsSettings,
+        onSaveDraft = viewModel::saveDraft,
+        formMemory = viewModel.formMemory,
+        selectedSection = section, onSectionChange = onSectionChange, onOpenDrawer = onOpenDrawer,
     )
 }
 
@@ -203,50 +265,74 @@ internal fun ExpertScreen(
     onImport: () -> Unit = {},
     onSaveExternal: (suspend (ExternalExitRequest, TransferProfile?) -> String?)? = null,
     onSaveHealth: (suspend (PolicyHealthSettings, PolicyHealthSettings) -> String?)? = null,
+    onSaveDns: (suspend (PolicyDnsSettings, PolicyDnsSettings) -> String?)? = null,
+    onSaveDraft: (suspend (NetworkPolicy, NetworkPolicy) -> String?)? = null,
+    formMemory: ExpertFormMemory = remember { ExpertFormMemory() },
+    selectedSection: ExpertSection? = null,
+    onSectionChange: ((ExpertSection) -> Unit)? = null,
+    onOpenDrawer: () -> Unit = {},
 ) {
-    var section by remember { mutableStateOf(ExpertSection.OVERVIEW) }
+    var localSection by rememberSaveable { mutableStateOf(ExpertSection.OVERVIEW) }
+    val section = selectedSection ?: localSection
+    fun selectSection(value: ExpertSection) {
+        if (onSectionChange != null) onSectionChange(value) else localSection = value
+    }
     var archiveMenu by remember { mutableStateOf(false) }
-    var healthEditor by remember { mutableStateOf<PolicyHealthSettings?>(null) }
+    var simulationConnection by rememberSaveable(stateSaver = ExpertObservationSaver) { mutableStateOf<ExpertConnectionObservation?>(null) }
+    var simulationRequest by rememberSaveable { mutableStateOf(0L) }
+    var historicalPath by rememberSaveable { mutableStateOf(false) }
+    val sectionStates = rememberSaveableStateHolder()
+    var dnsEditor by rememberSaveable(stateSaver = ExpertOptionalJsonSaver<PolicyDnsSettings>()) { mutableStateOf<PolicyDnsSettings?>(null) }
+    var healthEditor by rememberSaveable(stateSaver = ExpertOptionalJsonSaver<PolicyHealthSettings>()) { mutableStateOf<PolicyHealthSettings?>(null) }
     val reduced = rememberReduceMotion()
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
             Column {
-                TopAppBar(title = { Text(stringResource(R.string.app_name)) }, actions = {
-                    IconButton(onClick = { archiveMenu = true }, enabled = state.inventory != null) {
-                        Icon(
-                            LerNetSymbols.more(),
-                            contentDescription = stringResource(R.string.expert_archive_actions),
-                        )
+                TopAppBar(
+                    navigationIcon = {
+                        IconButton(onOpenDrawer) {
+                            Icon(LerNetSymbols.menu(), contentDescription = stringResource(R.string.expert_open_menu))
+                        }
+                    },
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            LerNetLogo(size = 28.dp)
+                            Column {
+                                Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleLarge)
+                                Text(stringResource(section.label), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+                    actions = {
+                        IconButton(onClick = { archiveMenu = true }, enabled = state.inventory != null) {
+                            Icon(
+                                LerNetSymbols.more(),
+                                contentDescription = stringResource(R.string.expert_archive_actions),
+                            )
+                        }
+                        DropdownMenu(archiveMenu, onDismissRequest = { archiveMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.expert_import)) },
+                                onClick = {
+                                    archiveMenu = false
+                                    onImport()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.expert_export)) },
+                                onClick = {
+                                    archiveMenu = false
+                                    onExport()
+                                },
+                            )
+                        }
                     }
-                    DropdownMenu(archiveMenu, onDismissRequest = { archiveMenu = false }) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.expert_import)) },
-                            onClick = {
-                                archiveMenu = false
-                                onImport()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.expert_export)) },
-                            onClick = {
-                                archiveMenu = false
-                                onExport()
-                            },
-                        )
-                    }
-                })
+                )
                 AppModeTabs(true, onVpn, {})
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    ExpertSection.entries.forEach { item ->
-                        FilterChip(
-                            section == item, onClick = { section = item },
-                            label = { Text(stringResource(item.label)) },
-                        )
-                    }
-                }
+
             }
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -265,10 +351,12 @@ internal fun ExpertScreen(
             val content: @Composable (ExpertSection) -> Unit = { visible ->
                 if (visible == ExpertSection.SCHEMA) {
                     Column(
-                        Modifier.fillMaxSize().padding(16.dp),
+                        Modifier.fillMaxSize().padding(top = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        state.storageError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        state.storageError?.let {
+                            Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp))
+                        }
                         if (permissionDenied) {
                             Text(
                                 stringResource(
@@ -279,10 +367,26 @@ internal fun ExpertScreen(
                                     }
                                 ),
                                 color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(horizontal = 16.dp),
                             )
                         }
-                        ExpertSchema(runtime, bundle, onIntent, Modifier.weight(1f))
+                        ExpertSchema(runtime, bundle, onIntent, Modifier.weight(1f), onSaveDraft)
                     }
+                } else if (visible == ExpertSection.OVERVIEW) {
+                    ExpertActivity(runtime, bundle, onSimulate = { connection, historical ->
+                        simulationConnection = connection
+                        historicalPath = historical
+                        simulationRequest++
+                        selectSection(ExpertSection.SIMULATION)
+                    }, onClear = { onIntent(ExpertIntent.ClearConnectionHistory) }, header = { rate ->
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            state.storageError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                            if (permissionDenied) {
+                                Text(stringResource(R.string.expert_permission_denied), color = MaterialTheme.colorScheme.error)
+                            }
+                            ExpertStatus(state, onIntent, onStart, rate, reduced)
+                        }
+                    })
                 } else {
                     LazyColumn(
                         Modifier.fillMaxSize(),
@@ -309,51 +413,23 @@ internal fun ExpertScreen(
                             }
                         }
                         when (visible) {
-                            ExpertSection.OVERVIEW -> {
-                                item { ExpertStatus(state, onIntent, onStart) }
-                                item {
-                                    OutlinedButton(
-                                        { healthEditor = runtime.draft.health },
-                                        Modifier.fillMaxWidth(), enabled = onSaveHealth != null,
-                                    ) {
-                                        Text(stringResource(R.string.expert_health_title))
-                                    }
-                                }
-                                item {
-                                    PanelCard {
-                                        Text(
-                                            stringResource(R.string.expert_title),
-                                            style = MaterialTheme.typography.titleLarge,
-                                        )
-                                        ExpertHint(R.string.expert_subtitle)
-                                        Text(
-                                            stringResource(
-                                                R.string.expert_overview_default,
-                                                targetTitle(runtime.saved.device.defaultTarget, bundle, runtime.saved)
-                                            ),
-                                            style = MaterialTheme.typography.bodyMedium
-                                        )
-                                        ExpertHint(R.string.expert_direct_hint)
-                                    }
-                                }
-                                item {
-                                    OutlinedButton(
-                                        { section = ExpertSection.SCHEMA }, Modifier.fillMaxWidth(),
-                                    ) {
-                                        Icon(LerNetSymbols.route(), contentDescription = null)
-                                        Text(stringResource(R.string.expert_section_schema))
-                                    }
-                                }
-                                state.inventoryNotes.forEach { note ->
-                                    item {
-                                        Text(note, style = MaterialTheme.typography.bodySmall)
-                                    }
-                                }
-                            }
+                            ExpertSection.OVERVIEW -> Unit
                             ExpertSection.SCHEMA -> Unit
-                            ExpertSection.EXITS -> item { ExpertExits(runtime, bundle, onIntent, onSaveExternal) }
-                            ExpertSection.SIMULATION -> item { ExpertSimulation(runtime, bundle) }
+                            ExpertSection.EXITS -> item { ExpertExits(runtime, bundle, onIntent, onSaveExternal, onSaveDraft, formMemory) }
+                            ExpertSection.SIMULATION -> item { ExpertSimulation(runtime, bundle, simulationConnection, historicalPath, simulationRequest, formMemory) }
                             ExpertSection.SAFETY -> item {
+                                OutlinedButton(
+                                    { dnsEditor = runtime.draft.dns }, Modifier.fillMaxWidth(),
+                                    enabled = onSaveDns != null,
+                                ) { Text(stringResource(R.string.expert_dns_title)) }
+
+                                OutlinedButton(
+                                    { healthEditor = runtime.draft.health }, Modifier.fillMaxWidth(),
+                                    enabled =
+                                    onSaveHealth != null
+                                ) {
+                                    Text(stringResource(R.string.expert_health_title))
+                                }
                                 PanelCard {
                                     Text(
                                         stringResource(R.string.expert_safety_title),
@@ -388,7 +464,6 @@ internal fun ExpertScreen(
                                     }
                                 }
                             }
-                            ExpertSection.ACTIVITY -> item { ExpertActivity(runtime, bundle) }
                             ExpertSection.JOURNAL -> {
                                 if (runtime.reasons.isEmpty()) {
                                     item {
@@ -409,12 +484,16 @@ internal fun ExpertScreen(
             }
             Column(Modifier.padding(padding)) {
                 if (reduced) {
-                    content(section)
+                    sectionStates.SaveableStateProvider(section) { content(section) }
                 } else {
                     AnimatedContent(section, label = "expert-section") {
-                        content(it)
+                        sectionStates.SaveableStateProvider(it) { content(it) }
                     }
                 }
+            }
+            if (dnsEditor != null && onSaveDns != null) {
+                val initialDns = requireNotNull(dnsEditor)
+                ExpertDnsEditor(initialDns, onDismiss = { dnsEditor = null }, onCommit = { onSaveDns(initialDns, it) })
             }
             if (healthEditor != null && onSaveHealth != null) {
                 val initialHealth = requireNotNull(healthEditor)
@@ -429,30 +508,151 @@ internal fun ExpertScreen(
 }
 
 @Composable
-private fun ExpertStatus(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, onStart: () -> Unit) {
+private fun ExpertStatus(
+    state: ExpertUiState,
+    onIntent: (ExpertIntent) -> Unit,
+    onStart: () -> Unit,
+    rate: FlowTrafficRate? = null,
+    reducedMotion: Boolean = false,
+) {
     val runtime = requireNotNull(state.runtime)
+    val health = runtime.tunnelHealth
+    val statusText = runtime.networkReason ?: when {
+        health == ExpertTunnelHealth.ERROR -> {
+            val failedExit = runtime.exits.firstOrNull {
+                it.phase == app.lernet.engine.policy.ExitPhase.FAILED || it.phase == app.lernet.engine.policy.ExitPhase.DEGRADED
+            }
+            if (runtime.phase == ExpertSessionPhase.FAILED) {
+                runtime.errors.firstOrNull() ?: stringResource(R.string.expert_lamp_error)
+            } else {
+                failedExit?.reason ?: failedExit?.let { stringResource(it.phase.titleResource()) }
+                    ?: stringResource(R.string.expert_lamp_error)
+            }
+        }
+        health == ExpertTunnelHealth.PENDING && runtime.phase == ExpertSessionPhase.RUNNING ->
+            stringResource(R.string.expert_lamp_pending)
+        else -> stringResource(runtime.phase.titleResource())
+    }
+    var details by rememberSaveable { mutableStateOf(false) }
     PanelCard {
-        Text(stringResource(runtime.phase.titleResource()), style = MaterialTheme.typography.titleLarge)
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            val summary: @Composable () -> Unit = {
+                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(stringResource(R.string.expert_tunnel_title), textAlign = TextAlign.Center, style = MaterialTheme.typography.headlineSmall)
+                Text(statusText, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium,
+                    color = when (runtime.tunnelHealth) {
+                        ExpertTunnelHealth.ERROR -> MaterialTheme.colorScheme.error
+                        ExpertTunnelHealth.PENDING -> MaterialTheme.colorScheme.tertiary
+                        ExpertTunnelHealth.HEALTHY -> MaterialTheme.colorScheme.secondary
+                        ExpertTunnelHealth.OFF -> MaterialTheme.colorScheme.onSurfaceVariant
+                    })
+                state.inventory?.let { inventory ->
+                    val policy = runtime.appliedPolicy ?: runtime.saved
+                    Text(
+                        stringResource(R.string.expert_default_path_summary, targetTitle(policy.device.defaultTarget, inventory, policy)),
+                        style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center
+                    )
+                }
+                }
+            }
+            val lever: @Composable () -> Unit = {
+            NetworkLever(
+                checked = runtime.desiredEnabled,
+                enabled = !runtime.applying &&
+                    runtime.phase !in setOf(ExpertSessionPhase.STARTING, ExpertSessionPhase.STOPPING),
+                onCheckedChange = { if (it) onStart() else onIntent(ExpertIntent.Stop) },
+                accessibleName = stringResource(R.string.expert_tunnel_title),
+                lamp = when (runtime.tunnelHealth) {
+                    ExpertTunnelHealth.OFF -> NetworkLeverLamp.OFF
+                    ExpertTunnelHealth.PENDING -> NetworkLeverLamp.PENDING
+                    ExpertTunnelHealth.HEALTHY -> NetworkLeverLamp.HEALTHY
+                    ExpertTunnelHealth.ERROR -> NetworkLeverLamp.ERROR
+                },
+                lampDescription = stringResource(
+                    when (runtime.tunnelHealth) {
+                        ExpertTunnelHealth.OFF -> R.string.expert_lamp_off
+                        ExpertTunnelHealth.PENDING -> R.string.expert_lamp_pending
+                        ExpertTunnelHealth.HEALTHY -> R.string.expert_lamp_healthy
+                        ExpertTunnelHealth.ERROR -> R.string.expert_lamp_error
+                    }
+                ),
+                stateLabel = stringResource(
+                    if (runtime.tunnelHealth == ExpertTunnelHealth.ERROR) {
+                        R.string.expert_lever_error
+                    } else if (runtime.applying) {
+                        R.string.expert_lever_apply
+                    } else {
+                        when (runtime.phase) {
+                            ExpertSessionPhase.RUNNING -> R.string.expert_lever_on
+                            ExpertSessionPhase.STOPPED -> R.string.expert_lever_off
+                            ExpertSessionPhase.STARTING -> R.string.expert_lever_start
+                            ExpertSessionPhase.STOPPING -> R.string.expert_lever_stop
+                            ExpertSessionPhase.FAILED -> R.string.expert_lever_error
+                        }
+                    }
+                ),
+                reducedMotion = reducedMotion,
+            )
+            }
+            lever()
+            summary()
+        }
         Text(
-            stringResource(
-                R.string.expert_revision, runtime.saved.revision,
-                runtime.appliedRevision?.toString() ?: stringResource(R.string.expert_no_revision)
-            ),
+            stringResource(R.string.expert_flow_active_count, runtime.connections.count { it.active == true }),
             style = MaterialTheme.typography.bodySmall
         )
+        Text(
+            if (rate == null) {
+                stringResource(R.string.expert_flow_rate_unknown)
+            } else {
+                stringResource(R.string.expert_flow_rate, rate.upload, rate.download)
+            },
+            style = MaterialTheme.typography.bodySmall
+        )
+        Text(
+            stringResource(when {
+                runtime.hasDraftChanges || (runtime.appliedRevision != null && runtime.appliedRevision != runtime.saved.revision) -> R.string.expert_schema_pending
+                runtime.appliedRevision != null -> R.string.expert_schema_applied
+                else -> R.string.expert_schema_saved
+            }),
+            style = MaterialTheme.typography.bodySmall
+        )
+        TextButton({ details = !details }, Modifier.fillMaxWidth()) {
+            Text(stringResource(if (details) R.string.expert_hide_tunnel_details else R.string.expert_tunnel_details))
+        }
+        androidx.compose.animation.AnimatedVisibility(details) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                runtime.directNetwork?.takeIf { runtime.phase == ExpertSessionPhase.RUNNING }?.let { facts ->
+                    fun familyResource(value: DirectFamilyAvailability): Int = when (value) {
+                        DirectFamilyAvailability.AVAILABLE -> R.string.expert_family_available
+                        DirectFamilyAvailability.LIMITED -> R.string.expert_family_limited
+                        DirectFamilyAvailability.UNAVAILABLE -> R.string.expert_family_unavailable
+                        DirectFamilyAvailability.UNKNOWN -> R.string.expert_family_unknown
+                    }
+                    Text(
+                        stringResource(
+                            R.string.expert_direct_families, facts.interfaceName ?: stringResource(R.string.expert_family_unknown),
+                            stringResource(familyResource(facts.ipv4)), stringResource(familyResource(facts.ipv6)),
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    if (facts.ipv6 == DirectFamilyAvailability.UNAVAILABLE) {
+                        Text(stringResource(R.string.expert_direct_no_ipv6), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
         runtime.errors.forEach { Text(it, color = MaterialTheme.colorScheme.error) }
         state.restoreWarning?.let {
             Text(it, color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.bodySmall)
         }
         ExpertInactiveProtections(state)
-        val active = runtime.phase != ExpertSessionPhase.STOPPED
-        Button(
-            onClick = { if (active) onIntent(ExpertIntent.Stop) else onStart() },
-            enabled = runtime.phase != ExpertSessionPhase.STOPPING, modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(stringResource(if (active) R.string.expert_stop else R.string.expert_start))
+        if (runtime.phase == ExpertSessionPhase.STARTING) {
+            OutlinedButton({ onIntent(ExpertIntent.Stop) }, Modifier.fillMaxWidth()) { Text(stringResource(R.string.expert_cancel_start)) }
         }
-        ExpertDraftActions(runtime, onIntent)
+        if (runtime.phase == ExpertSessionPhase.FAILED) {
+            Button({ onIntent(ExpertIntent.Stop) }, Modifier.fillMaxWidth()) { Text(stringResource(R.string.expert_stop)) }
+        }
     }
 }
 

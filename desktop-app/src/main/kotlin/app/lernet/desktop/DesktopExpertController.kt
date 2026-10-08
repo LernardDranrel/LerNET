@@ -36,10 +36,11 @@ import app.lernet.engine.policy.ExpertRuntimeController
 import app.lernet.engine.policy.ExpertRuntimeState
 import app.lernet.engine.policy.ExpertSessionPhase
 import app.lernet.engine.policy.PolicyConfigAssembler
+import app.lernet.engine.policy.tunnelHealth
 import app.lernet.routing.GeoRuleSets
 import app.lernet.routing.RoutePlatform
 import app.lernet.routing.policy.NetworkPolicy
-import java.net.NetworkInterface
+import app.lernet.routing.policy.PolicyTarget
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -48,6 +49,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -69,6 +71,7 @@ import kotlinx.serialization.json.put
 internal class DesktopExpertController(private val simple: DesktopController) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
+    private val startGate = DesktopExpertStartGate(mutex)
     private val root = simple.workspaceDirectory()
     private val repository = PolicyWorkspaceRepository(PolicyWorkspaceStore(root.resolve("network-workspace.json")))
     private val mutable = MutableStateFlow(ExpertUiState(NetworkPolicy(), administrator = WindowsElevation.isElevated))
@@ -141,35 +144,6 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
         scope.launch {
             simple.state.map { it.saved }.distinctUntilChanged().collect {
                 mutex.withLock { refreshInventory() }
-            }
-        }
-        scope.launch {
-            var previous: Set<String>? = null
-            while (!closed.get()) {
-                val current = runCatching {
-                    val ownedIndex = backend.identity?.interfaceId?.split(':')?.getOrNull(1)?.toIntOrNull()
-                    NetworkInterface.getNetworkInterfaces().toList().filter {
-                        it.isUp &&
-                            !it.isLoopback &&
-                            it.index != ownedIndex &&
-                            !it.name.contains("lernet", true) &&
-                            !it.displayName.contains("lernet", true)
-                    }
-                        .flatMap { adapter ->
-                            adapter.inetAddresses.toList().map { "${adapter.index}:${it.hostAddress}" }
-                        }.toSet()
-                }.getOrNull()
-                if (current != null &&
-                    previous != null &&
-                    current != previous &&
-                    runtime?.state?.value?.phase == ExpertSessionPhase.RUNNING
-                ) {
-                    runtime?.handle(RuntimeIntent.NetworkChanged)
-                    runCatching { backend.networkChanged() }
-                        .onFailure { showFailure("Не удалось уведомить ядро о смене сети", it) }
-                }
-                previous = current
-                delay(3_000)
             }
         }
         refreshApplications()
@@ -270,7 +244,19 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
         }
     }
 
-    fun dispatch(intent: UiIntent) {
+    fun startKeepingVpn(profileId: String, expected: NetworkPolicy) = dispatch(UiIntent.Start, profileId to expected)
+
+    fun dispatch(intent: UiIntent) = dispatch(intent, null)
+
+    private fun dispatch(intent: UiIntent, handover: Pair<String, NetworkPolicy>?) {
+        val startTicket = when (intent) {
+            UiIntent.Start -> startGate.requestStart()
+            UiIntent.Stop -> {
+                startGate.requestStop()
+                null
+            }
+            else -> null
+        }
         externalError = null
         if (intent is UiIntent.SaveExternalExit) {
             mutable.update {
@@ -285,6 +271,9 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                 when (intent) {
                     is UiIntent.SelectScope -> mutable.update { it.copy(selectedScope = intent.scope) }
                     is UiIntent.EditPolicy -> mutex.withLock { controller.handle(RuntimeIntent.Edit(intent.policy)) }
+                    is UiIntent.UpdateLayout -> mutex.withLock {
+                        controller.handle(RuntimeIntent.UpdateLayout(intent.scope, intent.points, intent.clear))
+                    }
                     UiIntent.SaveDraft -> mutex.withLock { controller.handle(RuntimeIntent.SaveDraft) }
                     UiIntent.DiscardDraft -> mutex.withLock { controller.handle(RuntimeIntent.DiscardDraft) }
                     UiIntent.RestoreAppliedToDraft -> mutex.withLock { controller.handle(RuntimeIntent.RestoreAppliedToDraft) }
@@ -294,7 +283,18 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                             automaticInventoryAllowed = true
                         }
                     }
-                    UiIntent.Start -> mutex.withLock {
+                    UiIntent.Start -> startGate.runIfCurrent(requireNotNull(startTicket)) {
+                        if (handover != null) {
+                            check(simple.connectedVpnProfileId() == handover.first) {
+                                "VPN-подключение изменилось. Повторите переключение режимов."
+                            }
+                            val target = PolicyTarget.Profile(
+                                handover.first,
+                                routeScope = PolicyMigration.effectiveScope(repository.snapshot().legacy, handover.first)
+                            )
+                            if (!controller.prepareVpnHandover(handover.second, target)) return@runIfCurrent
+                        }
+                        if (!startGate.isCurrent(requireNotNull(startTicket))) return@runIfCurrent
                         controller.handle(RuntimeIntent.Start)
                         if (controller.state.value.appliedRevision == controller.state.value.saved.revision) {
                             automaticInventoryAllowed = true
@@ -311,6 +311,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                         refreshProtection()
                     }
                     UiIntent.RefreshInterfaces -> refreshInterfaces()
+                    UiIntent.ClearConnectionHistory -> controller.handle(RuntimeIntent.ClearConnectionHistory)
                     is UiIntent.SaveExternalExit -> saveExternalExit(intent)
                     is UiIntent.WakeExit -> exitKey(intent.id)?.let { controller.handle(RuntimeIntent.WakeExit(it)) }
                     is UiIntent.SleepExit -> exitKey(intent.id)?.let { controller.handle(RuntimeIntent.SleepExit(it)) }
@@ -643,6 +644,9 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                 tunnelIdentity = snapshot.tun?.let { "${it.instanceId} · ${it.interfaceId}" },
                 capabilities = snapshot.capabilities,
                 phase = if (snapshot.applying) ExpertPhase.APPLYING else ExpertPhase.valueOf(snapshot.phase.name),
+                desiredEnabled = snapshot.desiredEnabled,
+                networkReason = snapshot.networkReason,
+                tunnelHealth = snapshot.tunnelHealth,
                 busy = snapshot.applying,
                 error = externalError ?: projectedRuntimeError(snapshot),
                 inactiveReasons = paths.associateWith { id ->
@@ -686,7 +690,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                 },
                 connections = snapshot.connections.map { flow ->
                     ExpertConnection(
-                        flow.id,
+                        "${flow.identity?.instanceId.orEmpty()}:${flow.id}",
                         flow.application?.takeIf { it.isNotBlank() }?.let { path ->
                             WindowsProcessIdentity.resolveObservation(path)?.label ?: path
                         }
@@ -700,9 +704,23 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                         },
                         flow.nodeIds, flow.exit?.let(::exitId), flow.uploadedBytes, flow.downloadedBytes, flow.active,
                         flow.policyRevision == policy?.revision && flow.nodeIds.any { it in protected },
-                        policyRevision = flow.policyRevision
+                        policyRevision = flow.policyRevision,
+                        startedAtMs = flow.startedAtMs,
+                        domain = flow.domain, destinationIp = flow.destinationIp, destinationPort = flow.destinationPort,
+                        sourceIp = flow.sourceIp, sourcePort = flow.sourcePort, processName = flow.processName,
+                        processPath = flow.application,
+                        network = flow.network, sniffedProtocol = flow.sniffedProtocol, geoCountry = flow.geoCountry,
+                        observedAtMs = flow.observedAtMs, closedAtMs = flow.closedAtMs,
+                        errorReason = flow.errorReason, state = flow.state, lastUpdateAtMs = flow.lastUpdateAtMs,
+                        errorStage = flow.errorStage,
+                        closeReason = flow.closeReason,
+                        inspection = flow.inspection,
                     )
                 },
+                connectionHistoryLimit = snapshot.connectionHistoryLimit,
+                connectionHistoryTruncated = snapshot.connectionHistoryTruncated,
+                connectionDroppedCount = snapshot.connectionDroppedCount.toLong(),
+                directNetwork = snapshot.directNetwork,
                 events = snapshot.reasons.map { event ->
                     ExpertEvent(
                         event.sequence.toString(), timeFormat.format(Instant.ofEpochMilli(epochOffsetMs + event.atMs)),
@@ -760,9 +778,36 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
-        runBlocking(Dispatchers.IO) { backend.stop(null) }
-        scope.cancel()
+        startGate.requestStop()
+        cancelExpertScopeAfterShutdown(scope) {
+            runBlocking(Dispatchers.IO) { backend.stop(null) }
+        }
         // Explicit OS recovery is separate: closing a window must not silently remove leak protection.
+    }
+}
+
+internal inline fun cancelExpertScopeAfterShutdown(scope: CoroutineScope, shutdown: () -> Unit) {
+    try {
+        shutdown()
+    } finally {
+        scope.cancel()
+    }
+}
+
+/** Stop invalidates Start requests waiting behind a previous operation, before its coroutine is scheduled. */
+internal class DesktopExpertStartGate(private val mutex: Mutex) {
+    private val desiredEpoch = AtomicLong()
+
+    fun requestStart(): Long = desiredEpoch.incrementAndGet()
+
+    fun requestStop() {
+        desiredEpoch.incrementAndGet()
+    }
+
+    fun isCurrent(ticket: Long): Boolean = ticket == desiredEpoch.get()
+
+    suspend fun runIfCurrent(ticket: Long, action: suspend () -> Unit) = mutex.withLock {
+        if (isCurrent(ticket)) action()
     }
 }
 

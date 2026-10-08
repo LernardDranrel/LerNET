@@ -207,6 +207,30 @@ class WindowsSimpleRestorationTest {
         }
     }
 
+    @Test
+    fun repeatedCoreExitsKeepRetryingUntilManualStop() = runBlocking {
+        val launches = AtomicInteger()
+        val recovered = FakeProcess()
+        val tunnel = WindowsBoxProcess(
+            Files.createTempDirectory("lernet-offline-retry"), { _, _ ->
+                if (launches.incrementAndGet() <= 5) FakeProcess().also { it.exit() } else recovered
+            }, { _, args -> if (args.first() == "version") WindowsBoxProcess.PINNED_CORE_VERSION else "" },
+            0, retryDelayMs = { 0 },
+        )
+        try {
+            tunnel.start(launch)
+            withTimeout(10_000) { tunnel.state.first { it.status == TunnelStatus.RUNNING && it.reconnectAttempt >= 5 } }
+            assertThat(launches.get()).isEqualTo(6)
+            assertThat(tunnel.captureRunningLaunch()).isSameInstanceAs(launch)
+            assertThat(tunnel.stop(waitForExit = true)).isTrue()
+            assertThat(tunnel.state.value.status).isEqualTo(TunnelStatus.STOPPED)
+            assertThat(launches.get()).isEqualTo(6)
+        } finally {
+            recovered.exit()
+            tunnel.stop(waitForExit = true)
+        }
+    }
+
     private fun fakeTunnel(fake: FakeProcess) = WindowsBoxProcess(
         Files.createTempDirectory("lernet-fake-restore"),
         { _, _ -> fake }, { _, args -> if (args.first() == "version") WindowsBoxProcess.PINNED_CORE_VERSION else "" }, 0

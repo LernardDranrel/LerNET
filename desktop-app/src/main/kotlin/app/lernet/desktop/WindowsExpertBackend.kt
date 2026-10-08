@@ -12,6 +12,7 @@ import app.lernet.engine.policy.ExpertProbeResult
 import app.lernet.engine.policy.ExpertRuntimeBackend
 import app.lernet.engine.policy.ExpertStateUncertainException
 import app.lernet.engine.policy.ExpertTunnelAck
+import app.lernet.engine.policy.FlowInspection
 import app.lernet.engine.policy.PolicyAssembledConfig
 import app.lernet.engine.policy.PolicyControlCapabilities
 import app.lernet.engine.policy.TunIdentity
@@ -107,6 +108,7 @@ internal class WindowsExpertBackend(
         private set
     private var polling: Job? = null
     private var reserved = false
+    private var revocationPending = false
     override val capabilities get() = negotiated
     override val events = mutableEvents.asSharedFlow()
     val assembled: PolicyAssembledConfig? get() = applied?.config
@@ -172,6 +174,7 @@ internal class WindowsExpertBackend(
                 applied = Applied(ack, config, owner)
                 tagBindings = config.exitTags.entries.associate { it.value to it.key }
             }
+            config.notes.forEach { log("Схема применена: $it") }
             startPolling(owner)
             ExpertTunnelAck(ack.identity(), ack.revision)
         } catch (failure: Exception) {
@@ -225,6 +228,7 @@ internal class WindowsExpertBackend(
             applied = Applied(ack, config, before.owner)
             tagBindings = tagBindings + config.exitTags.entries.associate { it.value to it.key }
         }
+        config.notes.forEach { log("Схема применена: $it") }
         ExpertTunnelAck(expected, ack.revision)
     }
 
@@ -260,10 +264,10 @@ internal class WindowsExpertBackend(
         val before = applied ?: return@withContext
         val underlay = physicalNetwork()
         before.owner.client.request("network_changed", identityPayload(before.ack) { put("underlay_interface", underlay) }, 4_000)
+        // The native watcher retains ingress and reports transient route failures.
+        // A failed verification must not release the TUN behind the user's back.
         verifyRoutes(before.ack)?.let { conflict ->
-            shutdownOwnedProcess(before.owner)
-            mutableEvents.emit(ExpertBackendEvent.TunnelLost(before.ack.identity(), conflict))
-            throw ExpertStateUncertainException(conflict)
+            mutableEvents.emit(ExpertBackendEvent.NetworkStatus(before.ack.identity(), before.ack.revision, conflict))
         }
         Unit
     }
@@ -289,6 +293,9 @@ internal class WindowsExpertBackend(
 
     private fun ensureControl(ticket: Long): OwnedControl = synchronized(lifecycleLock) {
         check(ticket == epoch.get()) { "Запуск управления отменён" }
+        if (revocationPending) {
+            throw ExpertStateUncertainException("Windows не подтвердила отзыв разрешения TUN; повторите «Остановить»")
+        }
         val existing = process
         client?.takeIf { existing?.isAlive == true }?.let {
             return@synchronized OwnedControl(requireNotNull(existing), it, ticket)
@@ -380,7 +387,7 @@ internal class WindowsExpertBackend(
                     failed = 0
                 } catch (failure: Exception) {
                     if (epoch.get() != owner.epoch) break
-                    if (++failed >= 3 || !owner.process.isAlive) {
+                    if (!owner.process.isAlive) {
                         mutableEvents.emit(
                             ExpertBackendEvent.TunnelLost(
                                 snapshot.ack.identity(),
@@ -388,6 +395,12 @@ internal class WindowsExpertBackend(
                             )
                         )
                         break
+                    }
+                    if (++failed >= 3) {
+                        mutableEvents.emit(ExpertBackendEvent.NetworkStatus(
+                            snapshot.ack.identity(), snapshot.ack.revision,
+                            "Нет ответа от ядра. TUN не отключаем; повторяем проверку.",
+                        ))
                     }
                 }
                 delay(1_000)
@@ -405,6 +418,12 @@ internal class WindowsExpertBackend(
             mutableEvents.emit(ExpertBackendEvent.TunnelLost(actual.identity(), reason))
             return false
         }
+        mutableEvents.emit(
+            ExpertBackendEvent.NetworkStatus(
+                actual.identity(), actual.revision,
+                body.nativeString("network_reason", 256)?.takeIf { it.isNotBlank() }?.let(::nativeReason),
+            )
+        )
         mutableEvents.emit(
             ExpertBackendEvent.RetiredCleanupSnapshot(
                 ExpertNativeStatusEvidence.retiredCleanupFailures(body), actual.identity(), actual.revision,
@@ -446,9 +465,22 @@ internal class WindowsExpertBackend(
             tag to selected
         }.toMap()
         mutableEvents.emit(ExpertBackendEvent.FolderSelectionsSnapshot(folders, actual.identity(), revision = actual.revision))
+        val flowRows = (body["flows"] as? JsonArray).orEmpty()
+        val observedAtMs = System.currentTimeMillis()
+        app.lernet.engine.policy.directNetworkFacts(body, observedAtMs)?.let {
+            mutableEvents.emit(ExpertBackendEvent.DirectNetworkSnapshot(it, actual.identity(), actual.revision))
+        }
+        mutableEvents.emit(
+            ExpertBackendEvent.ObservationHistory(
+                droppedCount = body.nativeLong("flow_dropped_count") ?: 0,
+                limit = body.nativeInt("flow_history_limit") ?: 500,
+                identity = actual.identity(),
+                visibleFlowIds = flowRows.mapNotNull { (it as? JsonObject)?.let(ExpertNativeStatusEvidence::flowId) }.toSet(),
+            ),
+        )
         (body["flows"] as? JsonArray).orEmpty().forEach { entry ->
             val flow = entry as? JsonObject ?: return@forEach
-            val id = flow.nativeString("id") ?: return@forEach
+            val id = ExpertNativeStatusEvidence.flowId(flow) ?: return@forEach
             val destination = flow.nativeString("destination", 4096) ?: return@forEach
             val tag = flow.nativeString("selected_outbound") ?: flow.nativeString("outbound")
             val key = tag?.let(byTag::get)
@@ -474,6 +506,23 @@ internal class WindowsExpertBackend(
                         active = flow.nativeBoolean("closed")?.not(),
                         startedAtMs = flow.nativeLong("started_ms"),
                         policyRevision = flow.nativeLong("revision"),
+                        sourceIp = flow.nativeString("source_ip", 128),
+                        sourcePort = flow.nativeInt("source_port")?.takeIf { it in 1..65535 },
+                        destinationIp = flow.nativeString("destination_ip", 128),
+                        destinationPort = flow.nativeInt("destination_port")?.takeIf { it in 1..65535 },
+                        domain = flow.nativeString("domain", 4096),
+                        processName = flow.nativeString("process_name", 4096),
+                        network = flow.nativeString("network", 64),
+                        sniffedProtocol = flow.nativeString("protocol", 64),
+                        inspection = FlowInspection.fromNative(flow),
+                        geoCountry = flow.nativeString("geo_country", 2),
+                        observedAtMs = observedAtMs,
+                        lastUpdateAtMs = flow.nativeLong("updated_ms")?.takeIf { it > 0 },
+                        closedAtMs = flow.nativeLong("closed_ms")?.takeIf { it > 0 },
+                        state = flow.nativeString("state", 64),
+                        errorReason = flow.nativeString("error_reason", 64),
+                        errorStage = flow.nativeString("error_stage", 64),
+                        closeReason = flow.nativeString("close_reason", 64),
                     ),
                     actual.identity()
                 )
@@ -517,7 +566,10 @@ internal class WindowsExpertBackend(
             polling?.cancel()
             val owned = process
             // A failed revocation never prevents terminating our core, but must not restore an unprotected mode.
-            val revocationFailure = if (owned != null) runCatching(beforeStop).exceptionOrNull() else null
+            val revocationFailure = if (owned != null || revocationPending) runCatching(beforeStop).exceptionOrNull() else null
+            // Core exit is not proof of guardian revocation. Preserve a failed operation
+            // independently of the process reference so an explicit Stop can retry it.
+            revocationPending = revocationFailure != null
             owned?.destroy()
             if (owned != null && !owned.waitFor(5, TimeUnit.SECONDS)) {
                 owned.destroyForcibly()

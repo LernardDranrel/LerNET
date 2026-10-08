@@ -22,7 +22,10 @@ import app.lernet.engine.policy.ExpertRuntimeState
 import app.lernet.engine.policy.ExpertSessionPhase
 import app.lernet.engine.redact.LerNetLog
 import app.lernet.routing.RoutePlatform
+import app.lernet.routing.policy.NetworkPolicy
+import app.lernet.routing.policy.PolicyDnsSettings
 import app.lernet.routing.policy.PolicyHealthSettings
+import app.lernet.routing.policy.PolicyTarget
 import app.lernet.vpn.DefaultNetworkMonitor
 import app.lernet.vpn.expert.AndroidExpertEnvironment
 import app.lernet.vpn.expert.AndroidExpertEnvironmentState
@@ -96,7 +99,13 @@ class ExpertCoordinator @Inject constructor(
             }
         }
         scope.launch {
-            DefaultNetworkMonitor.changes.drop(1).collect { runtime?.handle(ExpertIntent.NetworkChanged) }
+            DefaultNetworkMonitor.changes.drop(1).collect {
+                runtime?.state?.value?.let { snapshot ->
+                    app.lernet.vpn.expert.ExpertNotificationFeed.status.value =
+                        app.lernet.vpn.expert.expertNotificationStatus(snapshot, DefaultNetworkMonitor.underlyingNetwork() != null)
+                }
+                runtime?.handle(ExpertIntent.NetworkChanged)
+            }
         }
         scope.launch {
             backend.restoreWarning.collect { warning -> mutableState.update { it.copy(restoreWarning = warning) } }
@@ -148,6 +157,19 @@ class ExpertCoordinator @Inject constructor(
                             before.environment
                         }
                         mutableState.update { it.copy(runtime = snapshot, environment = inspected) }
+                        app.lernet.vpn.expert.ExpertNotificationFeed.status.value =
+                            app.lernet.vpn.expert.expertNotificationStatus(snapshot, DefaultNetworkMonitor.underlyingNetwork() != null)
+                        if (snapshot.phase == ExpertSessionPhase.RUNNING && before.runtime?.phase != ExpertSessionPhase.RUNNING) {
+                            // Commit handover only after ACK; a failed Expert start can still restore Simple.
+                            withContext(Dispatchers.IO) {
+                                runCatching { app.lernet.vpn.SimpleServiceRestorer.clearForExpert() }
+                                    .onFailure { error ->
+                                        if (error is CancellationException) throw error
+                                        LerNetLog.e("LerNET.Restore", "Simple handover journal write failed (${error.javaClass.simpleName})")
+                                        mutableState.update { it.copy(storageError = context.getString(R.string.expert_storage_error)) }
+                                    }
+                            }
+                        }
                         if (reconcilePending &&
                             !snapshot.applying &&
                             snapshot.phase !in setOf(ExpertSessionPhase.STARTING, ExpertSessionPhase.STOPPING)
@@ -204,9 +226,18 @@ class ExpertCoordinator @Inject constructor(
         }
     }
 
+    fun connectedVpnProfileId(): String? = backend.connectedSimpleVpnProfileId()
+
+    fun startKeepingVpn(profileId: String, expected: NetworkPolicy) =
+        dispatch(ExpertIntent.Start, automaticStart = false, handover = profileId to expected)
+
     fun dispatch(intent: ExpertIntent) = dispatch(intent, automaticStart = false)
 
-    private fun dispatch(intent: ExpertIntent, automaticStart: Boolean) {
+    private fun dispatch(
+        intent: ExpertIntent,
+        automaticStart: Boolean,
+        handover: Pair<String, NetworkPolicy>? = null
+    ) {
         if (intent == ExpertIntent.Start || intent == ExpertIntent.Stop) backend.noteModeIntent()
         val epoch = if (intent == ExpertIntent.Start || intent == ExpertIntent.Stop) desiredEpoch.incrementAndGet() else desiredEpoch.get()
         if (intent == ExpertIntent.Stop) {
@@ -220,6 +251,15 @@ class ExpertCoordinator @Inject constructor(
                     return@launch
                 }
                 mutex.withLock {
+                    if (intent == ExpertIntent.Start && epoch != desiredEpoch.get()) return@launch
+                    if (intent == ExpertIntent.Start && handover != null) {
+                        check(backend.connectedSimpleVpnProfileId() == handover.first) { "Simple VPN changed before handover" }
+                        val target = PolicyTarget.Profile(
+                            handover.first,
+                            routeScope = PolicyMigration.effectiveScope(workspace.snapshot().legacy, handover.first)
+                        )
+                        if (runtime?.prepareVpnHandover(handover.second, target) != true) return@launch
+                    }
                     if (intent == ExpertIntent.Start && epoch != desiredEpoch.get()) return@launch
                     if (intent == ExpertIntent.Start) {
                         require(desired.edit().putBoolean("desired", true).commit()) { "Session intent write failed" }
@@ -248,12 +288,40 @@ class ExpertCoordinator @Inject constructor(
                 throw error
             } catch (error: Exception) {
                 LerNetLog.e("LerNET.Expert", "workspace action failed", error)
-                mutableMessages.emit(context.getString(R.string.expert_storage_error))
+                mutableMessages.emit(context.getString(if (intent is ExpertIntent.EditChecked && error is IllegalArgumentException) {
+                    R.string.expert_edit_conflict
+                } else R.string.expert_storage_error))
             }
         }
     }
 
     fun noteSimpleModeIntent() = backend.noteModeIntent()
+
+    suspend fun saveDraft(expected: NetworkPolicy, next: NetworkPolicy): String? = withContext(Dispatchers.IO) {
+        try {
+            awaitInitialized()
+            mutex.withLock {
+                val controller = requireNotNull(runtime)
+                val current = controller.state.value
+                if (current.applying || current.phase in setOf(ExpertSessionPhase.STARTING, ExpertSessionPhase.STOPPING)) {
+                    return@withLock context.getString(R.string.expert_external_busy)
+                }
+                controller.handle(ExpertIntent.EditChecked(expected, next))
+                val durable = workspace.snapshot()
+                backend.updateWorkspace(durable)
+                if (controller.state.value.draftPersistenceError != null || durable.draft != controller.state.value.draft) {
+                    context.getString(R.string.expert_storage_error)
+                } else null
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: IllegalArgumentException) {
+            context.getString(R.string.expert_edit_conflict)
+        } catch (error: Exception) {
+            LerNetLog.e("LerNET.Expert", "draft save failed (${error.javaClass.simpleName})")
+            context.getString(R.string.expert_storage_error)
+        }
+    }
 
     suspend fun saveHealthSettings(
         expected: PolicyHealthSettings,
@@ -284,6 +352,38 @@ class ExpertCoordinator @Inject constructor(
         } catch (error: Exception) {
             LerNetLog.e("LerNET.Expert", "health settings save failed (${error.javaClass.simpleName})")
             context.getString(R.string.expert_health_save_error)
+        }
+    }
+
+    suspend fun saveDnsSettings(
+        expected: PolicyDnsSettings,
+        next: PolicyDnsSettings,
+    ): String? = withContext(Dispatchers.IO) {
+        try {
+            awaitInitialized()
+            mutex.withLock {
+                val controller = requireNotNull(runtime)
+                val current = controller.state.value
+                if (current.applying || current.phase in setOf(ExpertSessionPhase.STARTING, ExpertSessionPhase.STOPPING)) {
+                    return@withLock context.getString(R.string.expert_external_busy)
+                }
+                if (!next.isValid() || (current.draft.dns != expected && current.draft.dns != next)) {
+                    return@withLock context.getString(R.string.expert_dns_save_error)
+                }
+                controller.handle(ExpertIntent.Edit(current.draft.copy(dns = next)))
+                val durable = workspace.snapshot()
+                backend.updateWorkspace(durable)
+                if (durable.draft.dns == next && controller.state.value.errors.isEmpty()) {
+                    null
+                } else {
+                    context.getString(R.string.expert_dns_save_error)
+                }
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            LerNetLog.e("LerNET.Expert", "DNS settings save failed (${error.javaClass.simpleName})")
+            context.getString(R.string.expert_dns_save_error)
         }
     }
 

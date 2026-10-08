@@ -95,39 +95,37 @@ func (s *Session) startPlatformNetworkWatch() {
 			case <-s.ctx.Done():
 				return
 			case <-ticker.C:
+				// Failed reads/refreshes pause egress; they never destroy ingress.
 				if s.checkPlatformIngress(false) != nil {
-					return
+					continue
 				}
 				name, fingerprint, err := physicalNetworkSnapshot(s.ctx)
 				if err != nil {
-					// A second fenced read either proves capture or closes it.
-					if s.checkPlatformIngress(true) != nil {
-						return
-					}
-					continue
-				}
-				if fingerprint == previous {
-					if s.checkPlatformIngress(true) != nil {
-						return
-					}
+					s.mu.Lock()
+					s.setNetworkReasonLocked("expert_route_snapshot_failed")
+					s.mu.Unlock()
 					continue
 				}
 				if name == "" {
-					if s.checkPlatformIngress(true) != nil {
-						return
+					s.mu.Lock()
+					s.setNetworkReasonLocked("expert_underlay_unavailable")
+					if fingerprint != previous {
+						s.mux.ResetNetwork()
 					}
-					s.underlay.Store(nil)
-					s.NetworkChanged()
+					s.mu.Unlock()
 					previous = fingerprint
 					continue
 				}
 				s.stateMu.Lock()
-				ack := s.ack
-				running := s.running
+				ack, running, pending := s.ack, s.running, s.networkReason != ""
 				s.stateMu.Unlock()
 				if !running {
 					return
 				}
+				if fingerprint == previous && !pending && s.checkPlatformIngress(true) == nil {
+					continue
+				}
+				// Repair returning interfaces' new routes before testing capture.
 				if s.NetworkChangedToAt(ack.InstanceID, ack.InterfaceID, ack.Revision, name) == nil {
 					previous = fingerprint
 				}

@@ -60,12 +60,12 @@ internal class ConnectivityNetworkReader(context: Context) : AndroidNetworkReade
                 internet = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true,
                 validated = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true,
                 vpn = caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true,
-                ownerIsSelf = isOwnNetwork(Build.VERSION.SDK_INT, android.os.Process.myUid()) { caps?.ownerUid ?: -1 },
+                ownerIsSelf = if (Build.VERSION.SDK_INT >= 30) caps?.ownerUid == android.os.Process.myUid() else false,
                 addresses = links?.linkAddresses?.map { "${it.address.hostAddress}/${it.prefixLength}" }.orEmpty(),
                 dns = links?.dnsServers?.mapNotNull { it.hostAddress }.orEmpty(),
                 routes = links?.routes?.map { it.destination.toString() to routeGateway(it.gateway?.hostAddress) }.orEmpty(),
                 routeTypes = if (Build.VERSION.SDK_INT >= 33) links?.routes?.associate { route -> "${route.destination}:${routeGateway(route.gateway?.hostAddress)}" to route.type }.orEmpty() else emptyMap(),
-                mtu = links?.mtu ?: 0,
+                mtu = if (Build.VERSION.SDK_INT >= 29) links?.mtu ?: 0 else 0,
                 proxy = links?.httpProxy?.let { proxy ->
                     if (proxy.pacFileUrl != android.net.Uri.EMPTY) "PAC настроен · содержимое не загружается"
                     else "${proxy.host}:${proxy.port}"

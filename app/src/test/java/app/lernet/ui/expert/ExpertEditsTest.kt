@@ -5,6 +5,7 @@ import app.lernet.routing.policy.PolicyCanvasKeys
 import app.lernet.routing.policy.PolicyCanvasPoint
 import app.lernet.routing.policy.PolicyChannel
 import app.lernet.routing.policy.PolicyNode
+import app.lernet.routing.policy.PolicyOtherwise
 import app.lernet.routing.policy.PolicyScope
 import app.lernet.routing.policy.PolicyTarget
 import app.lernet.routing.policy.PolicyTree
@@ -14,6 +15,55 @@ import kotlinx.serialization.json.Json
 import org.junit.Test
 
 class ExpertEditsTest {
+    @Test
+    fun showingOtherwiseDoesNotMutateStoredPolicyAndItsExitCanBeEdited() {
+        val original = NetworkPolicy(device = PolicyTree(PolicyScope.Device, defaultTarget = PolicyTarget.Block))
+        val displayed = ExpertEdits.ordered(original.device).single().first
+        assertThat(PolicyOtherwise.isOtherwise(displayed)).isTrue()
+        assertThat(displayed.target).isEqualTo(PolicyTarget.Block)
+        assertThat(original.device.nodes).isEmpty()
+        val edited = ExpertEdits.putNode(original, PolicyScope.Device, displayed.copy(target = PolicyTarget.Direct))
+        assertThat(edited.device.nodes.single().target).isEqualTo(PolicyTarget.Direct)
+        assertThat(PolicyOtherwise.isOtherwise(edited.device.nodes.single())).isTrue()
+    }
+
+    @Test
+    fun addingChildToOtherwiseKeepsPhysicalExitForUnmatchedTraffic() {
+        val exit = PolicyTarget.Profile("profile")
+        val original = NetworkPolicy(device = PolicyTree(PolicyScope.Device, defaultTarget = exit))
+        val otherwise = ExpertEdits.ordered(original.device).single().first
+        assertThat(ExpertEdits.canAddChild(otherwise)).isTrue()
+        assertThat(ExpertEdits.canAddChild(PolicyNode("regular", target = exit))).isFalse()
+        val child = PolicyNode("child", parentId = otherwise.id, target = PolicyTarget.Block)
+        val edited = ExpertEdits.putNode(original, PolicyScope.Device, child)
+        val parent = edited.device.nodes.first { it.id == otherwise.id }
+        assertThat(parent.target).isEqualTo(PolicyTarget.Direct)
+        val fallback = edited.device.nodes.single { it.parentId == parent.id && PolicyOtherwise.isOtherwise(it) }
+        assertThat(fallback.target).isEqualTo(exit)
+        assertThat(edited.device.nodes.first { it.id == child.id }.parentId).isEqualTo(parent.id)
+    }
+
+    @Test
+    fun otherwiseCannotBeMovedOrDeletedFromItsSiblingLevel() {
+        val policy = ExpertEdits.putNode(NetworkPolicy(), PolicyScope.Device, PolicyNode("rule"))
+        val otherwise = policy.device.nodes.single { it.parentId == null && PolicyOtherwise.isOtherwise(it) }
+        assertThat(ExpertEdits.move(policy, PolicyScope.Device, otherwise.id, -1)).isEqualTo(policy)
+        assertThat(ExpertEdits.removeNode(policy, PolicyScope.Device, otherwise.id)).isEqualTo(policy)
+    }
+
+    @Test
+    fun otherwiseCanReferenceAndCreateAProfileTreeWithoutLosingOtherOwners() {
+        val folder = PolicyTree(PolicyScope.Folder("folder"), defaultTarget = PolicyTarget.CurrentExit)
+        val policy = NetworkPolicy(trees = listOf(folder))
+        val otherwise = ExpertEdits.ordered(policy.device).single().first
+        val destination = PolicyScope.Profile("profile")
+        val edited = ExpertEdits.putNode(policy, PolicyScope.Device, otherwise.copy(target = PolicyTarget.Profile("profile", destination)))
+        assertThat(edited.trees).contains(folder)
+        assertThat(edited.trees.single { it.scope == destination }.defaultTarget).isEqualTo(PolicyTarget.CurrentExit)
+        assertThat(ExpertEdits.tree(policy, destination).nodes).isEmpty()
+        assertThat(policy.trees).containsExactly(folder)
+    }
+
     @Test
     fun deletingLastChildRestoresParentsOriginalTerminalAction() {
         val policy = NetworkPolicy(

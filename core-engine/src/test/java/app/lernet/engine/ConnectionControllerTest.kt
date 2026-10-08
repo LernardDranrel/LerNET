@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -38,6 +39,137 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class ConnectionControllerTest {
     private val dispatcher = StandardTestDispatcher()
+
+    @Test
+    fun persistentSystemRestoreUsesExactCompiledSessionAndRespectsIntentGate() = runTest(dispatcher) {
+        var stored: SimpleSessionConfig? = null
+        val first = RecordingBoxEngine()
+        val controller = controller(this, first, 2_500, persist = { stored = it })
+        controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN,
+            defaults = EngineDefaults(directDnsServer = "9.9.9.9"))
+        runCurrent()
+        val saved = requireNotNull(stored)
+        val second = RecordingBoxEngine()
+        val restored = controller(this, second, 2_500)
+        assertThat(restored.resumePersistentSession(saved) { false }).isFalse()
+        assertThat(second.startCount).isEqualTo(0)
+        assertThat(restored.resumePersistentSession(saved) { true }).isTrue()
+        runCurrent()
+        assertThat(second.startedConfigs.single()).isEqualTo(first.startedConfigs.single())
+        assertThat(restored.snapshot.value.mode).isEqualTo(RunMode.FULL_VPN)
+        assertThat(restored.snapshot.value.activeProfileId).isEqualTo(saved.profileId)
+        controller.disconnect()
+        runCurrent()
+        assertThat(stored).isNull()
+    }
+
+    @Test
+    fun stopDuringDurableStartWritePreventsQueuedEngineStartAndClearsIntent() = runTest(dispatcher) {
+        val writeGate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var stored: SimpleSessionConfig? = null
+        val engine = RecordingBoxEngine()
+        val controller = controller(this, engine, 2_500, persist = {
+            if (it != null) writeGate.await()
+            stored = it
+        })
+        val connecting = async { controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN) }
+        runCurrent()
+        val stopping = async { controller.disconnect() }
+        runCurrent()
+        writeGate.complete(Unit)
+        connecting.await()
+        stopping.await()
+        runCurrent()
+        assertThat(stored).isNull()
+        assertThat(engine.startCount).isEqualTo(0)
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.DISCONNECTED)
+    }
+
+    @Test
+    fun failedSessionPersistencePreventsEngineStartWithoutThrowing() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine()
+        val controller = controller(this, engine, 2_500, persist = { throw java.io.IOException("disk unavailable") })
+        controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
+        runCurrent()
+        assertThat(engine.startCount).isEqualTo(0)
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.FAILED)
+    }
+
+    @Test
+    fun failedIntentClearCannotPreventManualStop() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine()
+        val controller = controller(this, engine, 2_500, persist = {
+            if (it == null) throw java.io.IOException("disk unavailable")
+        })
+        controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
+        runCurrent()
+        controller.disconnect()
+        runCurrent()
+        assertThat(engine.stopCount).isAtLeast(1)
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.DISCONNECTED)
+        advanceTimeBy(20_000)
+        runCurrent()
+        assertThat(engine.startCount).isEqualTo(1)
+    }
+
+    @Test
+    fun failedOfflineStartRetriesWhenUnderlayReturns() = runTest(dispatcher) {
+        var online = false
+        val engine = RecordingBoxEngine(failOnStartNumber = 1)
+        val controller = controller(this, engine, hardStopTimeoutMs = 2_500, underlayAvailable = { online })
+        controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
+        runCurrent()
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.RECONNECTING)
+        advanceTimeBy(10_000)
+        runCurrent()
+        assertThat(engine.startCount).isEqualTo(1)
+        online = true
+        controller.onUnderlayRestored()
+        advanceTimeBy(1_001)
+        runCurrent()
+        assertThat(engine.startCount).isEqualTo(2)
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
+    }
+
+    @Test
+    fun manualStopCancelsDeferredOfflineStart() = runTest(dispatcher) {
+        var online = false
+        val engine = RecordingBoxEngine(failOnStartNumber = 1)
+        val controller = controller(this, engine, hardStopTimeoutMs = 2_500, underlayAvailable = { online })
+        controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
+        runCurrent()
+        controller.disconnect()
+        runCurrent()
+        online = true
+        controller.onUnderlayRestored()
+        advanceTimeBy(20_000)
+        runCurrent()
+        assertThat(engine.startCount).isEqualTo(1)
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.DISCONNECTED)
+    }
+
+    @Test
+    fun offlineWatchdogPreservesTunAndManualDisconnectStillStopsIt() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine()
+        var online = true
+        val controller = controller(this, engine, hardStopTimeoutMs = 2_500, underlayAvailable = { online })
+        reachConnected(this, controller, engine)
+        online = false
+        repeat(8) { controller.onWatchdogMiss() }
+        controller.onEngineSignal(ConnectionCause.DialFailure("network is unreachable"))
+        runCurrent()
+        assertThat(engine.startCount).isEqualTo(1)
+        assertThat(engine.stopCount).isEqualTo(0)
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
+        online = true
+        controller.onUnderlayRestored()
+        runCurrent()
+        assertThat(engine.startCount).isEqualTo(1)
+        controller.disconnect()
+        runCurrent()
+        assertThat(engine.stopCount).isEqualTo(1)
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.DISCONNECTED)
+    }
 
     @Test
     fun failedModeSwitchRestoresExactEffectiveJsonAndPriorProxyMode() = runTest(dispatcher) {
@@ -938,6 +1070,8 @@ class ConnectionControllerTest {
         dialer: OutboundDialer = OutboundDialer { _, _ -> Result.success(Unit) },
         l7UrlTestEnabled: Boolean = false,
         tunnelHealthProbe: (suspend () -> Result<Long>)? = null,
+        underlayAvailable: () -> Boolean = { true },
+        persist: suspend (SimpleSessionConfig?) -> Unit = {},
     ): ConnectionController {
         val controller = ConnectionController(
             engine = engine,
@@ -948,6 +1082,8 @@ class ConnectionControllerTest {
             tunnelHealthProbe = tunnelHealthProbe,
             tunnelHealthIntervalMs = { 5_000L },
             pathDispatcher = dispatcher,
+            underlayAvailable = underlayAvailable,
+            persistSessionIntent = persist,
         )
         controller.updateSettings(reconnect, failoverEnabled = false, group = null)
         return controller

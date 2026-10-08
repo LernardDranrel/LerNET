@@ -1,0 +1,11 @@
+<resources>
+    <string name="expert_dns_title">DNS Expert</string>
+    <string name="expert_dns_system">Исходная сеть</string>
+    <string name="expert_dns_custom">Свой сервер</string>
+    <string name="expert_dns_server">IPv4-адрес DNS-сервера</string>
+    <string name="expert_dns_system_hint">По умолчанию используется DNS исходной сети, включая системный Private DNS. При смене подключения учитываются его настройки. Публичный сервер автоматически не подставляется.</string>
+    <string name="expert_dns_custom_hint">Прямые DNS-запросы будут отправляться этому серверу. При его недоступности появится ошибка; резервный сервер не подставляется.</string>
+    <string name="expert_dns_scope_hint">Настройка касается обычного DNS прямых веток. DNS защищённых веток идёт через их выход. Адрес самого VPN-сервера разрешается через исходную сеть. Приложения со своим DoH могут выбирать DNS самостоятельно.</string>
+    <string name="expert_dns_apply_hint">Изменение попадёт в черновик. Для работающего туннеля сохраните и примените схему. На Android 8–9 системное разрешение имён поддерживает только A и AAAA.</string>
+    <string name="expert_dns_save_error">Не удалось сохранить DNS. Проверьте адрес и откройте настройки заново, если они изменились в другом окне.</string>
+</resources>

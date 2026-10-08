@@ -72,8 +72,12 @@ class ConnectionController(
     private val ruleSetDirectory: String = "",
     /** Hop walk only — never Main. Tests inject the test dispatcher. */
     private val pathDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /** The platform excludes the VPN itself. Offline is not a reason to rebuild its TUN. */
+    private val underlayAvailable: () -> Boolean = { true },
+    private val persistSessionIntent: suspend (SimpleSessionConfig?) -> Unit = {},
 ) {
     private val mutex = Mutex()
+    private var engineReady = false
     private var machineState = MachineState.idle()
     private var context = MachineContext(ReconnectSettings(), app.lernet.engine.policy.FailoverSettings(), null)
     private var retryJob: Job? = null
@@ -165,6 +169,7 @@ class ConnectionController(
     private suspend fun onEngineEvent(event: EngineEvent) {
         when (event) {
             EngineEvent.Started -> {
+                engineReady = true
                 dispatch(PolicyEvent.EngineStarted)
                 if (_snapshot.value.state == ConnectionState.CONNECTING ||
                     _snapshot.value.state == ConnectionState.RECONNECTING
@@ -173,7 +178,12 @@ class ConnectionController(
                 }
             }
             is EngineEvent.Status -> onStatus(event)
-            is EngineEvent.Failed -> dispatch(PolicyEvent.EngineFailed(event.cause))
+            is EngineEvent.Failed -> mutex.withLock {
+                // Native reports Failed only after abandoning the service. Unlike a failed
+                // health probe, this needs a new start, including when the underlay is offline.
+                engineReady = false
+                dispatchLocked(PolicyEvent.EngineFailed(event.cause))
+            }
             is EngineEvent.LogLine -> {
                 LerNetLog.i(TAG, event.line)
                 SniffRematch.fromLibboxLine(event.line)?.let { LerNetLog.i(TAG, it) }
@@ -236,8 +246,7 @@ class ConnectionController(
         logLevel: String = "warn",
         defaults: EngineDefaults = EngineDefaults(),
     ) {
-        userIntentEpoch.incrementAndGet()
-        pendingRestoreGate = null
+        val epoch = userIntentEpoch.incrementAndGet()
         CrashTrail.mark("controller.connect enter profile=${profile.id} mode=$mode")
         val outbound = profile.selectedOutbound()
         if (outbound == null) {
@@ -252,7 +261,6 @@ class ConnectionController(
             return
         }
         val effectiveLog = if (logLevel == "warn" || logLevel == "error") "info" else logLevel
-        pendingDnsPolicy = profile.dnsPolicy
         val assembled = try {
             ConfigAssembler.assemble(
                 outbound,
@@ -281,30 +289,64 @@ class ConnectionController(
             )
             return
         }
-        pendingEndpoint = OutboundEndpoint.parse(outbound.singBoxJson)
-            ?: OutboundEndpoint.fromAssembled(assembled.json, assembled.proxyTag)
-        pendingOutboundId = outbound.id
-        pendingLogLevel = logLevel
-        pendingDefaults = defaults
-        pendingProxyTag = assembled.proxyTag
-        resetConnectMarkers()
-        assembled.notes.forEach { LerNetLog.i(TAG, it) }
-        CrashTrail.mark("controller.connect profile=${profile.id} mode=$mode l7Gate=$l7UrlTestEnabled")
-        LerNetLog.i(TAG, "assembled json: ${assembled.json}")
-        LerNetLog.i(TAG, "L7 probe tag=${pendingProxyTag ?: "?"} tcp=${pendingEndpoint?.label() ?: "missing"} log=$effectiveLog")
-        dispatch(
-            PolicyEvent.StartRequested(
-                profileId = profile.id,
-                outboundId = outbound.id,
-                mode = mode,
-                compiledJson = assembled.json,
-            ),
-        )
+        mutex.withLock {
+            if (userIntentEpoch.get() != epoch) return@withLock
+            pendingRestoreGate = { userIntentEpoch.get() == epoch }
+            pendingDnsPolicy = profile.dnsPolicy
+            pendingEndpoint = OutboundEndpoint.parse(outbound.singBoxJson)
+                ?: OutboundEndpoint.fromAssembled(assembled.json, assembled.proxyTag)
+            pendingOutboundId = outbound.id
+            pendingLogLevel = logLevel
+            pendingDefaults = defaults
+            pendingProxyTag = assembled.proxyTag
+            resetConnectMarkersLocked()
+            try {
+                persistSessionIntent(SimpleSessionConfig(
+                    profile.id, outbound.id, assembled.json, mode, logLevel, defaults, assembled.proxyTag, profile.dnsPolicy,
+                ))
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                LerNetLog.e(TAG, "Session intent write failed (${error.javaClass.simpleName})")
+                dispatchLocked(PolicyEvent.EngineFailed(ConnectionCause.InvalidConfig(listOf("Не удалось сохранить намерение запуска VPN"))))
+                return@withLock
+            }
+            if (userIntentEpoch.get() != epoch) return@withLock
+            assembled.notes.forEach { LerNetLog.i(TAG, it) }
+            CrashTrail.mark("controller.connect profile=${profile.id} mode=$mode l7Gate=$l7UrlTestEnabled")
+            LerNetLog.i(TAG, "assembled json: ${assembled.json}")
+            LerNetLog.i(TAG, "L7 probe tag=${pendingProxyTag ?: "?"} tcp=${pendingEndpoint?.label() ?: "missing"} log=$effectiveLog")
+            dispatchLocked(
+                PolicyEvent.StartRequested(
+                    profileId = profile.id,
+                    outboundId = outbound.id,
+                    mode = mode,
+                    compiledJson = assembled.json,
+                ),
+            )
+        }
     }
 
     suspend fun disconnect() {
         userIntentEpoch.incrementAndGet()
-        dispatch(PolicyEvent.UserDisconnect)
+        mutex.withLock {
+            clearSessionIntentAndDispatch(PolicyEvent.UserDisconnect)
+        }
+    }
+
+    /** System restart reuses effective JSON, including the former DNS and outbound settings. */
+    suspend fun resumePersistentSession(config: SimpleSessionConfig, stillDesired: () -> Boolean): Boolean = mutex.withLock {
+        if (!stillDesired() || machineState.snapshot.state != ConnectionState.DISCONNECTED) return@withLock false
+        val epoch = userIntentEpoch.incrementAndGet()
+        pendingRestoreGate = { userIntentEpoch.get() == epoch && stillDesired() }
+        pendingEndpoint = config.proxyTag?.let { OutboundEndpoint.fromAssembled(config.compiledJson, it) }
+        pendingOutboundId = config.outboundId
+        pendingLogLevel = config.logLevel
+        pendingDefaults = config.defaults
+        pendingProxyTag = config.proxyTag
+        pendingDnsPolicy = config.dnsPolicy
+        resetConnectMarkersLocked()
+        dispatchLocked(PolicyEvent.StartRequested(config.profileId, config.outboundId, config.mode, config.compiledJson))
+        true
     }
 
     /** Stops Simple after capturing its actual active rules and outbound, as one controller operation. */
@@ -396,7 +438,22 @@ class ConnectionController(
     }
 
     suspend fun onPermissionDenied() {
-        dispatch(PolicyEvent.PermissionDenied)
+        userIntentEpoch.incrementAndGet()
+        mutex.withLock {
+            clearSessionIntentAndDispatch(PolicyEvent.PermissionDenied)
+        }
+    }
+
+    /** A disk error must never prevent the user's Stop or permission revocation. */
+    private suspend fun clearSessionIntentAndDispatch(event: PolicyEvent) {
+        try {
+            persistSessionIntent(null)
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            LerNetLog.e(TAG, "Session intent clear failed (${error.javaClass.simpleName})")
+        } finally {
+            dispatchLocked(event)
+        }
     }
 
     suspend fun onEngineSignal(cause: ConnectionCause) {
@@ -415,8 +472,35 @@ class ConnectionController(
         mutex.withLock { dispatchLocked(event) }
     }
 
+    suspend fun onUnderlayRestored() {
+        if (!underlayAvailable() || !engineReady) return
+        val current = _snapshot.value.state
+        if (current == ConnectionState.CONNECTED) {
+            armTrafficWatch()
+            armDnsHealth()
+            armLatencyRefresh()
+            armTunnelHealth()
+        } else if (current in setOf(ConnectionState.CONNECTING, ConnectionState.RECONNECTING) && retryJob?.isActive != true) {
+            startOutboundProbe()
+            armConnectTimeout()
+        }
+    }
+
     private fun dispatchLocked(event: PolicyEvent) {
-        val (next, commands) = machine.reduce(machineState, context, event)
+        val networkFailure = event == PolicyEvent.WatchdogMiss || event == PolicyEvent.DnsHealthTimeout ||
+            event == PolicyEvent.ConnectTimeout || event is PolicyEvent.EngineFailed && event.cause.isRetryable()
+        if (networkFailure && !underlayAvailable() &&
+            (engineReady || event !is PolicyEvent.EngineFailed)
+        ) {
+            LerNetLog.w(TAG, "Нет исходной сети: сохраняем VPN/TUN и ждём восстановления")
+            return
+        }
+        // A generic start exception while offline can be retried once the underlay returns.
+        // Invalid configuration and permission failures keep their terminal classification.
+        val effective = if (!underlayAvailable() && event is PolicyEvent.EngineFailed && event.cause is ConnectionCause.EngineStartFailed) {
+            PolicyEvent.EngineFailed(ConnectionCause.DialFailure(event.cause.detail))
+        } else event
+        val (next, commands) = machine.reduce(machineState, context, effective)
         machineState = next
         val hops = _snapshot.value
         _snapshot.value = next.snapshot.copy(
@@ -443,6 +527,7 @@ class ConnectionController(
     private fun execute(command: PolicyCommand) {
         when (command) {
             is PolicyCommand.StartEngine -> {
+                engineReady = false
                 if (pendingOutboundId != null && command.outboundId != pendingOutboundId) {
                     failoverSwitchJob?.cancel()
                     failoverSwitchJob = scope.launch {
@@ -480,6 +565,7 @@ class ConnectionController(
                     if (restoreGate != null && !restoreGate()) return@launch
                     runCatching { engine.start(json, mode) }
                         .onFailure { error ->
+                            if (error is CancellationException) throw error
                             LerNetLog.e(TAG, "engine.start failed: ${error.message}", error)
                             CrashTrail.recordFailure("controller.engine.start", error)
                             dispatch(PolicyEvent.EngineFailed(ConnectionCause.EngineStartFailed(error.message ?: "unknown")))
@@ -487,6 +573,7 @@ class ConnectionController(
                 }
             }
             is PolicyCommand.StopEngine -> {
+                engineReady = false
                 retryJob?.cancel()
                 healthJob?.cancel()
                 dnsHealthJob?.cancel()
@@ -518,6 +605,8 @@ class ConnectionController(
                 val restoreGate = pendingRestoreGate
                 retryJob = scope.launch {
                     delay(command.delayMs)
+                    // An already scheduled retry must also respect a later network outage.
+                    while (!underlayAvailable()) delay(1_000)
                     if (restoreGate != null && !restoreGate()) return@launch
                     armConnectTimeout()
                     loggedTunBytes = false
@@ -532,6 +621,7 @@ class ConnectionController(
                     CrashTrail.mark("controller ScheduleRetry mode=$mode jsonBytes=${json.length}")
                     runCatching { engine.start(json, mode) }
                         .onFailure { error ->
+                            if (error is CancellationException) throw error
                             LerNetLog.e(TAG, "engine.start retry failed: ${error.message}", error)
                             CrashTrail.recordFailure("controller.engine.retry", error)
                             dispatch(PolicyEvent.EngineFailed(ConnectionCause.EngineStartFailed(error.message ?: "unknown")))
@@ -838,10 +928,6 @@ class ConnectionController(
             dnsOk = true,
         )
         LerNetLog.w(TAG, "debug: simulate PIPE_SILENT (requests into pipe without reply)")
-    }
-
-    private suspend fun resetConnectMarkers() {
-        mutex.withLock { resetConnectMarkersLocked() }
     }
 
     private fun resetConnectMarkersLocked() {

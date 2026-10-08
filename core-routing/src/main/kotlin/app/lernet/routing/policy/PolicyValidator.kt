@@ -22,6 +22,7 @@ object PolicyValidator {
                     "Ожидание активного выхода: 1–15 секунд. Неудач перед восстановлением: 1–10."
             )
         }
+        if (!policy.dns.isValid()) issue(null, "dns", "DNS: укажите корректный IPv4-адрес сервера")
         if (policy.device.scope != PolicyScope.Device) issue(null, "scope", "Основная схема должна принадлежать устройству")
         val trees = listOf(policy.device) + policy.trees
         if (trees.map { it.scope }.distinct().size != trees.size) issue(null, "scope", "Повторяющийся владелец схемы")
@@ -104,6 +105,7 @@ object PolicyValidator {
             }
         }
         trees.forEach { tree ->
+            errors += PolicyOtherwise.errors(tree)
             if (!validScope(tree.scope)) issue(null, "scope", "Владелец схемы отсутствует")
             if (tree.nodes.map { it.id }.distinct().size != tree.nodes.size) issue(null, "id", "Повторяющийся идентификатор правила")
             val byId = tree.nodes.associateBy { it.id }

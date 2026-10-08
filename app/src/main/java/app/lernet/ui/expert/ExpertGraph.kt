@@ -1,27 +1,27 @@
 package app.lernet.ui.expert
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.wrapContentSize
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import app.lernet.ui.icons.LerNetSymbols
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -29,40 +29,51 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.unit.IntSize
+import app.lernet.ui.routes.SchemaCanvas
+import app.lernet.ui.routes.SchemaCanvasControls
+import app.lernet.ui.routes.rememberSchemaCanvasState
+import io.github.xingray.compose.infinitecanvas.CanvasNode
+import io.github.xingray.compose.infinitecanvas.CanvasNodeState
+import io.github.xingray.compose.infinitecanvas.CanvasMode
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import app.lernet.R
 import app.lernet.config.transfer.TransferBundle
 import app.lernet.routing.policy.NetworkPolicy
+import app.lernet.routing.policy.PolicyBranchEditing
 import app.lernet.routing.policy.PolicyCanvasKeys
 import app.lernet.routing.policy.PolicyCanvasPoint
 import app.lernet.routing.policy.PolicyNode
+import app.lernet.routing.policy.PolicyOtherwise
 import app.lernet.routing.policy.PolicyTarget
 import app.lernet.routing.policy.PolicyTree
+import app.lernet.ui.motion.rememberReduceMotion
+import app.lernet.ui.routes.SchemaNodeSurface
+import app.lernet.ui.theme.LerNetDimens
 import kotlin.math.roundToInt
 
 private const val NODE_WIDTH = 216f
-private const val NODE_HEIGHT = 132f
+private const val NODE_HEIGHT = 144f
 private const val COLUMN_GAP = 50f
 private const val ROW_GAP = 80f
 
 @Composable
 internal fun ExpertGraph(
-    tree: PolicyTree,
+    sourceTree: PolicyTree,
     bundle: TransferBundle,
     policy: NetworkPolicy,
     inactive: Set<String>,
@@ -72,218 +83,300 @@ internal fun ExpertGraph(
     onPosition: (String, PolicyCanvasPoint) -> Unit,
     onAlign: () -> Unit,
     modifier: Modifier = Modifier.height(460.dp),
+    selectedKey: String? = null,
+    onSelect: ((String) -> Unit)? = null,
+    onAdd: ((PolicyNode?) -> Unit)? = null,
+    nodeActions: (@Composable (PolicyNode?) -> Unit)? = null,
+    highlightedNodes: Set<String> = emptySet(),
+    highlightedChannels: Set<String> = emptySet(),
+    highlightRoot: Boolean = false,
+    readOnly: Boolean = false,
 ) {
+    val tree = remember(sourceTree) { PolicyBranchEditing.displayTree(sourceTree) }
+    val shownHighlights = if (highlightRoot && tree.nodes.none { it.id in highlightedNodes }) {
+        tree.nodes.filter { it.parentId == null && PolicyOtherwise.isOtherwise(it) }.map { it.id }.toSet()
+    } else {
+        highlightedNodes
+    }
+    val nodeHeight = (NODE_HEIGHT + if (readOnly) 0f else 64f) * LocalDensity.current.fontScale.coerceAtLeast(1f)
     val density = LocalDensity.current.density
+    val canvasState = rememberSchemaCanvasState(tree.scope)
+    // Policy selection and branches belong to the model, not the library's transient connection tool.
+    // Prevent a canvas-only edge from looking like a stored routing rule, including read-only previews.
+    LaunchedEffect(canvasState) {
+        snapshotFlow { canvasState.selectedNodeIds }.collect { ids ->
+            if (ids.isNotEmpty()) canvasState.selectedNodeIds = emptySet()
+        }
+    }
+    LaunchedEffect(canvasState) {
+        snapshotFlow { canvasState.connections.map { it.id } }.collect { ids ->
+            ids.forEach(canvasState::removeConnection)
+        }
+    }
+    val holders = remember(tree.scope) { mutableMapOf<String, CanvasNodeState>() }
     val dragged = remember(tree.scope) { mutableStateMapOf<String, Offset>() }
-    var zoom by remember(tree.scope) { mutableStateOf(1f) }
-    var viewportWidth by remember { mutableStateOf(0) }
-    var centerRequest by remember(tree.scope) { mutableStateOf(0) }
-    val horizontal = rememberScrollState()
-    val vertical = rememberScrollState()
-    val automatic = remember(tree.nodes) { graphPositions(tree) }
+    var viewportSize by remember { mutableStateOf(IntSize.Zero) }
+    var centerAfterAlign by remember(tree.scope) { mutableStateOf(false) }
+    var centered by rememberSaveable(tree.scope) { mutableStateOf(false) }
+    val automatic = remember(tree.nodes, nodeHeight) { graphPositions(tree, nodeHeight) }
     val channelNodes = policy.channels.filter { it.owner == tree.scope }
     val maxDepth = ExpertEdits.ordered(tree).maxOfOrNull { it.second } ?: 0
-    val channelY = (maxDepth + 2) * (NODE_HEIGHT + ROW_GAP) + 24f
+    val channelY = (maxDepth + 2) * (nodeHeight + ROW_GAP) + 24f
     val base = automatic + channelNodes.mapIndexed { index, channel ->
         PolicyCanvasKeys.channel(channel.id) to Offset(24f + index * (NODE_WIDTH + COLUMN_GAP), channelY)
     } + tree.positions.mapValues { Offset(it.value.x, it.value.y) }
     val latestBase by rememberUpdatedState(base)
     val latestCommit by rememberUpdatedState(onPosition)
+    fun world(key: String): Offset = dragged[key] ?: latestBase[key] ?: Offset(24f, 24f)
     LaunchedEffect(tree.positions) {
         dragged.keys.toList().forEach { key ->
             val stored = tree.positions[key]
             if (stored != null && dragged[key] == Offset(stored.x, stored.y)) dragged.remove(key)
         }
     }
-    fun world(key: String): Offset = dragged[key] ?: latestBase[key] ?: Offset(24f, 24f)
-    val keys =
-        listOf(PolicyCanvasKeys.ROOT) + tree.nodes.map { PolicyCanvasKeys.node(it.id) } +
-            channelNodes.map { PolicyCanvasKeys.channel(it.id) }
-    val points = keys.map(::world)
-    val minimum = Offset(minOf(0f, base.values.minOfOrNull { it.x } ?: 0f), minOf(0f, base.values.minOfOrNull { it.y } ?: 0f))
-    val origin = Offset(24f - minimum.x, 24f - minimum.y)
-    val nodeExtent = tree.nodes.maxOfOrNull { world(PolicyCanvasKeys.node(it.id)).x + NODE_WIDTH } ?: NODE_WIDTH
-    val width = (points.maxOfOrNull { it.x } ?: 24f) + origin.x + NODE_WIDTH + 200f + channelNodes.size * 16f
-    val height = (points.maxOfOrNull { it.y } ?: 24f) + origin.y + NODE_HEIGHT + 100f
     val lineColor = MaterialTheme.colorScheme.outline
-    val maximum = Offset(
-        (4800f - origin.x - NODE_WIDTH - channelNodes.size * 16f).coerceAtLeast(minimum.x),
-        (4800f - origin.y - NODE_HEIGHT).coerceAtLeast(minimum.y)
-    )
-    fun draggable(key: String): Modifier = Modifier.pointerInput(key, density, minimum, maximum) {
-        detectDragGesturesAfterLongPress(
+    val pathColor = MaterialTheme.colorScheme.primary
+    val reducedMotion = rememberReduceMotion()
+    val pathProgress = remember { Animatable(1f) }
+    LaunchedEffect(highlightedNodes, highlightedChannels, highlightRoot, reducedMotion) {
+        if (reducedMotion || !highlightRoot) pathProgress.snapTo(1f) else {
+            pathProgress.snapTo(0.3f)
+            pathProgress.animateTo(1f, tween(220))
+        }
+    }
+    fun draggable(key: String): Modifier = Modifier.pointerInput(key, density, readOnly, canvasState.canvasMode) {
+        if (!readOnly && canvasState.canvasMode != CanvasMode.Pan) detectDragGesturesAfterLongPress(
             onDragEnd = { dragged[key]?.let { latestCommit(key, PolicyCanvasPoint(it.x, it.y)) } },
             onDragCancel = { dragged.remove(key) },
         ) { change, delta ->
             change.consume()
+            // Pointer coordinates are local to the scaled node; retain world coordinates in dp.
             val next = world(key) + delta / density
-            dragged[key] = Offset(next.x.coerceIn(minimum.x, maximum.x), next.y.coerceIn(minimum.y, maximum.y))
+            if (PolicyCanvasPoint(next.x, next.y).isValid()) dragged[key] = next
         }
     }
-    fun cardModifier(key: String): Modifier {
-        val point = (world(key) + origin) * density
-        return Modifier.offset { IntOffset(point.x.roundToInt(), point.y.roundToInt()) }
-            .size(NODE_WIDTH.dp, NODE_HEIGHT.dp).then(draggable(key))
+    fun cardModifier(): Modifier = Modifier.size(NODE_WIDTH.dp, nodeHeight.dp)
+    fun canvasNode(key: String, content: @Composable () -> Unit): CanvasNode {
+        val position = world(key) * density
+        val holder = holders.getOrPut(key) { CanvasNodeState(position.x, position.y, fixed = true) }
+        return CanvasNode(key, state = holder, modifier = draggable(key), content = content)
     }
-    LaunchedEffect(tree.scope, viewportWidth, zoom, centerRequest) {
-        if (viewportWidth > 0) {
-            val root = world(PolicyCanvasKeys.ROOT) + origin
-            horizontal.scrollTo(((root.x + NODE_WIDTH / 2) * density * zoom - viewportWidth / 2).roundToInt())
-            vertical.scrollTo((root.y * density * zoom - 16 * density).roundToInt())
-        }
-    }
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = {
-                dragged.clear()
-                onAlign()
-                centerRequest++
-            }) { Text(stringResource(R.string.expert_align_graph)) }
-            TextButton(onClick = { centerRequest++ }) { Text(stringResource(R.string.expert_graph_root)) }
-            val zoomOut = stringResource(R.string.expert_graph_zoom_out)
-            val zoomIn = stringResource(R.string.expert_graph_zoom_in)
-            TextButton(
-                onClick = { zoom = (zoom - 0.25f).coerceAtLeast(0.5f) },
-                enabled = zoom > 0.5f, modifier = Modifier.semantics { contentDescription = zoomOut },
-            ) { Text("−") }
-            TextButton(
-                onClick = { zoom = (zoom + 0.25f).coerceAtMost(1.5f) },
-                enabled = zoom < 1.5f, modifier = Modifier.semantics { contentDescription = zoomIn },
-            ) { Text("+") }
-        }
-        if (width > 5000f || height > 5000f) {
-            ExpertHint(R.string.expert_graph_large)
-        } else {
-            Box(
-                Modifier.fillMaxWidth().weight(1f).onSizeChanged { viewportWidth = it.width }
-                    .horizontalScroll(horizontal).verticalScroll(vertical),
+    val nodes = buildList {
+        add(canvasNode(PolicyCanvasKeys.ROOT) {
+            Card(
+                onClick = { onSelect?.invoke(PolicyCanvasKeys.ROOT) ?: onRoot() },
+                modifier = cardModifier(),
+                border = if (selectedKey == PolicyCanvasKeys.ROOT || highlightRoot) BorderStroke(2.dp, pathColor) else null,
             ) {
-                Box(Modifier.size((width * zoom).dp, (height * zoom).dp)) {
-                    Box(
-                        Modifier.wrapContentSize(Alignment.TopStart, unbounded = true).requiredSize(width.dp, height.dp)
-                            .graphicsLayer {
-                                scaleX = zoom
-                                scaleY = zoom
-                                transformOrigin = TransformOrigin(0f, 0f)
-                            }.background(MaterialTheme.colorScheme.surfaceContainerLow),
-                    ) {
-                        Canvas(Modifier.size(width.dp, height.dp)) {
-                            fun point(key: String): Offset = (world(key) + origin) * density
-                            fun edge(from: String, to: String) {
-                                val start = point(from) + Offset(NODE_WIDTH * density / 2, NODE_HEIGHT * density)
-                                val end = point(to) + Offset(NODE_WIDTH * density / 2, 0f)
-                                val middle = (start.y + end.y) / 2f
-                                drawPath(
-                                    Path().apply {
-                                        moveTo(start.x, start.y)
-                                        lineTo(start.x, middle)
-                                        lineTo(end.x, middle)
-                                        lineTo(end.x, end.y)
-                                    },
-                                    lineColor, style = Stroke(1.5.dp.toPx())
-                                )
-                            }
-                            fun portal(from: String, channelId: String) {
-                                val start = point(from) + Offset(NODE_WIDTH * density, NODE_HEIGHT * density / 2)
-                                val end = point(PolicyCanvasKeys.channel(channelId)) +
-                                    Offset(NODE_WIDTH * density, NODE_HEIGHT * density / 2)
-                                val lane =
-                                    (nodeExtent + origin.x + 40f + channelNodes.indexOfFirst { it.id == channelId } * 16f) * density
-                                drawPath(
-                                    Path().apply {
-                                        moveTo(start.x, start.y)
-                                        lineTo(start.x + 20f * density, start.y)
-                                        lineTo(start.x + 20f * density, start.y + NODE_HEIGHT * density / 2 + 20f * density)
-                                        lineTo(lane, start.y + NODE_HEIGHT * density / 2 + 20f * density)
-                                        lineTo(lane, end.y)
-                                        lineTo(end.x, end.y)
-                                    },
-                                    lineColor, style = Stroke(1.5.dp.toPx())
-                                )
-                            }
-                            tree.nodes.forEach { node ->
-                                if (!node.detached) {
-                                    edge(
-                                        node.parentId?.let(PolicyCanvasKeys::node)?.takeIf { it in automatic }
-                                            ?: PolicyCanvasKeys.ROOT,
-                                        PolicyCanvasKeys.node(node.id)
-                                    )
-                                }
-                                (node.target as? PolicyTarget.Channel)?.id?.takeIf { id -> channelNodes.any { it.id == id } }
-                                    ?.let { portal(PolicyCanvasKeys.node(node.id), it) }
-                            }
-                            (tree.defaultTarget as? PolicyTarget.Channel)?.id?.takeIf { id -> channelNodes.any { it.id == id } }
-                                ?.let { portal(PolicyCanvasKeys.ROOT, it) }
+                SchemaNodeSurface(Modifier.fillMaxWidth().weight(1f)) {
+                    Text(
+                        scopeTitle(tree.scope, bundle), style = MaterialTheme.typography.titleSmall,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(stringResource(R.string.expert_branching_root), style = MaterialTheme.typography.bodySmall)
+                }
+                if (!readOnly) nodeActions?.invoke(null)
+            }
+        })
+        tree.nodes.forEach { node ->
+            val inactiveNode = !node.enabled || node.detached || node.id in inactive
+            val fill = when {
+                inactiveNode -> MaterialTheme.colorScheme.surfaceVariant
+                node.target is PolicyTarget.Channel -> MaterialTheme.colorScheme.tertiaryContainer
+                node.protected -> MaterialTheme.colorScheme.secondaryContainer
+                PolicyOtherwise.isOtherwise(node) -> MaterialTheme.colorScheme.secondaryContainer
+                else -> MaterialTheme.colorScheme.surfaceContainerHighest
+            }
+            add(canvasNode(PolicyCanvasKeys.node(node.id)) {
+                Card(
+                    onClick = { onSelect?.invoke(PolicyCanvasKeys.node(node.id)) ?: onEdit(node) },
+                    colors = CardDefaults.cardColors(containerColor = fill),
+                    modifier = cardModifier(),
+                    border = if (selectedKey == PolicyCanvasKeys.node(node.id) || node.id in shownHighlights) {
+                        BorderStroke(2.dp, pathColor)
+                    } else {
+                        null
+                    },
+                ) {
+                    SchemaNodeSurface(Modifier.fillMaxWidth().weight(1f), containerColor = fill) {
+                        val nodeTitle = if (PolicyOtherwise.isOtherwise(node)) {
+                            stringResource(R.string.expert_otherwise_title)
+                        } else {
+                            node.title.ifBlank { stringResource(R.string.expert_rule_unnamed) }
                         }
-                        Card(onClick = onRoot, modifier = cardModifier(PolicyCanvasKeys.ROOT)) {
-                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(scopeTitle(tree.scope, bundle), style = MaterialTheme.typography.titleSmall)
-                                Text(stringResource(R.string.expert_default_path), style = MaterialTheme.typography.labelSmall)
-                                Text(targetTitle(tree.defaultTarget, bundle, policy), style = MaterialTheme.typography.bodySmall)
-                            }
+                        Text(
+                            nodeTitle,
+                            style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            if (tree.nodes.any { it.parentId == node.id && !it.detached }) {
+                                stringResource(R.string.expert_branching_root)
+                            } else {
+                                targetTitle(node.target, bundle, policy)
+                            },
+                            style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        )
+                        if (PolicyOtherwise.isOtherwise(node)) {
+                            Text(
+                                stringResource(R.string.expert_otherwise_hint),
+                                style = MaterialTheme.typography.labelSmall, maxLines = 2,
+                            )
                         }
-                        tree.nodes.forEach { node ->
-                            val inactiveNode = !node.enabled || node.detached || node.id in inactive
-                            val fill = when {
-                                inactiveNode -> MaterialTheme.colorScheme.surfaceVariant
-                                node.target is PolicyTarget.Channel -> MaterialTheme.colorScheme.tertiaryContainer
-                                node.protected -> MaterialTheme.colorScheme.secondaryContainer
-                                else -> MaterialTheme.colorScheme.surfaceContainerHighest
-                            }
-                            Card(
-                                onClick = { onEdit(node) }, colors = CardDefaults.cardColors(containerColor = fill),
-                                modifier = cardModifier(PolicyCanvasKeys.node(node.id))
-                            ) {
-                                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(
-                                        node.title.ifBlank {
-                                            stringResource(R.string.expert_rule_unnamed)
-                                        },
-                                        style = MaterialTheme.typography.titleSmall, maxLines = 2
-                                    )
-                                    Text(
-                                        targetTitle(node.target, bundle, policy),
-                                        style = MaterialTheme.typography.bodySmall, maxLines = 2,
-                                    )
-                                    if (inactiveNode) {
-                                        Text(
-                                            stringResource(
-                                                when {
-                                                    node.detached -> R.string.expert_detached
-                                                    !node.enabled -> R.string.expert_rule_disabled
-                                                    else -> R.string.expert_inactive_android
-                                                }
-                                            ),
-                                            style = MaterialTheme.typography.labelSmall, maxLines = 2
-                                        )
+                        if (inactiveNode) {
+                            Text(
+                                stringResource(
+                                    when {
+                                        node.detached -> R.string.expert_detached
+                                        !node.enabled -> R.string.expert_rule_disabled
+                                        else -> R.string.expert_inactive_android
                                     }
-                                }
-                            }
+                                ),
+                                style = MaterialTheme.typography.labelSmall, maxLines = 2
+                            )
                         }
-                        channelNodes.forEach { channel ->
-                            Card(
-                                onClick = { onChannel(channel.id) }, modifier = cardModifier(PolicyCanvasKeys.channel(channel.id)),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
-                            ) {
-                                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(
-                                        stringResource(R.string.expert_channel, channel.name),
-                                        style = MaterialTheme.typography.titleSmall,
-                                    )
-                                    Text(targetTitle(channel.target, bundle, policy), style = MaterialTheme.typography.bodySmall)
-                                    Text(
-                                        stringResource(
-                                            R.string.expert_observation_rule,
-                                            tree.nodes.count {
-                                                (it.target as? PolicyTarget.Channel)?.id ==
-                                                    channel.id
-                                            }
-                                        ),
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
+                    }
+                    if (!readOnly) nodeActions?.invoke(node)
+                }
+            })
+        }
+        channelNodes.forEach { channel ->
+            add(canvasNode(PolicyCanvasKeys.channel(channel.id)) {
+                Card(
+                    onClick = { onChannel(channel.id) }, modifier = cardModifier(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                    border = if (channel.id in highlightedChannels) BorderStroke(2.dp, pathColor) else null,
+                ) {
+                    SchemaNodeSurface(Modifier.fillMaxWidth().weight(1f), containerColor = MaterialTheme.colorScheme.tertiaryContainer) {
+                        Text(
+                            stringResource(R.string.expert_channel, channel.name),
+                            style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            targetTitle(channel.target, bundle, policy), style = MaterialTheme.typography.bodySmall,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            stringResource(
+                                R.string.expert_observation_rule,
+                                tree.nodes.count {
+                                    (it.target as? PolicyTarget.Channel)?.id ==
+                                        channel.id
                                 }
+                            ),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                    if (!readOnly) IconButton({ onChannel(channel.id) }) {
+                        Icon(LerNetSymbols.more(), contentDescription = stringResource(R.string.expert_node_options))
+                    }
+                }
+            })
+        }
+    }
+    LaunchedEffect(base, dragged.toMap(), density) {
+        holders.keys.retainAll(nodes.map { it.id }.toSet())
+        nodes.forEach { node ->
+            val position = world(node.id) * density
+            node.state.x = position.x; node.state.y = position.y
+        }
+    }
+    fun centerRoot() {
+        if (viewportSize.width > 0) {
+            val root = world(PolicyCanvasKeys.ROOT) * density
+            canvasState.viewport.offset = Offset(
+                viewportSize.width / 2f - (root.x + NODE_WIDTH * density / 2f) * canvasState.viewport.scale,
+                16f * density - root.y * canvasState.viewport.scale,
+            )
+            centered = true
+        }
+    }
+    LaunchedEffect(tree.scope, viewportSize) { if (!centered) centerRoot() }
+    LaunchedEffect(tree.positions) {
+        if (centerAfterAlign && tree.positions.isEmpty()) { centerRoot(); centerAfterAlign = false }
+    }
+    Column(modifier.padding(horizontal = LerNetDimens.screenPadding), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        SchemaCanvasControls(canvasState, onCenter = ::centerRoot,
+            zoomAnchor = Offset(viewportSize.width / 2f, viewportSize.height / 2f),
+            onAlign = if (readOnly) null else ({
+                dragged.clear()
+                centerAfterAlign = tree.positions.isNotEmpty()
+                onAlign()
+                if (!centerAfterAlign) centerRoot()
+            }))
+        Box(Modifier.fillMaxWidth().weight(1f).clipToBounds().onSizeChanged { viewportSize = it }) {
+            SchemaCanvas(canvasState, nodes, Modifier.fillMaxSize())
+            Canvas(Modifier.fillMaxSize()) {
+                val renderDensity = density * canvasState.viewport.scale
+                val nodeExtent = tree.nodes.maxOfOrNull { world(PolicyCanvasKeys.node(it.id)).x + NODE_WIDTH } ?: NODE_WIDTH
+                fun point(key: String): Offset = world(key) * renderDensity + canvasState.viewport.offset
+                fun edge(from: String, to: String) {
+                    val start = point(from) + Offset(NODE_WIDTH * renderDensity / 2, nodeHeight * renderDensity)
+                    val end = point(to) + Offset(NODE_WIDTH * renderDensity / 2, 0f)
+                    val middle = (start.y + end.y) / 2f
+                    drawPath(
+                        Path().apply {
+                            moveTo(start.x, start.y)
+                            lineTo(start.x, middle)
+                            lineTo(end.x, middle)
+                            lineTo(end.x, end.y)
+                        },
+                        if (to.removePrefix("node:") in shownHighlights ||
+                            tree.nodes.any { PolicyCanvasKeys.node(it.id) == to && it.id in shownHighlights }
+                        ) {
+                            pathColor.copy(alpha = pathProgress.value)
+                        } else {
+                            lineColor
+                        },
+                        style = Stroke(
+                            if (tree.nodes.any { PolicyCanvasKeys.node(it.id) == to && it.id in shownHighlights }) {
+                                3.dp.toPx()
+                            } else {
+                                1.5.dp.toPx()
                             }
-                        }
+                        ),
+                    )
+                }
+                fun portal(from: String, channelId: String) {
+                    val start = point(from) + Offset(NODE_WIDTH * renderDensity, nodeHeight * renderDensity / 2)
+                    val end = point(PolicyCanvasKeys.channel(channelId)) +
+                        Offset(NODE_WIDTH * renderDensity, nodeHeight * renderDensity / 2)
+                    val lane =
+                        (nodeExtent + 40f + channelNodes.indexOfFirst { it.id == channelId } * 16f) * renderDensity + canvasState.viewport.offset.x
+                    drawPath(
+                        Path().apply {
+                            moveTo(start.x, start.y)
+                            lineTo(start.x + 20f * renderDensity, start.y)
+                            lineTo(start.x + 20f * renderDensity, start.y + nodeHeight * renderDensity / 2 + 20f * renderDensity)
+                            lineTo(lane, start.y + nodeHeight * renderDensity / 2 + 20f * renderDensity)
+                            lineTo(lane, end.y)
+                            lineTo(end.x, end.y)
+                        },
+                        if (channelId in highlightedChannels) pathColor.copy(alpha = pathProgress.value) else lineColor,
+                        style = Stroke(if (channelId in highlightedChannels) 3.dp.toPx() else 1.5.dp.toPx()),
+                    )
+                }
+                tree.nodes.forEach { node ->
+                    if (!node.detached) {
+                        edge(
+                            node.parentId?.let(PolicyCanvasKeys::node)?.takeIf { it in automatic }
+                                ?: PolicyCanvasKeys.ROOT,
+                            PolicyCanvasKeys.node(node.id)
+                        )
+                    }
+                    (node.target as? PolicyTarget.Channel)?.id?.takeIf { id -> channelNodes.any { it.id == id } }
+                        ?.let { portal(PolicyCanvasKeys.node(node.id), it) }
+                }
+            }
+            if (!readOnly && onAdd != null && selectedKey != null) {
+                val selectedNode = tree.nodes.firstOrNull { PolicyCanvasKeys.node(it.id) == selectedKey }
+                if (selectedKey == PolicyCanvasKeys.ROOT || selectedNode != null && ExpertEdits.canAddChild(selectedNode)) {
+                    val bottom = canvasState.viewport.worldToScreen(
+                        (world(selectedKey) + Offset(NODE_WIDTH / 2f, nodeHeight)) * density,
+                    )
+                    val point = bottom + Offset(-24f * density, 8f * density)
+                    FilledIconButton({ onAdd(selectedNode) }, Modifier
+                        .offset { IntOffset(point.x.roundToInt(), point.y.roundToInt()) }.size(48.dp)) {
+                        Icon(app.lernet.ui.icons.LerNetSymbols.add(), contentDescription = stringResource(R.string.expert_add_child))
                     }
                 }
             }
@@ -292,7 +385,7 @@ internal fun ExpertGraph(
 }
 
 /** Top-down layout centers each parent over its children; root and channels have their own rows. */
-private fun graphPositions(tree: PolicyTree): Map<String, Offset> {
+private fun graphPositions(tree: PolicyTree, nodeHeight: Float): Map<String, Offset> {
     val children = tree.nodes.groupBy { it.parentId }
     val result = linkedMapOf<String, Offset>()
     val visiting = mutableSetOf<String>()
@@ -306,7 +399,7 @@ private fun graphPositions(tree: PolicyTree): Map<String, Offset> {
             descendants.map { place(it, depth + 1) }.average().toFloat()
         }
         result[PolicyCanvasKeys.node(node.id)] = Offset(
-            24f + center * (NODE_WIDTH + COLUMN_GAP), 24f + depth * (NODE_HEIGHT + ROW_GAP),
+            24f + center * (NODE_WIDTH + COLUMN_GAP), 24f + depth * (nodeHeight + ROW_GAP),
         )
         return center
     }

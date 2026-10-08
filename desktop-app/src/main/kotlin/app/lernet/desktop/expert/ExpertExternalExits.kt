@@ -317,7 +317,7 @@ internal fun ExpertExternalExitDetails(
     onEdit: () -> Unit,
     openScope: (PolicyScope) -> Unit = {},
 ) {
-    ExpertModal(profile.request.name, onDismiss, onDismiss, true, "Закрыть") {
+    ExpertModal(profile.request.name, onDismiss, onDismiss, true, "Закрыть", showCancel = false) {
         ExpertTag(externalKindName(profile.request.kind))
         val request = profile.request
         if (request.kind == ExternalExitKind.CORPORATE_INTERFACE) {
@@ -367,7 +367,7 @@ internal fun ExpertImportedInterfaceDetails(
     openScope: (PolicyScope) -> Unit = {},
 ) {
     val binding = profile.interfaceBinding ?: return
-    ExpertModal(profile.name, onDismiss, onDismiss, true, "Закрыть") {
+    ExpertModal(profile.name, onDismiss, onDismiss, true, "Закрыть", showCancel = false) {
         ExpertTag("Расширенный профиль · только просмотр", ExpertColors.muted)
         Text("Сохранённый адаптер: ${binding.name}", color = ExpertColors.text)
         Text("Номер: ${binding.index}", color = ExpertColors.muted)

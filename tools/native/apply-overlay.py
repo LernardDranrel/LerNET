@@ -61,14 +61,24 @@ replace("route/route.go", "if r.LerNETOwnerUnknown(&metadata) { return E.New(\"u
 replace("route/dns.go", "func (r *Router) HijackDNSPacket(ctx context.Context, payload []byte, writer N.PacketWriter, metadata adapter.InboundContext) {", "func (r *Router) HijackDNSPacket(ctx context.Context, payload []byte, writer N.PacketWriter, metadata adapter.InboundContext) {\n\tr.HijackDNSPacketTracked(ctx, payload, writer, metadata, func(){})\n}\n\nfunc (r *Router) HijackDNSPacketTracked(ctx context.Context, payload []byte, writer N.PacketWriter, metadata adapter.InboundContext, completed func()) {\n\ttransferred := false\n\tdefer func(){ if !transferred { completed() } }()")
 replace("route/dns.go", "go func() {\n\t\tdefer r.dnsHijackSem.Release(1)", "transferred = true\n\tgo func() {\n\t\tdefer r.dnsHijackSem.Release(1)")
 replace("route/dns.go", "func(response *mDNS.Msg, exchangeErr error) {", "func(response *mDNS.Msg, exchangeErr error) {\n\t\t\tdefer completed()")
+replace("route/dns.go", "defer completed()\n\t\t\tif exchangeErr == nil", "defer completed()\n\t\t\tif exchangeErr != nil { observed:=metadata; observed.Destination=destination; observed.Protocol=\"dns\"; if len(message.Question)>0 {observed.Domain=message.Question[0].Name}; r.LerNETObserveFailure(ctx,observed,\"dns\",exchangeErr) }\n\t\t\tif exchangeErr == nil")
 replace("route/dns.go", "destination := metadata.Destination", "if r.LerNETOwnerUnknown(&metadata) { r.LerNETObserveDecision(ctx, metadata, nil, \"blocked\", \"attribution_unknown\"); return }\n\tdestination := metadata.Destination")
 replace("route/dns.go", "func (r *Router) hijackDNSStream(ctx context.Context, conn net.Conn, metadata adapter.InboundContext) error {", "func (r *Router) hijackDNSStream(ctx context.Context, conn net.Conn, metadata adapter.InboundContext) error {\n\tctx,completed:=r.lernetTrackDNSIngress(ctx,conn);defer completed()\n\tif err:=ctx.Err();err!=nil{return err}")
 replace("route/dns.go", "func (r *Router) hijackDNSPacket(ctx context.Context, conn N.PacketConn, packetBuffers []*N.PacketBuffer, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) error {", "func (r *Router) hijackDNSPacket(ctx context.Context, conn N.PacketConn, packetBuffers []*N.PacketBuffer, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) error {\n\tctx,completed:=r.lernetTrackDNSIngress(ctx,conn);defer completed()\n\tif err:=ctx.Err();err!=nil{N.ReleaseMultiPacketBuffer(packetBuffers);return err}")
 replace("dns/router.go", "metadata.Destination = M.Socksaddr{}\n\tmetadata.QueryType", "// DNS detours never inherit a business flow's ordinary DIRECT fallback.\n\tmetadata.LerNETProtected=true\n\tmetadata.LerNETFallback=\"block\"\n\tmetadata.Destination = M.Socksaddr{}\n\tmetadata.QueryType")
+replace("dns/client.go", "func (c *Client) beginExchange(ctx context.Context, transport adapter.DNSTransport, message *dns.Msg, options adapter.DNSQueryOptions, responseChecker func(response *dns.Msg) bool, allowWait bool) (*exchangeOperation, *dns.Msg, exchangeStatus, error) {", "func (c *Client) beginExchange(ctx context.Context, transport adapter.DNSTransport, message *dns.Msg, options adapter.DNSQueryOptions, responseChecker func(response *dns.Msg) bool, allowWait bool) (*exchangeOperation, *dns.Msg, exchangeStatus, error) {\n\tif responseChecker==nil && transport!=nil && ctx.Err()==nil {if response:=lernetDirectFamilyResponse(c.ctx,message,transport.Tag());response!=nil{if c.logger!=nil{c.logger.DebugContext(ctx,\"Direct IPv6 unavailable: AAAA NODATA for \" ,message.Question[0].Name)};return nil,response,exchangeDone,nil}}")
 for relative in ("route/route.go", "route/dns.go"):
     PATCH_BUFFERS[relative] = PATCH_BUFFERS[relative].replace("r.LerNETOwnerUnknown(&metadata)", "r.LerNETOwnerUnknownDNS(&metadata)")
     (SOURCE / relative).write_text(PATCH_BUFFERS[relative], encoding="utf-8", newline="\n")
 
+replace("option/dns.go", "type RemoteDNSServerOptions struct {", "type RemoteDNSServerOptions struct {\n\tLerNETSystemRoute bool `json:\"lernet_system_route,omitempty\"`")
+replace("dns/transport_dialer.go", "func NewRemoteDialer(ctx context.Context, options option.RemoteDNSServerOptions) (N.Dialer, error) {", "func NewRemoteDialer(ctx context.Context, options option.RemoteDNSServerOptions) (N.Dialer, error) {\n\tif options.LerNETSystemRoute { var err error; ctx,err = dialer.LerNETSystemRouteContext(ctx); if err != nil { return nil, err } }")
+# Preserve Windows' chosen DNS destination independently of DNS rule matching.
+replace("adapter/inbound.go", "type InboundContext struct {", "type InboundContext struct {\n\tLerNETDNSDestination M.Socksaddr")
+replace("option/dns.go", "type RawLocalDNSServerOptions struct {", "type RawLocalDNSServerOptions struct {\n\tLerNETPreserveDestination bool `json:\"lernet_preserve_destination,omitempty\"`")
+replace("dns/transport/local/local.go", "transportDialer, err := dns.NewLocalDialer(ctx, options)", "if options.LerNETPreserveDestination {\n\t\tvar err error; ctx, err = lernetPreservingContext(ctx); if err != nil { return nil, err }\n\t}\n\ttransportDialer, err := dns.NewLocalDialer(ctx, options)")
+replace("dns/transport/local/local.go", "return &Transport{", "transport := &Transport{")
+replace("dns/transport/local/local.go", "\t}, nil\n}", "\t}\n\tif options.LerNETPreserveDestination { return newLerNETPreservingTransport(ctx, logger, transport) }\n\treturn transport, nil\n}")
 replace("adapter/inbound.go", "LerNETProtected bool", "LerNETNodeIDs []string\n\tLerNETFlowObserver func(string,string)\n\tLerNETProtected bool")
 replace("option/rule_action.go", "type RawRouteOptionsActionOptions struct {", "type RawRouteOptionsActionOptions struct {\n\tLerNETNodeIDs []string `json:\"lernet_node_ids,omitempty\"`")
 replace("option/rule_action.go", "if *r == (RouteOptionsActionOptions{}) {", "if reflect.DeepEqual(*r, RouteOptionsActionOptions{}) {")
@@ -95,9 +105,12 @@ replace("route/route.go", "case *R.RuleActionReject:\n\t\t\tbuf.ReleaseMulti", "
 replace("route/route.go", "case *R.RuleActionReject:\n\t\t\tN.ReleaseMultiPacketBuffer", "case *R.RuleActionReject:\n\t\t\tr.LerNETObserveDecision(ctx, metadata, selectedRule, \"blocked\", \"policy_reject\")\n\t\t\tN.ReleaseMultiPacketBuffer")
 replace("route/route.go", "conn = tracker.RoutedConnection(ctx, conn, metadata, selectedRule, selectedOutbound)\n\t}", "conn = tracker.RoutedConnection(ctx, conn, metadata, selectedRule, selectedOutbound)\n\t\tif observer,ok:=conn.(interface{LerNETDecisionObserver()func(string,string)});ok{metadata.LerNETFlowObserver=observer.LerNETDecisionObserver()}\n\t}")
 replace("route/route.go", "conn = tracker.RoutedPacketConnection(ctx, conn, metadata, selectedRule, selectedOutbound)\n\t}", "conn = tracker.RoutedPacketConnection(ctx, conn, metadata, selectedRule, selectedOutbound)\n\t\tif observer,ok:=conn.(interface{LerNETDecisionObserver()func(string,string)});ok{metadata.LerNETFlowObserver=observer.LerNETDecisionObserver()}\n\t}")
+for method in ("RoutedConnection", "RoutedPacketConnection"):
+    anchor = f"conn = tracker.{method}(ctx, conn, metadata, selectedRule, selectedOutbound)"
+    replace("route/route.go", anchor, anchor + "\n\t\tif observer,ok:=conn.(interface{LerNETCloseObserver()func(error)});ok{ observe:=observer.LerNETCloseObserver(); previous:=onClose; onClose=N.OnceClose(func(err error){observe(err);if previous!=nil{previous(err)}}) }")
 replace("protocol/tun/inbound.go", "func (t *Inbound) JudgeFlow(network uint8", "// LerNETInterfaceIdentity is read only after Start succeeded. It describes the\n// actual retained native interface, rather than a policy generation UUID.\nfunc (t *Inbound) LerNETInterfaceIdentity() string {\n\tindex := 0\n\tif actual, err := net.InterfaceByName(t.tunOptions.Name); err == nil { index = actual.Index }\n\treturn t.tunOptions.Name + \":\" + strconv.Itoa(index) + \":\" + strconv.Itoa(t.tunOptions.FileDescriptor)\n}\n\nfunc (t *Inbound) JudgeFlow(network uint8")
 replace("protocol/tun/inbound.go", "func (t *Inbound) LerNETInterfaceIdentity() string {", "func(t *Inbound)LerNETPendingPacketLimits()(int,int){if limits,ok:=t.router.(interface{LerNETPendingPacketLimits()(int,int)});ok{return limits.LerNETPendingPacketLimits()};return 0,0}\n\nfunc (t *Inbound) LerNETInterfaceIdentity() string {")
-replace("protocol/tun/inbound.go", "func (t *Inbound) LerNETInterfaceIdentity() string {", "func(t *Inbound)LerNETUpdateCaptureRoutes(prefixes []netip.Prefix)error{\n\tif t.tunIf==nil{return E.New(\"owned TUN unavailable\")}\n\toptions:=t.tunOptions;options.Inet4RouteAddress=nil;options.Inet6RouteAddress=nil\n\tfor _,prefix:=range prefixes{if prefix.Addr().Is4(){options.Inet4RouteAddress=append(options.Inet4RouteAddress,prefix)}else{options.Inet6RouteAddress=append(options.Inet6RouteAddress,prefix)}}\n\tif err:=t.tunIf.UpdateRouteOptions(options);err!=nil{return err};t.tunOptions=options;return nil\n}\n\nfunc (t *Inbound) LerNETInterfaceIdentity() string {")
+replace("protocol/tun/inbound.go", "func (t *Inbound) LerNETInterfaceIdentity() string {", "func(t *Inbound)LerNETUpdateCaptureRoutes(prefixes []netip.Prefix)error{\n\tif t.tunIf==nil{return E.New(\"owned TUN unavailable\")}\n\toptions:=t.tunOptions;options.Inet4RouteAddress=nil;options.Inet6RouteAddress=nil\n\tfor _,prefix:=range prefixes{if prefix.Addr().Is4(){options.Inet4RouteAddress=append(options.Inet4RouteAddress,prefix)}else{options.Inet6RouteAddress=append(options.Inet6RouteAddress,prefix)}}\n\tvar err error;if updater,ok:=t.tunIf.(interface{LerNETUpdateCaptureRouteOptions(tun.Options)error});ok{err=updater.LerNETUpdateCaptureRouteOptions(options)}else{err=t.tunIf.UpdateRouteOptions(options)};if err!=nil{return err};t.tunOptions=options;return nil\n}\n\nfunc (t *Inbound) LerNETInterfaceIdentity() string {")
 replace("protocol/tun/inbound.go", "t.tunOptions.Name = tunOptions.Name", "t.lernetRetainOpenedIdentity(tunOptions)")
 replace("cmd/sing-box/main.go", "func main() {", "func main() {\n\t// Only the elevated Expert TUN service can use this WFP-trusted binary.\n\tfor _,command:=range mainCommand.Commands(){if command.Name()!=\"expert\"{mainCommand.RemoveCommand(command)}}")
 replace("option/direct.go", "type _DirectOutboundOptions struct {", "type LerNETInterfaceOptions struct {\n\tGUID string `json:\"guid\"`\n\tName string `json:\"name\"`\n\tIndex int `json:\"index\"`\n}\n\ntype _DirectOutboundOptions struct {\n\tLerNETInterface *LerNETInterfaceOptions `json:\"lernet_interface,omitempty\"`")
@@ -195,3 +208,23 @@ for original in overlay.rglob("*"):
         shutil.copyfile(original, destination)
 (SOURCE / ".lernet-overlay-applied").write_text(PIN, encoding="ascii")
 print(f"Applied LerNET native overlay to {actual}")
+
+# Keep server selection before clearing destination for DNS condition matching.
+for relative in ("route/dns.go", "protocol/dns/handle.go"):
+    if relative not in PATCH_BUFFERS:
+        PATCH_BUFFERS[relative] = subprocess.check_output(["git", "show", f"{PIN}:{relative}"], cwd=SOURCE).decode("utf-8")
+    contents = PATCH_BUFFERS[relative]
+    anchor = "metadata.Destination = M.Socksaddr{}"
+    if anchor not in contents:
+        raise SystemExit(f"DNS destination anchor changed: {relative}")
+    contents = contents.replace(anchor, "metadata.LerNETDNSDestination = metadata.Destination\n\t" + anchor)
+    if relative == "protocol/dns/handle.go":
+        anchor = "metadataInQuery := metadata"
+        # TCP inherits the captured destination; each UDP query has its own endpoint.
+        first = contents.index(anchor)
+        head, tail = contents[:first + len(anchor)], contents[first + len(anchor):]
+        if tail.count(anchor) != 2:
+            raise SystemExit("DNS packet query anchor changed")
+        contents = head + tail.replace(anchor, anchor + "\n\t\t\tmetadataInQuery.LerNETDNSDestination = destination")
+    PATCH_BUFFERS[relative] = contents
+    (SOURCE / relative).write_text(contents, encoding="utf-8", newline="\n")

@@ -16,9 +16,37 @@ data class NetworkPolicy(
     val folderPolicies: List<FolderPolicy> = emptyList(),
     val profilePolicies: List<ProfileExitPolicy> = emptyList(),
     val health: PolicyHealthSettings = PolicyHealthSettings(),
+    val dns: PolicyDnsSettings = PolicyDnsSettings(),
 ) {
     companion object {
         const val VERSION = 1
+    }
+}
+
+/** Expert DNS is independent of the ordinary VPN's legacy direct DNS setting. */
+@Serializable
+enum class PolicyDnsMode { SYSTEM, CUSTOM }
+
+@Serializable
+data class PolicyDnsSettings(
+    val mode: PolicyDnsMode = PolicyDnsMode.SYSTEM,
+    val server: String = "1.1.1.1",
+) {
+    fun isValid(): Boolean = server.length <= 64 &&
+        (mode == PolicyDnsMode.SYSTEM || validServer(server))
+
+    companion object {
+        fun validServer(value: String): Boolean {
+            val parts = value.split('.')
+            return parts.size == 4 &&
+                parts.all {
+                    it.isNotEmpty() &&
+                        it.length <= 3 &&
+                        it.all { char -> char in '0'..'9' } &&
+                        it.toIntOrNull()?.let { number -> number in 0..255 && number.toString() == it } == true
+                } &&
+                parts.first().toIntOrNull()?.let { it in 1..223 } == true
+        }
     }
 }
 
@@ -80,6 +108,8 @@ data class PolicyNode(
     val redirect: DestinationRedirect? = null,
     /** Detached nodes remain editable but cannot execute. */
     val detached: Boolean = false,
+    /** Last unconditional branch at this level; its children can form another complete level. */
+    val otherwise: Boolean = false,
 )
 
 @Serializable

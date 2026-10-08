@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="expert_schema_pending">Есть неприменённые изменения</string>
+    <string name="expert_schema_applied">Схема применена</string>
+    <string name="expert_schema_saved">Схема сохранена · туннель выключен</string>
+    <string name="expert_simulation_hide_editor">Скрыть параметры</string>
+    <string name="expert_simulation_edit_parameters">Изменить параметры</string>
+    <string name="expert_simulation_create_example">Создать пример</string>
+    <string name="expert_simulation_recorded_path">Как прошло тогда</string>
+    <string name="expert_simulation_current_path">Как пройдёт по текущей схеме</string>
+    <string name="expert_simulation_with_edits">С учётом несохранённых правок</string>
+    <string name="expert_simulation_history_first">Выберите соединение из истории. Если история пока пуста, включите туннель или создайте свой пример.</string>
+    <string name="expert_simulation_invalid_example">Откройте параметры примера и исправьте адрес или порт.</string>
+</resources>

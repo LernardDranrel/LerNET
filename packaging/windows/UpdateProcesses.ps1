@@ -30,6 +30,73 @@ function Get-LerNetEventName([string]$Executable) {
     return 'Local\LerNET.Update.' + ([BitConverter]::ToString($hash).Replace('-', '').ToLowerInvariant())
 }
 
+function Get-LerNetProcessOperations {
+    # Process.Handle pins the kernel object. .NET Framework Kill and WaitForExit
+    # reuse that stored handle; never close/refresh it and reopen by PID.
+    return @{
+        Open = { param($ProcessId)
+            try { return [Diagnostics.Process]::GetProcessById($ProcessId) }
+            catch [ArgumentException] { return $null } # Already disappeared.
+        }
+        Pin = { param($Process) [void]$Process.Handle }
+        Identity = { param($Process)
+            return [pscustomobject]@{ CreationDate=$Process.StartTime; ExecutablePath=$Process.MainModule.FileName }
+        }
+        Exited = { param($Process) return $Process.HasExited }
+        Stop = { param($Process) $Process.Kill() }
+        Wait = { param($Process, $Milliseconds) return $Process.WaitForExit($Milliseconds) }
+        Dispose = { param($Process) $Process.Dispose() }
+    }
+}
+
+function Open-LerNetOwnedProcessLease($Item, $Operations) {
+    if (-not $Item.CreationDate -or -not $Item.ExecutablePath) { throw 'Missing owned process identity' }
+    $process = & $Operations.Open ([int]$Item.ProcessId)
+    if ($null -eq $process) { return $null }
+    $retained = $false
+    try {
+        & $Operations.Pin $process
+        if (& $Operations.Exited $process) { return $null }
+        $identity = & $Operations.Identity $process
+        # Win32_Process CreationDate has microsecond precision; Process.StartTime
+        # can also have a seventh fractional digit. Compare at the snapshot precision.
+        $format = 'yyyyMMddHHmmssffffff'
+        $culture = [Globalization.CultureInfo]::InvariantCulture
+        $expectedTime = ([datetime]$Item.CreationDate).ToUniversalTime().ToString($format, $culture)
+        $actualTime = ([datetime]$identity.CreationDate).ToUniversalTime().ToString($format, $culture)
+        if (-not $identity.ExecutablePath -or $expectedTime -cne $actualTime -or
+            -not $identity.ExecutablePath.Equals($Item.ExecutablePath, [StringComparison]::OrdinalIgnoreCase)) {
+            return $null # Reused PID or another executable: never mutate it.
+        }
+        $retained = $true
+        return [pscustomobject]@{ Process=$process; Item=$Item }
+    } catch {
+        $failure = $_
+        $exited = $false
+        try { $exited = & $Operations.Exited $process } catch { $exited = $false }
+        if (-not $exited) { throw $failure }
+    } finally {
+        if (-not $retained) { & $Operations.Dispose $process }
+    }
+}
+
+function Stop-LerNetProcessLease($Lease, $Operations) {
+    try {
+        if (-not (& $Operations.Exited $Lease.Process)) { & $Operations.Stop $Lease.Process }
+    } catch {
+        $failure = $_
+        $exited = $false
+        try { $exited = & $Operations.Exited $Lease.Process } catch { $exited = $false }
+        # A graceful exit racing Kill is success only when this retained object exited.
+        if (-not $exited) { throw $failure }
+    }
+}
+
+function Confirm-LerNetProcessLeaseExit($Lease, $Operations) {
+    if (-not (& $Operations.Wait $Lease.Process 10000) -and
+        -not (& $Operations.Exited $Lease.Process)) { throw 'LerNET is still running' }
+}
+
 function Get-LerNetPreparationFailure([string]$Stage, $Failure, [bool]$HasLegacyProduct) {
     # Exception messages and invocation text may contain private paths or arguments.
     return [ordered]@{
@@ -50,37 +117,38 @@ try {
     $snapshot = @(Get-CimInstance Win32_Process)
     $owned = @(Get-LerNetOwnedProcesses $snapshot $executable)
     if ($owned.Count -gt 0) {
+        $operations = Get-LerNetProcessOperations
+        $leases = @()
         try {
-            $lernetPreparationStage = 'signal-shutdown'
-            $signal = [Threading.EventWaitHandle]::OpenExisting((Get-LerNetEventName $executable))
-            try { [void]$signal.Set() } finally { $signal.Dispose() }
-            $deadline = [DateTime]::UtcNow.AddSeconds(15)
-            while ([DateTime]::UtcNow -lt $deadline -and (Get-Process -Id @($owned.ProcessId) -ErrorAction SilentlyContinue)) {
-                Start-Sleep -Milliseconds 250
+            $lernetPreparationStage = 'lease-owned-process'
+            foreach ($item in $owned) {
+                $lease = Open-LerNetOwnedProcessLease $item $operations
+                if ($null -ne $lease) { $leases += $lease }
             }
-        } catch [Threading.WaitHandleCannotBeOpenedException] {
-            # Older versions have no shutdown signal. Ask to close first, then scoped fallback.
-            $lernetPreparationStage = 'close-window-fallback'
-            foreach ($item in $owned | Where-Object { $_.ExecutablePath -eq $executable }) {
-                $process = Get-Process -Id $item.ProcessId -ErrorAction SilentlyContinue
-                if ($process) { [void]$process.CloseMainWindow() }
+            if ($leases.Count -gt 0) {
+                try {
+                    $lernetPreparationStage = 'signal-shutdown'
+                    $signal = [Threading.EventWaitHandle]::OpenExisting((Get-LerNetEventName $executable))
+                    try { [void]$signal.Set() } finally { $signal.Dispose() }
+                    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+                    while ([DateTime]::UtcNow -lt $deadline -and
+                        @($leases | Where-Object { -not (& $operations.Exited $_.Process) }).Count -gt 0) {
+                        Start-Sleep -Milliseconds 250
+                    }
+                } catch [Threading.WaitHandleCannotBeOpenedException] {
+                    # Legacy versions have no event. Do not post to a potentially reused
+                    # HWND; the verified retained handles provide the scoped fallback.
+                    $lernetPreparationStage = 'legacy-shutdown-grace'
+                    Start-Sleep -Seconds 2
+                }
+                $ordered = @($leases | Sort-Object @{Expression={ if ($_.Item.ExecutablePath -eq $executable) { 1 } else { 0 } }})
+                $lernetPreparationStage = 'stop-owned-process'
+                foreach ($lease in $ordered) { Stop-LerNetProcessLease $lease $operations }
+                $lernetPreparationStage = 'confirm-process-exit'
+                foreach ($lease in $leases) { Confirm-LerNetProcessLeaseExit $lease $operations }
             }
-            Start-Sleep -Seconds 2
-        }
-        # Snapshot creation time guards against a reused PID. Stop children before launchers.
-        $ordered = @($owned | Sort-Object @{Expression={ if ($_.ExecutablePath -eq $executable) { 1 } else { 0 } }})
-        $lernetPreparationStage = 'stop-owned-process'
-        foreach ($item in $ordered) {
-            $current = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$item.ProcessId)"
-            if ($current -and $current.CreationDate -eq $item.CreationDate -and $current.ExecutablePath -eq $item.ExecutablePath) {
-                Stop-Process -Id $item.ProcessId -Force
-            }
-        }
-        $lernetPreparationStage = 'confirm-process-exit'
-        foreach ($item in $owned) {
-            Wait-Process -Id $item.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
-            $current = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$item.ProcessId)"
-            if ($current -and $current.CreationDate -eq $item.CreationDate) { throw 'LerNET is still running' }
+        } finally {
+            foreach ($lease in $leases) { & $operations.Dispose $lease.Process }
         }
     }
     if ($LegacyProduct) {

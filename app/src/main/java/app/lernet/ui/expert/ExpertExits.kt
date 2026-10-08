@@ -17,6 +17,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.launch
+import app.lernet.routing.policy.NetworkPolicy
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -49,12 +53,16 @@ internal fun ExpertExits(
     bundle: TransferBundle,
     onIntent: (ExpertIntent) -> Unit,
     onSaveExternal: (suspend (ExternalExitRequest, TransferProfile?) -> String?)? = null,
+    onSaveDraft: (suspend (NetworkPolicy, NetworkPolicy) -> String?)? = null,
+    formMemory: ExpertFormMemory = remember { ExpertFormMemory() },
 ) {
-    var editingChannel by remember { mutableStateOf<PolicyChannel?>(null) }
+    var editingChannel by rememberSaveable(stateSaver = ExpertOptionalJsonSaver<PolicyChannel>()) { mutableStateOf<PolicyChannel?>(null) }
     var chooseOwner by remember { mutableStateOf(false) }
-    var lifecycleOwner by remember { mutableStateOf<PolicyScope?>(null) }
-    var externalEditor by remember { mutableStateOf(false) }
-    var externalProfile by remember { mutableStateOf<TransferProfile?>(null) }
+    var lifecycleOwner by rememberSaveable(stateSaver = ExpertOptionalJsonSaver<PolicyScope>()) { mutableStateOf<PolicyScope?>(null) }
+    var externalEditor by rememberSaveable { mutableStateOf(false) }
+    var externalProfile by remember { mutableStateOf(formMemory.externalProfile) }
+    var externalProfileId by rememberSaveable { mutableStateOf<String?>(null) }
+    var externalFingerprint by rememberSaveable { mutableStateOf<String?>(null) }
     var externalDetails by remember { mutableStateOf<TransferProfile?>(null) }
     var liveDetails by remember { mutableStateOf<ExpertExitState?>(null) }
     val unsupportedProfiles = remember(bundle.profiles) {
@@ -69,6 +77,10 @@ internal fun ExpertExits(
         if (onSaveExternal != null) {
             Button(onClick = {
                 externalProfile = null
+                formMemory.externalProfile = null
+                externalProfileId = null
+                externalFingerprint = null
+                formMemory.passwords.clear()
                 externalEditor = true
             }, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.expert_external_add))
@@ -80,7 +92,7 @@ internal fun ExpertExits(
             var preferredOpen by remember(folder.id) { mutableStateOf(false) }
             fun update(next: FolderPolicy) {
                 onIntent(
-                    ExpertIntent.Edit(
+                    ExpertIntent.EditChecked(policy,
                         policy.copy(folderPolicies = policy.folderPolicies.filterNot { it.folderId == folder.id } + next),
                     )
                 )
@@ -235,7 +247,14 @@ internal fun ExpertExits(
         )
     }
     if (externalEditor && onSaveExternal != null) {
-        ExpertExternalExitEditor(externalProfile, onDismiss = { externalEditor = false }, onSave = onSaveExternal)
+        val expected = externalProfile ?: externalProfileId?.let { id -> bundle.profiles.firstOrNull { it.id == id } }
+        ExpertExternalExitEditor(expected, onDismiss = {
+            externalEditor = false; formMemory.passwords.clear(); formMemory.externalProfile = null
+        }, onSave = { request, profile ->
+            if (externalProfileId != null && (profile == null || ExternalExitProfiles.fingerprint(profile) != externalFingerprint)) {
+                "Конфигурация изменилась. Откройте её свойства заново."
+            } else onSaveExternal(request, profile)
+        }, formMemory = formMemory)
     }
     externalDetails?.let { profile ->
         val editAction: (() -> Unit)? = if (onSaveExternal == null) {
@@ -243,6 +262,10 @@ internal fun ExpertExits(
         } else {
             {
                 externalProfile = profile
+                formMemory.externalProfile = profile
+                externalProfileId = profile.id
+                externalFingerprint = ExternalExitProfiles.fingerprint(profile)
+                formMemory.passwords.clear()
                 externalDetails = null
                 externalEditor = true
             }
@@ -253,27 +276,27 @@ internal fun ExpertExits(
         )
     }
     lifecycleOwner?.let { owner ->
+        val base by rememberSaveable(owner, stateSaver = ExpertPolicySaver) { mutableStateOf(policy) }
         val initial = when (owner) {
-            is PolicyScope.Profile -> policy.profilePolicies.firstOrNull { it.profileId == owner.id }?.lifecycle
-            is PolicyScope.Folder -> policy.folderPolicies.firstOrNull { it.folderId == owner.id }?.lifecycle
+            is PolicyScope.Profile -> base.profilePolicies.firstOrNull { it.profileId == owner.id }?.lifecycle
+            is PolicyScope.Folder -> base.folderPolicies.firstOrNull { it.folderId == owner.id }?.lifecycle
             PolicyScope.Device -> null
         } ?: ExitLifecyclePolicy()
         ExpertLifecycleEditor(initial, onDismiss = { lifecycleOwner = null }, onCommit = { lifecycle ->
             val updated = when (owner) {
-                is PolicyScope.Profile -> policy.copy(
-                    profilePolicies = policy.profilePolicies.filterNot { it.profileId == owner.id } +
+                is PolicyScope.Profile -> base.copy(
+                    profilePolicies = base.profilePolicies.filterNot { it.profileId == owner.id } +
                         ProfileExitPolicy(owner.id, lifecycle)
                 )
                 is PolicyScope.Folder -> {
-                    val settings = policy.folderPolicies.firstOrNull { it.folderId == owner.id } ?: FolderPolicy(owner.id)
-                    policy.copy(
-                        folderPolicies = policy.folderPolicies.filterNot { it.folderId == owner.id } + settings.copy(lifecycle = lifecycle),
+                    val settings = base.folderPolicies.firstOrNull { it.folderId == owner.id } ?: FolderPolicy(owner.id)
+                    base.copy(
+                        folderPolicies = base.folderPolicies.filterNot { it.folderId == owner.id } + settings.copy(lifecycle = lifecycle),
                     )
                 }
-                PolicyScope.Device -> policy
+                PolicyScope.Device -> base
             }
-            onIntent(ExpertIntent.Edit(updated))
-            lifecycleOwner = null
+            if (onSaveDraft == null) "Сохранение недоступно" else onSaveDraft(base, updated)
         })
     }
     if (chooseOwner) {
@@ -295,18 +318,25 @@ internal fun ExpertExits(
         )
     }
     editingChannel?.let { initial ->
-        var channel by remember(initial.id) { mutableStateOf(initial) }
-        var seconds by remember(initial.id) { mutableStateOf(expertSecondsInput(initial.lifecycle.idleTimeoutMs)) }
-        val validMilliseconds = expertIdleMilliseconds(seconds)
+        val base by rememberSaveable(initial.id, stateSaver = ExpertPolicySaver) { mutableStateOf(policy) }
+        var channel by rememberSaveable(initial.id, stateSaver = androidx.compose.runtime.saveable.Saver<PolicyChannel, String>(
+            save = { kotlinx.serialization.json.Json.encodeToString(PolicyChannel.serializer(), it) },
+            restore = { kotlinx.serialization.json.Json.decodeFromString(PolicyChannel.serializer(), it) },
+        )) { mutableStateOf(initial) }
+        var busy by remember { mutableStateOf(false) }
+        var error by remember { mutableStateOf<String?>(null) }
+        val commitScope = rememberCoroutineScope()
+        var seconds by rememberSaveable(initial.id) { mutableStateOf(expertSecondsInput(initial.lifecycle.idleTimeoutMs)) }
+        val validMilliseconds = expertIdleAfterEdit(initial.lifecycle.idleTimeoutMs, channel.lifecycle.coldStart, seconds)
         AlertDialog(
-            onDismissRequest = { editingChannel = null }, title = { Text(stringResource(R.string.expert_channel_add)) },
+            onDismissRequest = { if (!busy) editingChannel = null }, title = { Text(stringResource(R.string.expert_channel_add)) },
             text = {
                 Column(
                     Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     OutlinedTextField(
-                        channel.name, { channel = channel.copy(name = it) }, label = { Text(stringResource(R.string.expert_channel_name)) },
+                        channel.name, { if (!busy) channel = channel.copy(name = it) }, label = { Text(stringResource(R.string.expert_channel_name)) },
                         modifier = Modifier.fillMaxWidth(), singleLine = true
                     )
                     ExpertHint(R.string.expert_channel_hint)
@@ -320,20 +350,27 @@ internal fun ExpertExits(
                         policy.channels.none { it.id != channel.id && (it.target as? PolicyTarget.Channel)?.id == channel.id }
                     ) {
                         TextButton({
-                            onIntent(ExpertIntent.Edit(ExpertEdits.removeChannel(policy, channel.id)))
-                            editingChannel = null
-                        }) { Text(stringResource(R.string.expert_channel_remove)) }
+                            busy = true
+                            commitScope.launch {
+                                try {
+                                    error = if (onSaveDraft == null) "Сохранение недоступно" else onSaveDraft(base, ExpertEdits.removeChannel(base, channel.id))
+                                    if (error == null) editingChannel = null
+                                } finally { busy = false }
+                            }
+                        }, enabled = !busy) { Text(stringResource(R.string.expert_channel_remove)) }
                     }
+                    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     ExpertTargetSelector(channel.target, channel.owner, bundle, policy, false, includeChannels = false) {
-                        channel = channel.copy(target = it)
+                        if (!busy) channel = channel.copy(target = it)
                     }
-                    ExpertCheckRow(R.string.expert_cold_start, channel.lifecycle.coldStart) {
-                        channel = channel.copy(lifecycle = channel.lifecycle.copy(coldStart = it))
+                    ExpertCheckRow(R.string.expert_cold_start, channel.lifecycle.coldStart, enabled = !busy) {
+                        if (!busy) channel = channel.copy(lifecycle = channel.lifecycle.copy(coldStart = it))
                     }
                     ExpertHint(R.string.expert_cold_hint)
                     OutlinedTextField(
-                        seconds, { seconds = it }, label = { Text(stringResource(R.string.expert_idle_seconds)) },
-                        isError = validMilliseconds == null, singleLine = true, modifier = Modifier.fillMaxWidth()
+                        seconds, { if (!busy) seconds = it }, label = { Text(stringResource(R.string.expert_idle_seconds)) },
+                        isError = channel.lifecycle.coldStart && validMilliseconds == null,
+                        enabled = channel.lifecycle.coldStart && !busy, singleLine = true, modifier = Modifier.fillMaxWidth()
                     )
                 }
             }, confirmButton = {
@@ -342,13 +379,19 @@ internal fun ExpertExits(
                         name = channel.name.trim(),
                         lifecycle = channel.lifecycle.copy(idleTimeoutMs = requireNotNull(validMilliseconds)),
                     )
-                    onIntent(ExpertIntent.Edit(policy.copy(channels = policy.channels.filterNot { it.id == complete.id } + complete)))
-                    editingChannel = null
-                }, enabled = channel.name.isNotBlank() && validMilliseconds != null) {
+                    busy = true
+                    commitScope.launch {
+                        try {
+                            error = if (onSaveDraft == null) "Сохранение недоступно" else
+                                onSaveDraft(base, base.copy(channels = base.channels.filterNot { it.id == complete.id } + complete))
+                            if (error == null) editingChannel = null
+                        } finally { busy = false }
+                    }
+                }, enabled = !busy && channel.name.isNotBlank() && validMilliseconds != null) {
                     Text(stringResource(R.string.expert_node_accept))
                 }
             },
-            dismissButton = { TextButton({ editingChannel = null }) { Text(stringResource(R.string.cancel)) } }
+            dismissButton = { TextButton({ editingChannel = null }, enabled = !busy) { Text(stringResource(R.string.cancel)) } }
         )
     }
 }
@@ -396,29 +439,40 @@ private fun LifecycleSummary(lifecycle: ExitLifecyclePolicy, onEdit: () -> Unit)
 }
 
 @Composable
-private fun ExpertLifecycleEditor(initial: ExitLifecyclePolicy, onDismiss: () -> Unit, onCommit: (ExitLifecyclePolicy) -> Unit) {
-    var cold by remember(initial) { mutableStateOf(initial.coldStart) }
-    var seconds by remember(initial) { mutableStateOf(expertSecondsInput(initial.idleTimeoutMs)) }
+private fun ExpertLifecycleEditor(initial: ExitLifecyclePolicy, onDismiss: () -> Unit, onCommit: suspend (ExitLifecyclePolicy) -> String?) {
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val commitScope = rememberCoroutineScope()
+    var cold by rememberSaveable(initial) { mutableStateOf(initial.coldStart) }
+    var seconds by rememberSaveable(initial) { mutableStateOf(expertSecondsInput(initial.idleTimeoutMs)) }
     val valid = expertIdleAfterEdit(initial.idleTimeoutMs, cold, seconds)
     AlertDialog(
-        onDismissRequest = onDismiss, title = { Text(stringResource(R.string.expert_lifecycle)) },
+        onDismissRequest = { if (!busy) onDismiss() }, title = { Text(stringResource(R.string.expert_lifecycle)) },
         text = {
             Column(
                 Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                ExpertCheckRow(R.string.expert_cold_start, cold) { cold = it }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                ExpertCheckRow(R.string.expert_cold_start, cold) { if (!busy) cold = it }
                 ExpertHint(R.string.expert_cold_hint)
                 OutlinedTextField(
-                    seconds, { seconds = it }, label = { Text(stringResource(R.string.expert_idle_seconds)) },
+                    seconds, { if (!busy) seconds = it }, label = { Text(stringResource(R.string.expert_idle_seconds)) },
                     isError = cold && valid == null, enabled = cold, singleLine = true, modifier = Modifier.fillMaxWidth()
                 )
             }
         }, confirmButton = {
             Button(onClick = {
-                onCommit(initial.copy(coldStart = cold, idleTimeoutMs = requireNotNull(valid)))
-            }, enabled = !cold || valid != null) { Text(stringResource(R.string.expert_node_accept)) }
+                busy = true
+                val next = initial.copy(coldStart = cold, idleTimeoutMs = requireNotNull(valid))
+                commitScope.launch {
+                    try {
+                        error = onCommit(next)
+                        if (error == null) onDismiss()
+                    } finally { busy = false }
+                }
+            }, enabled = !busy && (!cold || valid != null)) { Text(stringResource(R.string.expert_node_accept)) }
         },
-        dismissButton = { TextButton(onDismiss) { Text(stringResource(R.string.cancel)) } }
+        dismissButton = { TextButton(onDismiss, enabled = !busy) { Text(stringResource(R.string.cancel)) } }
     )
 }

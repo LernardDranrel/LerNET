@@ -80,6 +80,9 @@ class ExpertRuntimeController(
     private var applyingSnapshot: Pair<NetworkPolicy, PolicyInventory>? = null
     private var startupStopUnconfirmed = false
     private var draftPersistenceError: String? = null
+    private var nativeConnectionDroppedCount = 0L
+    private var localConnectionDroppedCount = 0L
+    private val clearedConnectionIds = mutableSetOf<Pair<TunIdentity?, String>>()
     private val mutableState = MutableStateFlow(
         ExpertRuntimeState(
             capabilities = backend.capabilities, saved = session.saved, draft = session.draft,
@@ -103,6 +106,21 @@ class ExpertRuntimeController(
             ExpertIntent.Stop -> stop()
             is ExpertIntent.Edit -> mutex.withLock {
                 session.edit(intent.policy)
+                persistDraft()
+                publish()
+            }
+            is ExpertIntent.EditChecked -> mutex.withLock {
+                val updated = app.lernet.routing.policy.PolicyDraftMerge.merge(intent.base, intent.policy, session.draft)
+                session.edit(updated)
+                persistDraft()
+                publish()
+            }
+            is ExpertIntent.UpdateLayout -> mutex.withLock {
+                // Layout changes are merged independently of semantic rule edits.
+                val updated = app.lernet.routing.policy.PolicyCanvasEditing.update(
+                    session.draft, intent.scope, intent.points, intent.clear
+                )
+                session.edit(updated)
                 persistDraft()
                 publish()
             }
@@ -166,7 +184,53 @@ class ExpertRuntimeController(
                 publish()
             }
             ExpertIntent.Tick -> tick()
+            ExpertIntent.ClearConnectionHistory -> mutex.withLock {
+                val tun = mutableState.value.tun
+                clearedConnectionIds.retainAll { it.first == tun }
+                mutableState.value.connections.filter { it.active == false && it.identity == tun }
+                    .forEach { clearedConnectionIds += it.identity to it.id }
+                mutableState.value = mutableState.value.copy(
+                    connections = mutableState.value.connections.filter { it.active != false && it.identity == tun },
+                )
+            }
         }
+    }
+
+    /** Persist the confirmed VPN path before stopping Simple. A stale prompt never replaces newer user rules. */
+    suspend fun prepareVpnHandover(expected: NetworkPolicy, target: PolicyTarget.Profile): Boolean = mutex.withLock {
+        val current = mutableState.value
+        if (current.phase !in setOf(ExpertSessionPhase.STOPPED, ExpertSessionPhase.FAILED) ||
+            current.tun != null ||
+            current.applying ||
+            session.saved != expected ||
+            !ExpertVpnHandover.available(session.saved, session.draft)
+        ) {
+            val message = "Схема изменилась. Проверьте основной путь и повторите включение."
+            mutableState.value = current.copy(errors = listOf(message))
+            reason(ExpertReasonLevel.WARNING, message)
+            return@withLock false
+        }
+        val next = expected.copy(
+            revision = Math.addExact(expected.revision, 1),
+            device = expected.device.copy(defaultTarget = target)
+        )
+        val program = PolicyProgramCompiler.compile(next, inventory, platform)
+        if (!program.isValid) {
+            mutableState.value = current.copy(errors = program.errors.map { it.message })
+            return@withLock false
+        }
+        try {
+            persistence.persist(next, next)
+        } catch (failure: Exception) {
+            reportPersistenceFailure("Не удалось сохранить основной VPN-путь", failure)
+            publish()
+            return@withLock false
+        }
+        check(session.replaceWorkspace(next, next)) { "Confirmed handover policy could not be adopted" }
+        draftPersistenceError = null
+        reason(ExpertReasonLevel.INFO, "Текущий VPN выбран основным путём экспертного режима.")
+        publish()
+        true
     }
 
     private suspend fun start() {
@@ -176,7 +240,10 @@ class ExpertRuntimeController(
                 reason(ExpertReasonLevel.ERROR, "Сначала остановите прежний обработчик сети.")
                 return
             }
-            mutableState.value = mutableState.value.copy(phase = ExpertSessionPhase.STARTING, errors = errorsWithPersistence(emptyList()))
+            mutableState.value = mutableState.value.copy(
+                phase = ExpertSessionPhase.STARTING, desiredEnabled = true, networkReason = null, networkRecovering = false,
+                errors = errorsWithPersistence(emptyList()),
+            )
             ++generation
         }
         val capabilities = try {
@@ -198,7 +265,7 @@ class ExpertRuntimeController(
             mutableState.value = mutableState.value.copy(capabilities = capabilities)
             if (!capabilities.preservesTun || !capabilities.atomicRules || !capabilities.independentExits) {
                 mutableState.value = mutableState.value.copy(
-                    phase = ExpertSessionPhase.STOPPED,
+                    phase = ExpertSessionPhase.STOPPED, desiredEnabled = false,
                     errors = errorsWithPersistence(listOf("Ядро не подтвердило постоянный TUN и независимые выходы.")),
                 )
                 reason(ExpertReasonLevel.ERROR, "Экспертный режим недоступен: перезапуск обычного VPN не сохраняет общий TUN.")
@@ -207,11 +274,14 @@ class ExpertRuntimeController(
             val program = PolicyProgramCompiler.compile(session.saved, inventory, platform)
             if (!program.isValid) {
                 mutableState.value = mutableState.value.copy(
-                    phase = ExpertSessionPhase.STOPPED, errors = errorsWithPersistence(program.errors.map { it.message }),
+                    phase = ExpertSessionPhase.STOPPED, desiredEnabled = false, errors = errorsWithPersistence(program.errors.map { it.message }),
                 )
                 return
             }
-            mutableState.value = mutableState.value.copy(phase = ExpertSessionPhase.STARTING, errors = errorsWithPersistence(emptyList()))
+            mutableState.value = mutableState.value.copy(
+                phase = ExpertSessionPhase.STARTING, desiredEnabled = true, networkReason = null, networkRecovering = false,
+                errors = errorsWithPersistence(emptyList()),
+            )
             reason(ExpertReasonLevel.INFO, "Создаём общий TUN. Подтверждение работающей схемы ожидается от ядра.")
             startingSnapshot = session.saved to inventory
             negotiationGeneration to program
@@ -235,7 +305,18 @@ class ExpertRuntimeController(
                     activePolicy = startingSnapshot?.first
                     activeInventory = startingSnapshot?.second
                     startingSnapshot = null
-                    mutableState.value = mutableState.value.copy(phase = ExpertSessionPhase.RUNNING, tun = ack.identity)
+                    nativeConnectionDroppedCount = 0
+                    localConnectionDroppedCount = 0
+                    clearedConnectionIds.clear()
+                    mutableState.value = mutableState.value.copy(
+                        phase = ExpertSessionPhase.RUNNING,
+                        tun = ack.identity,
+                        connections = emptyList(),
+                        connectionHistoryLimit = MAX_CONNECTIONS,
+                        connectionHistoryTruncated = false,
+                        connectionDroppedCount = 0,
+                        directNetwork = null,
+                    )
                     reason(ExpertReasonLevel.INFO, "Общий TUN запущен. Ядро подтвердило версию ${ack.revision}.")
                     reportInactiveProtections(candidate.second)
                     publish()
@@ -312,8 +393,12 @@ class ExpertRuntimeController(
 
     private suspend fun stop() {
         val operation = mutex.withLock {
+            mutableState.value = mutableState.value.copy(desiredEnabled = false, networkReason = null, networkRecovering = false)
             if (mutableState.value.phase == ExpertSessionPhase.STOPPED || mutableState.value.phase == ExpertSessionPhase.STOPPING) return
             val identity = mutableState.value.tun
+            // Start may still own native resources before it returns an identity.
+            // Failed or cancelled Stop must fence a successor until cleanup is confirmed.
+            startupStopUnconfirmed = true
             generation++
             maintenance?.cancel()
             maintenance = null
@@ -388,8 +473,13 @@ class ExpertRuntimeController(
                     session.tunnelStopped()
                     activePolicy = null
                     activeInventory = null
-                    mutableState.value = mutableState.value.copy(phase = ExpertSessionPhase.FAILED)
-                    reason(ExpertReasonLevel.ERROR, "Ядро сообщило другую версию. Работающая схема не подтверждена.")
+                    applyingSnapshot = null
+                    val error = "Ядро сообщило другую версию. Работающая схема не подтверждена. " +
+                        "Нажмите «Остановить» перед новым запуском."
+                    mutableState.value = mutableState.value.copy(
+                        phase = ExpertSessionPhase.FAILED, errors = errorsWithPersistence(listOf(error)),
+                    )
+                    reason(ExpertReasonLevel.ERROR, error)
                 } else {
                     session.acknowledge(request.third.ticket, ack.identity)
                     if (ack.identity != request.second) {
@@ -431,8 +521,13 @@ class ExpertRuntimeController(
                         session.tunnelStopped()
                         activePolicy = null
                         activeInventory = null
-                        mutableState.value = mutableState.value.copy(phase = ExpertSessionPhase.FAILED)
-                        reason(ExpertReasonLevel.ERROR, "Применение прервано. Активная версия ядра не подтверждена.")
+                        applyingSnapshot = null
+                        val error = "Применение прервано. Активная версия ядра не подтверждена. " +
+                            "Нажмите «Остановить» перед новым запуском."
+                        mutableState.value = mutableState.value.copy(
+                            phase = ExpertSessionPhase.FAILED, errors = errorsWithPersistence(listOf(error)),
+                        )
+                        reason(ExpertReasonLevel.ERROR, error)
                         publish()
                     }
                 }
@@ -845,18 +940,54 @@ class ExpertRuntimeController(
             is ExpertBackendEvent.ExitsSnapshot -> event.revision
             is ExpertBackendEvent.FolderSelectionsSnapshot -> event.revision
             is ExpertBackendEvent.NetworkChanged -> event.revision
+            is ExpertBackendEvent.NetworkStatus -> event.revision
             is ExpertBackendEvent.RetiredCleanupSnapshot -> event.revision
+            is ExpertBackendEvent.DirectNetworkSnapshot -> event.revision
             is ExpertBackendEvent.UserTraffic, is ExpertBackendEvent.FlowClosed, is ExpertBackendEvent.Health,
-            is ExpertBackendEvent.TunnelLost, is ExpertBackendEvent.Observation -> null
+            is ExpertBackendEvent.TunnelLost, is ExpertBackendEvent.Observation, is ExpertBackendEvent.ObservationHistory -> null
         }
         if (snapshotRevision != null && snapshotRevision != session.state.appliedRevision) return@withLock
         when (event) {
+            is ExpertBackendEvent.NetworkStatus -> {
+                val previous = mutableState.value.networkReason
+                val next = event.reason?.let(SecretRedactor::redact)
+                mutableState.value = mutableState.value.copy(networkReason = next, networkRecovering = next != null && event.recovering)
+                if (previous != next) {
+                    reason(
+                        if (next == null) ExpertReasonLevel.INFO else ExpertReasonLevel.WARNING,
+                        next ?: "Сеть восстановлена. Общий TUN и работающая схема сохранены.",
+                    )
+                }
+            }
+            is ExpertBackendEvent.DirectNetworkSnapshot -> {
+                val old = mutableState.value.directNetwork
+                if (event.facts.networkEpoch < (lastNativeNetworkEpoch ?: 0) ||
+                    old?.let {
+                        event.facts.networkEpoch < it.networkEpoch ||
+                            event.facts.networkEpoch == it.networkEpoch &&
+                            event.facts.observedAtMs < it.observedAtMs
+                    } == true
+                ) {
+                    return@withLock
+                }
+                mutableState.value = mutableState.value.copy(directNetwork = event.facts)
+                if (old == null || old.copy(observedAtMs = event.facts.observedAtMs) != event.facts) {
+                    reason(
+                        ExpertReasonLevel.INFO,
+                        "Локальный Direct: ${event.facts.interfaceName ?: "интерфейс не определён"}; " +
+                            "IPv4=${event.facts.ipv4}, IPv6=${event.facts.ipv6}; источник=${event.facts.source}; " +
+                            "сеть=${event.facts.networkEpoch}, версия=${event.revision}. " +
+                            "Это сведения о системном пути, а не проверка сайтов или VPN-выходов.",
+                    )
+                }
+            }
             is ExpertBackendEvent.UserTraffic -> lifecycles[event.key]?.traffic(event.flowId, clockMs())
             is ExpertBackendEvent.FlowClosed -> lifecycles[event.key]?.closeFlow(event.flowId, clockMs())
             is ExpertBackendEvent.Health -> updateHealth(event.key, event.result)
             is ExpertBackendEvent.NetworkChanged -> {
                 if (event.epoch < 0 || lastNativeNetworkEpoch?.let { event.epoch <= it } == true) return@withLock
                 lastNativeNetworkEpoch = event.epoch
+                mutableState.value = mutableState.value.copy(directNetwork = null)
                 invalidateNetworkHealth()
             }
             is ExpertBackendEvent.TunnelLost -> {
@@ -869,13 +1000,49 @@ class ExpertRuntimeController(
                 reason(ExpertReasonLevel.ERROR, "Общий TUN потерян: ${event.reason}")
             }
             is ExpertBackendEvent.Observation -> {
+                if (((event.identity ?: mutableState.value.tun) to event.connection.id) in clearedConnectionIds) return@withLock
                 val safe = event.connection.copy(
                     application = event.connection.application?.let(SecretRedactor::redact),
                     destination = SecretRedactor.redact(event.connection.destination),
                     decision = SecretRedactor.redact(event.connection.decision),
+                    domain = event.connection.domain?.let(SecretRedactor::redact),
+                    processName = event.connection.processName?.let(SecretRedactor::redact),
+                    errorReason = event.connection.errorReason?.let(SecretRedactor::redact),
+                    packageNames = event.connection.packageNames.map(SecretRedactor::redact),
+                    identity = event.identity ?: mutableState.value.tun,
                 )
+                val retained = mutableState.value.connections.toMutableList()
+                val existing = retained.indexOfFirst { it.id == safe.id && it.identity == safe.identity }
+                if (existing >= 0) retained[existing] = safe else retained.add(0, safe)
+                if (retained.size > MAX_CONNECTIONS) {
+                    val evict = retained.indexOfLast { it.active != true || it.identity != mutableState.value.tun }
+                    retained.removeAt(if (evict >= 0) evict else retained.lastIndex)
+                    localConnectionDroppedCount++
+                }
                 mutableState.value = mutableState.value.copy(
-                    connections = (listOf(safe) + mutableState.value.connections.filter { it.id != safe.id }).take(MAX_CONNECTIONS),
+                    connections = retained,
+                    connectionDroppedCount = maxOf(localConnectionDroppedCount, nativeConnectionDroppedCount),
+                    connectionHistoryTruncated = localConnectionDroppedCount > 0 || nativeConnectionDroppedCount > 0,
+                )
+            }
+            is ExpertBackendEvent.ObservationHistory -> {
+                event.visibleFlowIds?.let { visible ->
+                    clearedConnectionIds.retainAll { it.first == mutableState.value.tun && it.second in visible }
+                    mutableState.value = mutableState.value.copy(
+                        connections = mutableState.value.connections.map {
+                            if (it.identity == mutableState.value.tun && it.active == true && it.id !in visible) {
+                                it.copy(active = null)
+                            } else {
+                                it
+                            }
+                        },
+                    )
+                }
+                nativeConnectionDroppedCount = maxOf(nativeConnectionDroppedCount, event.droppedCount.coerceAtLeast(0))
+                mutableState.value = mutableState.value.copy(
+                    connectionHistoryLimit = minOf(MAX_CONNECTIONS, event.limit.coerceAtLeast(1)),
+                    connectionDroppedCount = maxOf(localConnectionDroppedCount, nativeConnectionDroppedCount),
+                    connectionHistoryTruncated = localConnectionDroppedCount > 0 || nativeConnectionDroppedCount > 0,
                 )
             }
             is ExpertBackendEvent.ExitStatus -> {
@@ -1153,6 +1320,10 @@ class ExpertRuntimeController(
     }
 
     private fun clearExits() {
+        // Session loss/stop does not prove when each socket closed. Keep history with unknown activity.
+        mutableState.value = mutableState.value.copy(
+            connections = mutableState.value.connections.map { if (it.active == true) it.copy(active = null) else it },
+        )
         wakes.values.forEach { it.cancel() }
         probes.values.forEach { it.cancel() }
         wakes.clear()

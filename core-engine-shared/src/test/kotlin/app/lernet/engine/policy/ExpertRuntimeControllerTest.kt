@@ -32,6 +32,161 @@ import org.junit.Test
 class ExpertRuntimeControllerTest {
     private val inventory = PolicyInventory(setOf("a", "b"), mapOf("folder" to listOf("a", "b")))
 
+    @Test fun `network outage preserves on intent tunnel and policy until explicit stop`() = runTest {
+        val backend = FakeBackend()
+        val controller = controller(backend)
+        controller.handle(ExpertIntent.Start)
+        val started = controller.state.value
+        assertTrue(started.desiredEnabled)
+        controller.onBackendEvent(ExpertBackendEvent.NetworkStatus(TunIdentity("old"), 0, "stale"))
+        assertNull(controller.state.value.networkReason)
+        controller.onBackendEvent(ExpertBackendEvent.NetworkStatus(TunIdentity("tun"), 99, "stale"))
+        assertNull(controller.state.value.networkReason)
+        controller.onBackendEvent(ExpertBackendEvent.NetworkStatus(TunIdentity("tun"), 0, "Нет сети"))
+        controller.onBackendEvent(ExpertBackendEvent.NetworkStatus(TunIdentity("tun"), 0, "Нет сети", recovering = true))
+        assertEquals(ExpertTunnelHealth.PENDING, controller.state.value.tunnelHealth)
+        assertTrue(controller.state.value.networkRecovering)
+        // A real error clears the recovery category even when the displayed reason is unchanged.
+        controller.onBackendEvent(ExpertBackendEvent.NetworkStatus(TunIdentity("tun"), 0, "Нет сети"))
+        assertFalse(controller.state.value.networkRecovering)
+        assertTrue(controller.state.value.desiredEnabled)
+        assertEquals(ExpertTunnelHealth.ERROR, controller.state.value.tunnelHealth)
+        assertEquals(started.tun, controller.state.value.tun)
+        assertEquals(started.appliedPolicy, controller.state.value.appliedPolicy)
+        controller.onBackendEvent(ExpertBackendEvent.NetworkStatus(TunIdentity("tun"), 0, null))
+        assertEquals(ExpertTunnelHealth.HEALTHY, controller.state.value.tunnelHealth)
+        assertFalse(controller.state.value.networkRecovering)
+        assertTrue(controller.state.value.desiredEnabled)
+        assertEquals(1, backend.starts)
+        controller.onBackendEvent(ExpertBackendEvent.TunnelLost(TunIdentity("tun"), "core failed"))
+        assertTrue(controller.state.value.desiredEnabled)
+        controller.handle(ExpertIntent.Stop)
+        assertFalse(controller.state.value.desiredEnabled)
+    }
+
+
+    @Test fun `checked semantic edits preserve queue running policy and durable error evidence`() = runTest {
+        var diskFail = false
+        val writes = mutableListOf<NetworkPolicy>()
+        val backend = FakeBackend()
+        val controller = controller(backend, persist = ExpertPolicyPersistence { _, draft ->
+            if (diskFail) error("disk unavailable")
+            writes += draft
+        })
+        controller.handle(ExpertIntent.Start)
+        val base = controller.state.value.draft
+        val applied = controller.state.value.appliedPolicy
+        val a = app.lernet.routing.policy.PolicyNode("a", target = PolicyTarget.Block)
+        val b = app.lernet.routing.policy.PolicyNode("b", target = PolicyTarget.Direct)
+        controller.handle(ExpertIntent.EditChecked(base, base.copy(device = base.device.copy(nodes = listOf(a)))))
+        controller.handle(ExpertIntent.EditChecked(base, base.copy(device = base.device.copy(nodes = listOf(b)))))
+        assertEquals(setOf("a", "b"), controller.state.value.draft.device.nodes.map { it.id }.toSet())
+        assertEquals(applied, controller.state.value.appliedPolicy)
+        assertEquals(1, backend.starts)
+        val current = controller.state.value.draft
+        val next = current.copy(dns = app.lernet.routing.policy.PolicyDnsSettings(app.lernet.routing.policy.PolicyDnsMode.CUSTOM, "9.9.9.9"))
+        diskFail = true
+        controller.handle(ExpertIntent.EditChecked(current, next))
+        assertTrue(controller.state.value.draftPersistenceError != null)
+        assertTrue(writes.last() != next)
+        diskFail = false
+        controller.handle(ExpertIntent.EditChecked(current, next))
+        assertNull(controller.state.value.draftPersistenceError)
+        assertEquals(next, writes.last())
+        assertEquals(applied, controller.state.value.appliedPolicy)
+    }
+
+    @Test fun `canvas intent retains newly edited rule and does not restart or apply running tunnel`() = runTest {
+        val backend = FakeBackend()
+        val controller = controller(backend)
+        controller.handle(ExpertIntent.Start)
+        val applied = controller.state.value.appliedPolicy
+        val node = app.lernet.routing.policy.PolicyNode("new", target = PolicyTarget.Block)
+        val current = controller.state.value.draft
+        controller.handle(ExpertIntent.Edit(current.copy(device = current.device.copy(nodes = listOf(node)))))
+        val point = app.lernet.routing.policy.PolicyCanvasPoint(33f, 44f)
+        controller.handle(ExpertIntent.UpdateLayout(PolicyScope.Device, mapOf("new" to point)))
+        assertEquals(listOf(node), controller.state.value.draft.device.nodes)
+        assertEquals(point, controller.state.value.draft.device.positions["new"])
+        controller.handle(ExpertIntent.UpdateLayout(PolicyScope.Device, mapOf("removed" to point)))
+        assertEquals(listOf(node), controller.state.value.draft.device.nodes)
+        assertFalse("removed" in controller.state.value.draft.device.positions)
+        controller.handle(ExpertIntent.UpdateLayout(PolicyScope.Device, clear = true))
+        assertEquals(listOf(node), controller.state.value.draft.device.nodes)
+        assertTrue(controller.state.value.draft.device.positions.isEmpty())
+        assertEquals(applied, controller.state.value.appliedPolicy)
+        assertEquals(1, backend.starts)
+        assertEquals(ExpertSessionPhase.RUNNING, controller.state.value.phase)
+    }
+
+    @Test fun `direct family evidence rejects old session revision network and timestamps`() = runTest {
+        val controller = controller(FakeBackend())
+        controller.handle(ExpertIntent.Start)
+        val facts = ExpertDirectNetworkFacts(
+            DirectFamilyAvailability.AVAILABLE, DirectFamilyAvailability.UNAVAILABLE, "windows_routes", "Ethernet", 0, 100,
+        )
+        controller.onBackendEvent(ExpertBackendEvent.DirectNetworkSnapshot(facts, TunIdentity("old"), 0))
+        controller.onBackendEvent(ExpertBackendEvent.DirectNetworkSnapshot(facts, TunIdentity("tun"), 99))
+        assertNull(controller.state.value.directNetwork)
+        controller.onBackendEvent(ExpertBackendEvent.DirectNetworkSnapshot(facts, TunIdentity("tun"), 0))
+        assertEquals(facts, controller.state.value.directNetwork)
+        controller.onBackendEvent(ExpertBackendEvent.DirectNetworkSnapshot(facts.copy(observedAtMs = 90), TunIdentity("tun"), 0))
+        assertEquals(facts, controller.state.value.directNetwork)
+        controller.onBackendEvent(ExpertBackendEvent.NetworkChanged(TunIdentity("tun"), 0, 1))
+        assertNull(controller.state.value.directNetwork)
+        controller.onBackendEvent(ExpertBackendEvent.DirectNetworkSnapshot(facts, TunIdentity("tun"), 0))
+        assertNull(controller.state.value.directNetwork)
+        controller.onBackendEvent(ExpertBackendEvent.DirectNetworkSnapshot(facts.copy(networkEpoch = 1), TunIdentity("tun"), 0))
+        assertEquals(1L, controller.state.value.directNetwork?.networkEpoch)
+    }
+
+    @Test fun `confirmed simple VPN handover persists a profile route before any tunnel acquisition`() = runTest {
+        val initial = NetworkPolicy(trees = listOf(PolicyTree(PolicyScope.Profile("a"), defaultTarget = PolicyTarget.CurrentExit)))
+        val writes = mutableListOf<NetworkPolicy>()
+        val backend = FakeBackend().apply { startAck = ExpertTunnelAck(TunIdentity("tun"), 1) }
+        val controller = controller(
+            backend, initial,
+            ExpertPolicyPersistence { saved, draft ->
+                assertEquals(saved, draft)
+                writes += saved
+            }
+        )
+        val target = PolicyTarget.Profile("a", routeScope = PolicyScope.Profile("a"))
+        assertTrue(controller.prepareVpnHandover(initial, target))
+        assertEquals(0, backend.starts)
+        assertEquals(target, writes.single().device.defaultTarget)
+        assertEquals(initial.trees, writes.single().trees)
+        controller.handle(ExpertIntent.Start)
+        assertEquals(ExpertSessionPhase.RUNNING, controller.state.value.phase)
+        assertEquals(target, controller.state.value.appliedPolicy?.device?.defaultTarget)
+    }
+
+    @Test fun `handover rejects a stale prompt user draft or configured device path`() = runTest {
+        val backend = FakeBackend()
+        val controller = controller(backend)
+        val target = PolicyTarget.Profile("a", routeScope = null)
+        val initial = controller.state.value.saved
+        assertFalse(controller.prepareVpnHandover(initial.copy(revision = 1), target))
+        controller.handle(ExpertIntent.Edit(initial.copy(device = initial.device.copy(defaultTarget = PolicyTarget.Block))))
+        assertFalse(controller.prepareVpnHandover(initial, target))
+        controller.handle(ExpertIntent.SaveDraft)
+        assertFalse(controller.prepareVpnHandover(controller.state.value.saved, target))
+        assertEquals(PolicyTarget.Block, controller.state.value.saved.device.defaultTarget)
+        assertEquals(0, backend.starts)
+    }
+
+    @Test fun `handover persistence failure or missing profile cannot stop the previous VPN`() = runTest {
+        val backend = FakeBackend()
+        val initial = NetworkPolicy()
+        val controller = controller(backend, initial, ExpertPolicyPersistence { _, _ -> error("disk unavailable") })
+        assertFalse(controller.prepareVpnHandover(initial, PolicyTarget.Profile("missing", routeScope = null)))
+        assertFalse(controller.prepareVpnHandover(initial, PolicyTarget.Profile("a", routeScope = null)))
+        assertEquals(initial, controller.state.value.saved)
+        assertEquals(initial, controller.state.value.draft)
+        assertEquals(0, backend.starts)
+        assertTrue(controller.state.value.errors.isNotEmpty())
+    }
+
     @Test fun `restart only host cannot activate expert mode`() = runTest {
         val backend = FakeBackend().apply { actualCapabilities = PolicyControlCapabilities.RESTART_ONLY }
         val controller = controller(backend)
@@ -230,6 +385,50 @@ class ExpertRuntimeControllerTest {
         assertNull(controller.state.value.appliedRevision)
     }
 
+    @Test fun `wrong apply revision exposes the cause to the screen without claiming an active policy`() = runTest {
+        val backend = FakeBackend().apply { applyRevision = 99 }
+        val controller = controller(backend)
+        controller.handle(ExpertIntent.Start)
+        val edited = NetworkPolicy(device = PolicyTree(PolicyScope.Device, defaultTarget = PolicyTarget.Block))
+        controller.handle(ExpertIntent.Edit(edited))
+        controller.handle(ExpertIntent.SaveDraft)
+        controller.handle(ExpertIntent.ApplySaved)
+
+        val snapshot = controller.state.value
+        assertEquals(ExpertSessionPhase.FAILED, snapshot.phase)
+        assertEquals(1L, snapshot.saved.revision)
+        assertEquals(snapshot.saved, snapshot.draft)
+        assertNull(snapshot.appliedRevision)
+        assertNull(snapshot.appliedPolicy)
+        assertFalse(snapshot.applying)
+        assertTrue(snapshot.errors.single().contains("Ядро сообщило другую версию"))
+        assertEquals(snapshot.errors.single(), snapshot.reasons.last().message)
+    }
+
+    @Test fun `cancelled apply exposes uncertainty and preserves the saved draft`() = runTest {
+        val backend = FakeBackend().apply { applyGate = CompletableDeferred() }
+        val controller = controller(backend)
+        controller.handle(ExpertIntent.Start)
+        val edited = NetworkPolicy(device = PolicyTree(PolicyScope.Device, defaultTarget = PolicyTarget.Block))
+        controller.handle(ExpertIntent.Edit(edited))
+        controller.handle(ExpertIntent.SaveDraft)
+        val applying = async { controller.handle(ExpertIntent.ApplySaved) }
+        runCurrent()
+        assertTrue(controller.state.value.applying)
+        applying.cancel()
+        applying.join()
+
+        val snapshot = controller.state.value
+        assertEquals(ExpertSessionPhase.FAILED, snapshot.phase)
+        assertEquals(1L, snapshot.saved.revision)
+        assertEquals(snapshot.saved, snapshot.draft)
+        assertNull(snapshot.appliedRevision)
+        assertNull(snapshot.appliedPolicy)
+        assertFalse(snapshot.applying)
+        assertTrue(snapshot.errors.single().contains("Применение прервано"))
+        assertEquals(snapshot.errors.single(), snapshot.reasons.last().message)
+    }
+
     @Test fun `late start completion after stop cannot reactivate tunnel`() = runTest {
         val gate = CompletableDeferred<Unit>()
         val backend = FakeBackend().apply { startGate = gate }
@@ -304,6 +503,60 @@ class ExpertRuntimeControllerTest {
         controller.handle(ExpertIntent.Stop)
         assertEquals(ExpertSessionPhase.STOPPED, controller.state.value.phase)
         assertNull(controller.state.value.tun)
+    }
+
+    @Test fun `failed explicit stop during startup blocks restart until cleanup is confirmed`() = runTest {
+        val backend = FakeBackend().apply {
+            startGate = CompletableDeferred()
+            stopFailure = "cleanup not confirmed"
+        }
+        val controller = controller(backend)
+        val startup = async { controller.handle(ExpertIntent.Start) }
+        runCurrent()
+        controller.handle(ExpertIntent.Stop)
+        assertEquals(ExpertSessionPhase.FAILED, controller.state.value.phase)
+        assertNull(controller.state.value.tun)
+        val retry = async { controller.handle(ExpertIntent.Start) }
+        runCurrent()
+        assertEquals(1, backend.starts)
+        retry.await()
+        startup.cancel()
+        startup.join()
+        backend.stopFailure = null
+        backend.startGate = null
+        controller.handle(ExpertIntent.Stop)
+        controller.handle(ExpertIntent.Start)
+        assertEquals(2, backend.starts)
+        assertEquals(ExpertSessionPhase.RUNNING, controller.state.value.phase)
+    }
+
+    @Test fun `cancelled explicit stop before startup identity blocks restart until cleanup is confirmed`() = runTest {
+        val backend = FakeBackend().apply {
+            startGate = CompletableDeferred()
+            stopGate = CompletableDeferred()
+        }
+        val controller = controller(backend)
+        val startup = async { controller.handle(ExpertIntent.Start) }
+        runCurrent()
+        val stopping = async { controller.handle(ExpertIntent.Stop) }
+        runCurrent()
+        stopping.cancel()
+        stopping.join()
+        backend.stopGate!!.complete(Unit)
+        assertEquals(ExpertSessionPhase.FAILED, controller.state.value.phase)
+        assertNull(controller.state.value.tun)
+        val retry = async { controller.handle(ExpertIntent.Start) }
+        runCurrent()
+        assertEquals(1, backend.starts)
+        retry.await()
+        startup.cancel()
+        startup.join()
+        backend.stopGate = null
+        backend.startGate = null
+        controller.handle(ExpertIntent.Stop)
+        controller.handle(ExpertIntent.Start)
+        assertEquals(2, backend.starts)
+        assertEquals(ExpertSessionPhase.RUNNING, controller.state.value.phase)
     }
 
     @Test fun `two first flows coalesce one independent wake and both are admitted`() = runTest {
@@ -913,6 +1166,80 @@ class ExpertRuntimeControllerTest {
         assertTrue(backend.wakes.contains(ExpertExitKey("a")))
     }
 
+    @Test fun `connection history cap preserves quiet active connections before completed records`() = runTest {
+        val controller = controller(FakeBackend())
+        controller.handle(ExpertIntent.Start)
+        val active = ExpertConnectionObservation(
+            "active", destination = "example.invalid", protocol = "tcp", decision = "Direct", active = true,
+        )
+        controller.onBackendEvent(ExpertBackendEvent.Observation(active, TunIdentity("tun")))
+        repeat(500) { index ->
+            controller.onBackendEvent(
+                ExpertBackendEvent.Observation(active.copy(id = "closed-$index", active = false), TunIdentity("tun")),
+            )
+        }
+        assertEquals(500, controller.state.value.connections.size)
+        assertTrue(controller.state.value.connections.any { it.id == "active" && it.active == true })
+        assertTrue(controller.state.value.connectionHistoryTruncated)
+        assertEquals(1L, controller.state.value.connectionDroppedCount)
+    }
+
+    @Test fun `native eviction makes missing live connection activity unknown without inventing closure`() = runTest {
+        val controller = controller(FakeBackend())
+        controller.handle(ExpertIntent.Start)
+        val flow = ExpertConnectionObservation(
+            "flow", destination = "example.invalid", protocol = "tcp", decision = "Direct", active = true,
+        )
+        controller.onBackendEvent(ExpertBackendEvent.Observation(flow, TunIdentity("tun")))
+        controller.onBackendEvent(ExpertBackendEvent.ObservationHistory(1, identity = TunIdentity("old"), visibleFlowIds = emptySet()))
+        assertTrue(controller.state.value.connections.single().active == true)
+        controller.onBackendEvent(ExpertBackendEvent.ObservationHistory(1, identity = TunIdentity("tun"), visibleFlowIds = emptySet()))
+        assertNull(controller.state.value.connections.single().active)
+        assertNull(controller.state.value.connections.single().closedAtMs)
+        assertTrue(controller.state.value.connectionHistoryTruncated)
+    }
+
+    @Test fun `connection ids are scoped to native session and stale events cannot overwrite new rows`() = runTest {
+        val backend = FakeBackend()
+        val controller = controller(backend)
+        controller.handle(ExpertIntent.Start)
+        val flow = ExpertConnectionObservation(
+            "1", destination = "old.invalid", protocol = "tcp", decision = "Direct", active = true,
+        )
+        controller.onBackendEvent(ExpertBackendEvent.Observation(flow, TunIdentity("tun")))
+        controller.onBackendEvent(ExpertBackendEvent.ObservationHistory(10, identity = TunIdentity("tun")))
+        assertTrue(controller.state.value.connectionHistoryTruncated)
+        controller.handle(ExpertIntent.Stop)
+        assertNull(controller.state.value.connections.single().active)
+        backend.startAck = ExpertTunnelAck(TunIdentity("new"), 0)
+        controller.handle(ExpertIntent.Start)
+        assertTrue(controller.state.value.connections.isEmpty())
+        assertEquals(0L, controller.state.value.connectionDroppedCount)
+        assertFalse(controller.state.value.connectionHistoryTruncated)
+        controller.onBackendEvent(ExpertBackendEvent.Observation(flow.copy(destination = "new.invalid"), TunIdentity("new")))
+        controller.onBackendEvent(ExpertBackendEvent.Observation(flow.copy(destination = "late.invalid"), TunIdentity("tun")))
+        assertEquals(1, controller.state.value.connections.size)
+        assertEquals("new.invalid", controller.state.value.connections.first().destination)
+        assertEquals(TunIdentity("new"), controller.state.value.connections.first().identity)
+    }
+
+    @Test fun `clearing closed history keeps live flows and prevents later poll from restoring cleared rows`() = runTest {
+        val controller = controller(FakeBackend())
+        controller.handle(ExpertIntent.Start)
+        val flow = ExpertConnectionObservation(
+            "active", destination = "example.invalid", protocol = "tcp", decision = "Direct", active = true,
+        )
+        val closed = flow.copy(id = "closed", active = false)
+        controller.onBackendEvent(ExpertBackendEvent.Observation(flow, TunIdentity("tun")))
+        controller.onBackendEvent(ExpertBackendEvent.Observation(closed, TunIdentity("tun")))
+        controller.handle(ExpertIntent.ClearConnectionHistory)
+        controller.onBackendEvent(
+            ExpertBackendEvent.ObservationHistory(0, identity = TunIdentity("tun"), visibleFlowIds = setOf("active", "closed")),
+        )
+        controller.onBackendEvent(ExpertBackendEvent.Observation(closed, TunIdentity("tun")))
+        assertEquals(listOf("active"), controller.state.value.connections.map { it.id })
+    }
+
     private fun TestScope.controller(
         backend: FakeBackend,
         initial: NetworkPolicy = NetworkPolicy(),
@@ -947,6 +1274,8 @@ class ExpertRuntimeControllerTest {
         var negotiateGate: CompletableDeferred<Unit>? = null
         var startAck = ExpertTunnelAck(TunIdentity("tun"), 0)
         var applyIdentity = TunIdentity("tun")
+        var applyRevision: Long? = null
+        var applyGate: CompletableDeferred<Unit>? = null
         var startGate: CompletableDeferred<Unit>? = null
         var wakeGate: CompletableDeferred<Unit>? = null
         var applyFailure: String? = null
@@ -975,9 +1304,10 @@ class ExpertRuntimeControllerTest {
         }
 
         override suspend fun apply(program: PolicyProgram, expected: TunIdentity): ExpertTunnelAck {
+            applyGate?.await()
             applyFailure?.let { error(it) }
             applyProblem?.let { throw it }
-            return ExpertTunnelAck(applyIdentity, program.revision)
+            return ExpertTunnelAck(applyIdentity, applyRevision ?: program.revision)
         }
 
         override suspend fun stop(expected: TunIdentity?) {

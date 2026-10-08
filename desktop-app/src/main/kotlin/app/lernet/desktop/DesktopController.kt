@@ -170,10 +170,11 @@ class DesktopController(
                                     mutable.update { it.copy(healthMessage = "$reason · ${health.error}",
                                         healthFailures = failedChecks, healthVerified = false, tunnelLatencyMs = null) }
                                     if (failedChecks >= 2 && desiredConnection) {
-                                        val swapped = tryFailover(profile.id)
+                                        val swapped = runCatching { WindowsPhysicalNetwork.select() }.isSuccess && tryFailover(profile.id)
                                         if (!swapped && desiredConnection) {
-                                            disconnect()
-                                            connectInternal(resetFailover = true)
+                                            // A failed probe is not evidence that ingress is dead.
+                                            // Keep the existing TUN/routes; later probes recover in place.
+                                            mutable.update { it.copy(healthMessage = "VPN включён · ждём восстановления сети · ${health.error}") }
                                         }
                                         failedChecks = 0
                                     }
@@ -751,18 +752,19 @@ class DesktopController(
         val candidates = saved.profiles.filter { it.groupId == group.id && it.id != failedProfileId &&
             synchronized(failedInGroup) { it.id !in failedInGroup } }
         if (candidates.isEmpty()) return false
-        // Probe the underlay after removing the broken TUN route. Keep the user's
-        // connection intent so a failed folder search can still retry later.
-        synchronized(connectLock) {
-            connectGeneration.incrementAndGet()
-            tunnel.stop(waitForExit = true)
-        }
+        // Keep current ingress while searching. An offline/failed folder probe
+        // must never remove capture routes and silently return to Direct.
         for (candidate in candidates) {
             val tcp = EndpointProbe.check(candidate)
             val outbound = checkOutbound(candidate, saved)
             val probe = tcp.copy(tunnelLatencyMs = outbound.latencyMs, tunnelMessage = outbound.message)
             mutable.update { it.copy(probes = it.probes + (candidate.id to probe)) }
             if (probe.tunnelLatencyMs != null) {
+                synchronized(connectLock) {
+                    if (!desiredConnection || expertReserved.get()) return false
+                    connectGeneration.incrementAndGet()
+                    if (!tunnel.stop(waitForExit = true)) return false
+                }
                 change { it.copy(selectedProfileId = candidate.id) }
                 mutable.update { it.copy(message = "Переключаемся на ${candidate.name} из папки «${group.name}»") }
                 connectInternal(resetFailover = false)
@@ -801,6 +803,16 @@ class DesktopController(
             tunnel.stop()
         }
         mutable.update { it.copy(message = "Отключено") }
+    }
+
+    /** Report only a running VPN whose profile/settings still match the applied launch. */
+    fun connectedVpnProfileId(): String? = synchronized(connectLock) {
+        val connection = activeSimpleConnection ?: return@synchronized null
+        connection.profileId.takeIf {
+            connection.mode == RunMode.FULL_VPN && desiredConnection &&
+                tunnel.captureRunningLaunch() === connection.launch &&
+                connectGeneration.get() == connection.intentGeneration && state.value.saved == connection.desiredSnapshot
+        }
     }
 
     /** Cancels pending Simple starts before the Expert host is allowed to acquire TUN. */

@@ -139,7 +139,12 @@ class ExpertHealthSettingsTest {
         }
         try {
             render(scene)
-            click(scene, "Настроить проверки связи")
+            nodes(scene).first {
+                "Настройки экспертного режима" in it.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty() &&
+                    it.config.getOrNull(SemanticsActions.OnClick) != null
+            }.config[SemanticsActions.OnClick].action!!.invoke()
+            render(scene)
+            click(scene, "Проверки связи")
             assertThat(nodes(scene).any { texts(it).contains("Сохранить в черновик · Ctrl+Enter") }).isTrue()
             assertThat(intents).isEmpty()
             screenshot(scene, "health-editor")

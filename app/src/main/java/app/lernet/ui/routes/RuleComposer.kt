@@ -1,7 +1,7 @@
 package app.lernet.ui.routes
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,8 +45,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
 import app.lernet.R
 import app.lernet.config.repo.RuleNodeRecord
 import app.lernet.routing.ConditionBlock
@@ -62,6 +63,18 @@ import app.lernet.ui.theme.lernetButton
 internal fun RuleComposer(node: RuleNodeRecord, onIntent: (RouteEditorIntent) -> Unit) {
     val conditions = node.shownConditions()
     val commit = { next: RuleConditions -> onIntent(RouteEditorIntent.Update(node.withConditions(next))) }
+    ConditionsComposer(conditions, commit)
+}
+
+/** Shared condition controls; adapters retain the identity and storage of each editor's node. */
+@Composable
+internal fun ConditionsComposer(
+    conditions: RuleConditions,
+    onChange: (RuleConditions) -> Unit,
+    includeProcess: Boolean = false,
+    requireBlocks: Boolean = true,
+) {
+    val commit = onChange
     Column(verticalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap)) {
         JoinToggle(conditions.join) { commit(conditions.copy(join = it)) }
         conditions.blocks.forEachIndexed { index, block ->
@@ -77,10 +90,10 @@ internal fun RuleComposer(node: RuleNodeRecord, onIntent: (RouteEditorIntent) ->
                 )
             }
         }
-        AddBlockMenu { kind ->
+        AddBlockMenu(includeProcess) { kind ->
             commit(conditions.copy(blocks = conditions.blocks + ConditionBlock(kind, emptyList())))
         }
-        if (conditions.blocks.isEmpty()) {
+        if (requireBlocks && conditions.blocks.isEmpty()) {
             Text(
                 stringResource(R.string.rule_blocks_required),
                 style = MaterialTheme.typography.bodySmall,
@@ -171,9 +184,9 @@ private fun BlockValues(block: ConditionBlock, onChange: (ConditionBlock) -> Uni
         }
         ConditionKind.PROCESS -> PatternChipField(
             values = block.values,
-            addLabel = "Добавить процесс",
-            fieldLabel = "Имя процесса",
-            help = null,
+            addLabel = stringResource(R.string.rule_add_process),
+            fieldLabel = stringResource(R.string.expert_condition_process),
+            help = stringResource(R.string.expert_inactive_android),
             onChange = { onChange(block.copy(values = it)) },
         )
         ConditionKind.GEOIP -> CountryPicker(block.values) { onChange(block.copy(values = it)) }
@@ -190,7 +203,7 @@ internal fun PatternChipField(
     help: String?,
     onChange: (List<String>) -> Unit,
 ) {
-    var draft by remember { mutableStateOf<String?>(null) }
+    var draft by rememberSaveable { mutableStateOf<String?>(null) }
     val focus = remember { FocusRequester() }
     val filled = values.filter { PatternSign.body(it).isNotEmpty() }
     LaunchedEffect(draft != null) {
@@ -245,8 +258,10 @@ internal fun PatternChipField(
                     modifier = Modifier.padding(end = 8.dp).size(44.dp)
                         .background(LerNetOk, RoundedCornerShape(12.dp)),
                 ) {
-                    Icon(LerNetSymbols.check(), contentDescription = stringResource(R.string.done),
-                        tint = MaterialTheme.colorScheme.onPrimary)
+                    Icon(
+                        LerNetSymbols.check(), contentDescription = stringResource(R.string.done),
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
                 }
             },
         )
@@ -299,7 +314,7 @@ internal fun SignedChip(
 }
 
 @Composable
-private fun AddBlockMenu(onAdd: (ConditionKind) -> Unit) {
+private fun AddBlockMenu(includeProcess: Boolean, onAdd: (ConditionKind) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxWidth()) {
         TextButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth().lernetButton()) {
@@ -311,7 +326,7 @@ private fun AddBlockMenu(onAdd: (ConditionKind) -> Unit) {
             onDismissRequest = { open = false },
             properties = PopupProperties(focusable = true, clippingEnabled = true),
         ) {
-            ConditionKind.entries.filterNot { it == ConditionKind.PROCESS }.forEach { kind ->
+            ConditionKind.entries.filter { includeProcess || it != ConditionKind.PROCESS }.forEach { kind ->
                 DropdownMenuItem(
                     text = { Text(blockTitle(kind)) },
                     onClick = {
@@ -331,7 +346,7 @@ private fun blockTitle(kind: ConditionKind): String = when (kind) {
     ConditionKind.PRIVATE -> stringResource(R.string.rule_block_private)
     ConditionKind.CIDR -> stringResource(R.string.rule_block_cidr)
     ConditionKind.APP -> stringResource(R.string.rule_block_app)
-    ConditionKind.PROCESS -> "Имя процесса"
+    ConditionKind.PROCESS -> stringResource(R.string.expert_condition_process)
 }
 
 private fun <T> List<T>.replaceAt(index: Int, value: T): List<T> =

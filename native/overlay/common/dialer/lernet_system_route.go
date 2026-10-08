@@ -3,6 +3,7 @@ package dialer
 import (
 	"errors"
 	"net/netip"
+	"strconv"
 )
 
 type lernetRouteCandidate struct {
@@ -14,8 +15,13 @@ type lernetRouteCandidate struct {
 }
 
 func selectLerNETSystemRoute(destination netip.Addr, routes []lernetRouteCandidate) (lernetRouteCandidate, error) {
+	zone := destination.Zone()
+	destination = destination.WithZone("")
 	var selected lernetRouteCandidate
 	for _, route := range routes {
+		if zone != "" && zone != strconv.Itoa(route.index) && zone != route.name {
+			continue
+		}
 		if !route.up || route.owned || route.index <= 0 || route.guid == "" || !route.prefix.IsValid() || !route.prefix.Contains(destination) {
 			continue
 		}
@@ -26,7 +32,10 @@ func selectLerNETSystemRoute(destination netip.Addr, routes []lernetRouteCandida
 		}
 	}
 	if !selected.prefix.IsValid() {
-		return selected, errors.New("system_route_unavailable")
+		if destination.Is6() {
+			return selected, errors.New("system_route_ipv6_unavailable")
+		}
+		return selected, errors.New("system_route_ipv4_unavailable")
 	}
 	return selected, nil
 }

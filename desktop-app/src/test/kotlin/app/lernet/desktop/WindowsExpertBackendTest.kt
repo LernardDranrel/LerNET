@@ -67,13 +67,13 @@ class WindowsExpertBackendTest {
                   {"tag":"known","phase":"ready","health":[],"reason":{"password":"private-native-secret"},
                    "latency_ms":"12","active_flows":[],"pending_flows":-1,"last_check_ms":true}],
                 "folders":[{"tag":[],"selected_tag":{"password":"private-native-secret"}}],
-                "flows":[{"id":17,"destination":"invalid.example:443"},
-                  {"id":"invalid-destination","destination":["private-native-secret"]},
-                  {"id":"flow","destination":"example.invalid:443","selected_outbound":"known","network":[],
+                "flows":[{"id":17,"destination":"numeric.example:443"},
+                  {"id":18,"destination":["private-native-secret"]},
+                  {"id":19,"destination":"example.invalid:443","selected_outbound":"known","network":[],
                    "process":{"password":"private-native-secret"},"state":true,"reason":{"password":"private-native-secret"},
                    "node_ids":["valid-node",{},[],null,17,true],"upload_bytes":-1,"download_bytes":"55",
                    "closed":"false","started_ms":false,"revision":"1"},
-                  {"id":"unknown","destination":"other.invalid:443","outbound":"private-native-secret"}]
+                  {"id":20,"destination":"other.invalid:443","outbound":"private-native-secret"}]
             """.trimIndent()
             val queue = Channel<ExpertBackendEvent>(Channel.UNLIMITED)
             val collector = launch(start = CoroutineStart.UNDISPATCHED) {
@@ -84,7 +84,7 @@ class WindowsExpertBackendTest {
                 val started = fixture.backend.start(PolicyProgram(1, emptyList()))
                 val seen = mutableListOf<ExpertBackendEvent>()
                 withTimeout(5_000) {
-                    while (seen.filterIsInstance<ExpertBackendEvent.Observation>().size < 2 ||
+                    while (seen.filterIsInstance<ExpertBackendEvent.Observation>().size < 3 ||
                         seen.none { it is ExpertBackendEvent.ExitsSnapshot }
                     ) {
                         val event = queue.receive()
@@ -99,7 +99,8 @@ class WindowsExpertBackendTest {
                 assertEquals(null, exits.exits.single().latencyMs)
                 assertEquals(0, exits.exits.single().activeFlows)
                 val observations = seen.filterIsInstance<ExpertBackendEvent.Observation>().map { it.connection }
-                val flow = observations.first { it.id == "flow" }
+                assertEquals(setOf("17", "19", "20"), observations.map { it.id }.toSet())
+                val flow = observations.first { it.id == "19" }
                 assertEquals(listOf("valid-node"), flow.nodeIds)
                 assertEquals(null, flow.application)
                 assertEquals("?", flow.protocol)
@@ -107,8 +108,61 @@ class WindowsExpertBackendTest {
                 assertEquals(0L, flow.downloadedBytes)
                 assertEquals(null, flow.active)
                 assertEquals(null, flow.policyRevision)
-                assertEquals("Через другой выход", observations.first { it.id == "unknown" }.decision)
+                assertEquals("Через другой выход", observations.first { it.id == "20" }.decision)
                 assertFalse(seen.toString().contains("private-native-secret"))
+            } finally {
+                collector.cancelAndJoin()
+                queue.close()
+            }
+        }
+    }
+
+    @Test
+    fun `native numeric flows retain identity activity bytes and history visibility`() = runBlocking {
+        Fixture().use { fixture ->
+            // Field types match native/overlay/lernet/expert/history.go, including the int64 ID.
+            fixture.statusFields = """
+                "running":true,"flow_history_limit":500,"flow_dropped_count":620,
+                "exits":[],"folders":[],"flows":[
+                  {"id":9223372036854775807,"revision":0,"started_ms":1791283000000,
+                   "updated_ms":1791283001000,"network":"tcp","source":"172.19.0.1:53000",
+                   "destination":"203.0.113.8:443","domain":"example.invalid",
+                   "destination_ip":"203.0.113.8","destination_port":443,"process_name":"browser.exe",
+                   "outbound":"direct","state":"active","closed":false,"upload_bytes":512,"download_bytes":4096,
+                   "inspection":{"transfer_count":1,"payload_available":true,"upload_prefix":"aGVsbG8=",
+                   "transfers":[{"sequence":1,"at_ms":1791283001000,"upload":true,"bytes":5}]}},
+                  {"id":18,"revision":0,"started_ms":1791283000000,"updated_ms":1791283001000,
+                   "closed_ms":1791283001000,"network":"udp","destination":"203.0.113.9:53",
+                   "outbound":"direct","state":"closed","closed":true,"upload_bytes":32,"download_bytes":128}]
+            """.trimIndent()
+            val queue = Channel<ExpertBackendEvent>(Channel.UNLIMITED)
+            val collector = launch(start = CoroutineStart.UNDISPATCHED) {
+                fixture.backend.events.collect { queue.send(it) }
+            }
+            try {
+                fixture.backend.negotiateCapabilities()
+                fixture.backend.start(PolicyProgram(0, emptyList()))
+                val seen = mutableListOf<ExpertBackendEvent>()
+                withTimeout(5_000) {
+                    while (seen.filterIsInstance<ExpertBackendEvent.Observation>().size < 2) seen += queue.receive()
+                }
+                val history = seen.filterIsInstance<ExpertBackendEvent.ObservationHistory>().first()
+                assertEquals(setOf("9223372036854775807", "18"), history.visibleFlowIds)
+                assertEquals(620L, history.droppedCount)
+                val flows = seen.filterIsInstance<ExpertBackendEvent.Observation>().map { it.connection }
+                val active = flows.first { it.id == "9223372036854775807" }
+                assertEquals(true, active.active)
+                assertEquals(512L, active.uploadedBytes)
+                assertEquals(4096L, active.downloadedBytes)
+                assertEquals("example.invalid", active.domain)
+                assertEquals("browser.exe", active.processName)
+                assertEquals(1791283001000L, active.lastUpdateAtMs)
+                assertEquals("Напрямую", active.decision)
+                assertEquals("hello", active.inspection?.text(true))
+                assertEquals(1L, active.inspection?.transferCount)
+                val closed = flows.first { it.id == "18" }
+                assertEquals(false, closed.active)
+                assertEquals(1791283001000L, closed.closedAtMs)
             } finally {
                 collector.cancelAndJoin()
                 queue.close()
@@ -346,11 +400,38 @@ class WindowsExpertBackendTest {
         }
     }
 
+    @Test
+    fun `failed guardian revocation remains retryable after owned process has exited`() = runBlocking {
+        val failRevocation = AtomicBoolean(true)
+        Fixture(revoke = { check(!failRevocation.get()) { "guardian did not confirm revocation" } }).use { fixture ->
+            try {
+                fixture.backend.negotiateCapabilities()
+                fixture.backend.start(PolicyProgram(1, emptyList()))
+                assertTrue(runCatching { fixture.backend.stop(null) }.exceptionOrNull() is ExpertStateUncertainException)
+                assertFalse(fixture.process!!.isAlive)
+                assertEquals(null, fixture.backend.identity)
+                assertTrue(runCatching { fixture.backend.negotiateCapabilities() }.exceptionOrNull() is ExpertStateUncertainException)
+                assertEquals(1, fixture.spawned.get())
+                assertTrue(runCatching { fixture.backend.stop(null) }.exceptionOrNull() is ExpertStateUncertainException)
+                assertEquals(2, fixture.beforeStops.get())
+                failRevocation.set(false)
+                fixture.backend.stop(null)
+                assertEquals(3, fixture.beforeStops.get())
+                fixture.backend.negotiateCapabilities()
+                fixture.backend.start(PolicyProgram(2, emptyList()))
+                assertEquals(2, fixture.spawned.get())
+            } finally {
+                failRevocation.set(false)
+            }
+        }
+    }
+
     private class Fixture(
         private val prepare: ((Path) -> Path)? = null,
         private val routeCheck: (ExpertNativeAck) -> String? = { null },
         private val permit: (ExpertNativeAck) -> Unit = {},
         private val physicalExits: List<PolicyPhysicalExit> = emptyList(),
+        private val revoke: () -> Unit = {},
     ) : AutoCloseable {
         private val directory = Files.createTempDirectory("lernet-expert-fake-")
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -451,7 +532,10 @@ class WindowsExpertBackendTest {
                 },
                 probeUrl = { "https://health.example/204" }, log = {}, elevated = { true },
                 prepareBinary = { prepare?.invoke(it) ?: it.resolve("lernet-core.exe") }, verifyRoutes = routeCheck,
-                beforeStop = { beforeStops.incrementAndGet() },
+                beforeStop = {
+                    beforeStops.incrementAndGet()
+                    revoke()
+                },
                 permitIngress = { ack, _ ->
                     permits.incrementAndGet()
                     permit(ack)

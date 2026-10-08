@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -47,17 +48,18 @@ import kotlinx.coroutines.launch
 internal fun ExpertExternalExitEditor(
     existing: TransferProfile?,
     onDismiss: () -> Unit,
+    formMemory: ExpertFormMemory = remember { ExpertFormMemory() },
     onSave: suspend (ExternalExitRequest, TransferProfile?) -> String?,
 ) {
     val initial = remember(existing) { existing?.let(ExternalExitProfiles::describe) }
-    var kind by remember(existing) { mutableStateOf(initial?.kind ?: ExternalExitKind.SOCKS5) }
-    var name by remember(existing) { mutableStateOf(initial?.name.orEmpty()) }
-    var host by remember(existing) { mutableStateOf(initial?.host.orEmpty()) }
-    var port by remember(existing) { mutableStateOf(initial?.port?.takeIf { it > 0 }?.toString() ?: "1080") }
-    var authenticated by remember(existing) { mutableStateOf(initial?.username?.isNotEmpty() == true) }
-    var username by remember(existing) { mutableStateOf(initial?.username.orEmpty()) }
-    var password by remember(existing) { mutableStateOf(initial?.password.orEmpty()) }
-    var tls by remember(existing) { mutableStateOf(initial?.tls == true) }
+    var kind by rememberSaveable(existing?.id) { mutableStateOf(initial?.kind ?: ExternalExitKind.SOCKS5) }
+    var name by rememberSaveable(existing?.id) { mutableStateOf(initial?.name.orEmpty()) }
+    var host by rememberSaveable(existing?.id) { mutableStateOf(initial?.host.orEmpty()) }
+    var port by rememberSaveable(existing?.id) { mutableStateOf(initial?.port?.takeIf { it > 0 }?.toString() ?: "1080") }
+    var authenticated by rememberSaveable(existing?.id) { mutableStateOf(initial?.username?.isNotEmpty() == true) }
+    var username by rememberSaveable(existing?.id) { mutableStateOf(initial?.username.orEmpty()) }
+    var password by remember(existing?.id) { formMemory.passwords.getOrPut(existing?.id ?: "new") { mutableStateOf(initial?.password.orEmpty()) } }
+    var tls by rememberSaveable(existing?.id) { mutableStateOf(initial?.tls == true) }
     var busy by remember { mutableStateOf(false) }
     var saveError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()

@@ -11,7 +11,9 @@ import app.lernet.R
 import app.lernet.config.policy.PolicyWorkspace
 import app.lernet.config.redact.SecretRedactor
 import app.lernet.engine.ConnectionController
+import app.lernet.engine.ConnectionState
 import app.lernet.engine.LibboxBoxEngine
+import app.lernet.engine.RunMode
 import app.lernet.engine.SimpleModeRestorePoint
 import app.lernet.engine.compile.ConfigAssembler
 import app.lernet.engine.compile.EngineDefaults
@@ -20,10 +22,12 @@ import app.lernet.engine.policy.ExpertBackendEvent
 import app.lernet.engine.policy.ExpertConnectionObservation
 import app.lernet.engine.policy.ExpertExitKey
 import app.lernet.engine.policy.ExpertExitState
+import app.lernet.engine.policy.ExpertNativeStatusEvidence as SharedNativeStatusEvidence
 import app.lernet.engine.policy.ExpertProbeResult
 import app.lernet.engine.policy.ExpertRuntimeBackend
 import app.lernet.engine.policy.ExpertStateUncertainException
 import app.lernet.engine.policy.ExpertTunnelAck
+import app.lernet.engine.policy.FlowInspection
 import app.lernet.engine.policy.PolicyConfigAssembler
 import app.lernet.engine.policy.PolicyControlCapabilities
 import app.lernet.engine.policy.TunIdentity
@@ -79,6 +83,16 @@ class ExpertAndroidEngine @Inject constructor(
     private val settings: SettingsStore,
     private val scope: CoroutineScope,
 ) : ExpertRuntimeBackend {
+    fun connectedSimpleVpnProfileId(): String? {
+        val connection = simpleController.snapshot.value
+        val profile = workspace.get()?.legacy?.profiles?.firstOrNull { it.id == connection.activeProfileId }
+        return profile?.id?.takeIf {
+            connection.state == ConnectionState.CONNECTED &&
+                connection.mode == RunMode.FULL_VPN &&
+                connection.activeOutboundId == profile.selectedOutboundId
+        }
+    }
+
     private val mutex = Mutex()
     private val bridge = ExpertNativeBridge()
     private val workspace = AtomicReference<PolicyWorkspace?>(null)
@@ -106,6 +120,7 @@ class ExpertAndroidEngine @Inject constructor(
     private val trackedFlows = mutableMapOf<String, ExpertExitKey>()
     private val exitGenerations = mutableMapOf<ExpertExitKey, Long>()
     private val lossReported = AtomicBoolean(false)
+    private val underlayResetPending = AtomicBoolean(false)
     private val operationEpoch = AtomicLong(0)
     private val modeIntentEpoch = AtomicLong(0)
 
@@ -123,17 +138,8 @@ class ExpertAndroidEngine @Inject constructor(
             DefaultNetworkMonitor.changes.drop(1).collect {
                 val snapshot = appliedSnapshot ?: return@collect
                 if (stopping || serviceFailure != null) return@collect
-                try {
-                    // IP/DNS changes can keep the same Android interface index. Notify native
-                    // independently of its interface-name listener so cached exit health expires.
-                    snapshot.session.networkChanged()
-                } catch (failure: Exception) {
-                    if (failure is CancellationException) throw failure
-                    if (appliedSnapshot === snapshot && !stopping) {
-                        LerNetLog.w(TAG, "Expert underlay reset failed", failure)
-                        signalLost("underlay_reset_failed")
-                    }
-                }
+                // Polling serializes refresh with status/apply and retries transient failures.
+                underlayResetPending.set(true)
             }
         }
     }
@@ -241,19 +247,11 @@ class ExpertAndroidEngine @Inject constructor(
                 serviceTun = owned
                 nativeAck = actual
                 tun = identity(actual, owned)
+                assembled.notes.forEach { LerNetLog.i(TAG, "Схема применена: $it") }
                 exitTags = assembled.exitTags
                 tagBindings.putAll(exitTags.entries.associate { it.value to it.key })
                 appliedSnapshot = NativeAppliedSnapshot(session, actual, tun!!, owned, assembled.exitTags)
                 promoteRestartEligibility(fingerprint, actual.revision)
-                (VpnRuntime.current() as? LerNetVpnService)?.let { service ->
-                    runCatching {
-                        service.getSystemService(NotificationManager::class.java).notify(
-                            17, ExpertVpnNotification.build(service, "lernet.vpn", active = true),
-                        )
-                    }.onFailure { failure ->
-                        LerNetLog.w(TAG, "Expert notification keeps initial foreground content", failure)
-                    }
-                }
                 startPolling()
                 ExpertTunnelAck(tun!!, actual.revision)
             }
@@ -353,6 +351,7 @@ class ExpertAndroidEngine @Inject constructor(
             throw ExpertStateUncertainException(context.getString(R.string.expert_platform_apply_uncertain))
         }
         nativeAck = actual
+        assembled.notes.forEach { LerNetLog.i(TAG, "Схема применена: $it") }
         exitTags = assembled.exitTags
         tagBindings.putAll(exitTags.entries.associate { it.value to it.key })
         exitGenerations.clear()
@@ -534,12 +533,31 @@ class ExpertAndroidEngine @Inject constructor(
                     mutex.withLock {
                         val session = native ?: return@launch
                         requireOwnedTun()
+                        // Keep the pending reset while offline; there is no physical path to rebuild yet.
+                        // Native status is still read, so a stopped or unconfirmed core stays visible.
+                        if (DefaultNetworkMonitor.underlyingNetwork() != null && underlayResetPending.getAndSet(false)) {
+                            try {
+                                session.networkChanged()
+                            } catch (failure: Exception) {
+                                underlayResetPending.set(true)
+                                throw failure
+                            }
+                        }
                         receiveStatus(session.status())
                     }
                 } catch (failure: Exception) {
                     if (failure is CancellationException) throw failure
-                    signalLost(SecretRedactor.redact(failure.message.orEmpty()))
-                    return@launch
+                    val identity = tun
+                    val ack = nativeAck
+                    if (stopping || identity == null || ack == null || serviceFailure != null) {
+                        signalLost(SecretRedactor.redact(failure.message.orEmpty()))
+                        return@launch
+                    }
+                    // An unconfirmed status is red, but does not discard the owned VPN lease.
+                    // The next valid response clears this transient reason.
+                    mutableEvents.emit(ExpertBackendEvent.NetworkStatus(
+                        identity, ack.revision, nativeReason("expert_status_unavailable"),
+                    ))
                 }
             }
         }
@@ -572,9 +590,20 @@ class ExpertAndroidEngine @Inject constructor(
                 )
             )
         }
+        val underlayMissing = DefaultNetworkMonitor.underlyingNetwork() == null
+        tun?.let {
+            mutableEvents.emit(ExpertBackendEvent.NetworkStatus(
+                it, actual.revision,
+                if (underlayMissing) {
+                    nativeReason("expert_underlay_unavailable")
+                } else null,
+                recovering = underlayMissing,
+            ))
+        }
         val networkEpoch = ExpertNativeJson.long(body, "network_epoch")?.takeIf { it >= 0 }
         if (networkEpoch != null) {
             val before = observedNetworkEpoch
+            if (before != null && networkEpoch < before) return
             if (before == null || networkEpoch > before) observedNetworkEpoch = networkEpoch
             if (before != null && networkEpoch > before) {
                 tun?.let { mutableEvents.emit(ExpertBackendEvent.NetworkChanged(it, actual.revision, networkEpoch)) }
@@ -622,12 +651,23 @@ class ExpertAndroidEngine @Inject constructor(
             }
         }
         mutableEvents.emit(ExpertBackendEvent.FolderSelectionsSnapshot(selectedFolders, identity = tun, revision = actual.revision))
-        val visibleIds = flows.mapNotNull { (it as? JsonObject)?.let { row -> ExpertNativeJson.long(row, "id") } }
-            .filter { it > 0 }.map(Long::toString).toSet()
+        val visibleIds = flows.mapNotNull { (it as? JsonObject)?.let(SharedNativeStatusEvidence::flowId) }.toSet()
+        val observedAtMs = System.currentTimeMillis()
+        app.lernet.engine.policy.directNetworkFacts(body, observedAtMs)?.let { facts ->
+            tun?.let { mutableEvents.emit(ExpertBackendEvent.DirectNetworkSnapshot(facts, it, actual.revision)) }
+        }
+        mutableEvents.emit(
+            ExpertBackendEvent.ObservationHistory(
+                droppedCount = ExpertNativeJson.long(body, "flow_dropped_count") ?: 0,
+                limit = ExpertNativeJson.int(body, "flow_history_limit") ?: 500,
+                identity = tun,
+                visibleFlowIds = visibleIds,
+            ),
+        )
         trackedFlows.keys.retainAll(visibleIds)
         for (entry in flows) {
             val flow = entry as? JsonObject ?: continue
-            val id = ExpertNativeJson.long(flow, "id")?.takeIf { it > 0 }?.toString() ?: continue
+            val id = SharedNativeStatusEvidence.flowId(flow) ?: continue
             val destination = ExpertNativeJson.string(flow, "destination") ?: continue
             val key = ExpertNativeJson.string(flow, "outbound")?.let(byTag::get)
             val closedValue = ExpertNativeJson.boolean(flow, "closed")
@@ -658,6 +698,24 @@ class ExpertAndroidEngine @Inject constructor(
                         active = closedValue?.not(),
                         startedAtMs = ExpertNativeJson.long(flow, "started_ms")?.takeIf { it > 0 },
                         policyRevision = ExpertNativeJson.long(flow, "revision")?.takeIf { it >= 0 },
+                        sourceIp = ExpertNativeJson.string(flow, "source_ip"),
+                        sourcePort = ExpertNativeJson.int(flow, "source_port")?.takeIf { it in 1..65535 },
+                        destinationIp = ExpertNativeJson.string(flow, "destination_ip"),
+                        destinationPort = ExpertNativeJson.int(flow, "destination_port")?.takeIf { it in 1..65535 },
+                        domain = ExpertNativeJson.string(flow, "domain"),
+                        processName = ExpertNativeJson.string(flow, "process_name"),
+                        network = ExpertNativeJson.string(flow, "network"),
+                        sniffedProtocol = ExpertNativeJson.string(flow, "protocol"),
+                        inspection = FlowInspection.fromNative(flow),
+                        geoCountry = ExpertNativeJson.string(flow, "geo_country"),
+                        observedAtMs = observedAtMs,
+                        lastUpdateAtMs = ExpertNativeJson.long(flow, "updated_ms")?.takeIf { it > 0 },
+                        closedAtMs = ExpertNativeJson.long(flow, "closed_ms")?.takeIf { it > 0 },
+                        state = state,
+                        errorReason = ExpertNativeJson.string(flow, "error_reason"),
+                        errorStage = ExpertNativeJson.string(flow, "error_stage"),
+                        closeReason = ExpertNativeJson.string(flow, "close_reason"),
+                        packageNames = packages,
                     ),
                     identity = tun,
                 ),
