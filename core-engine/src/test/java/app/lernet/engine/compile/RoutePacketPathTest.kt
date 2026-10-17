@@ -1,5 +1,6 @@
 package app.lernet.engine.compile
 
+import app.lernet.config.model.DnsPolicy
 import app.lernet.config.model.NormalizedOutbound
 import app.lernet.engine.RunMode
 import app.lernet.routing.CompiledRoute
@@ -26,6 +27,7 @@ class RoutePacketPathTest {
             CompiledRoute(rules = emptyList(), finalAction = RouteAction.PROXY, errors = emptyList()),
             RunMode.FULL_VPN,
             "info",
+            dnsPolicy = DnsPolicy.UNDERLAY,
         )
         val root = json.parseToJsonElement(assembled.json).jsonObject
         assertThat(DnsDependency.dangling(root)).isEmpty()

@@ -42,6 +42,8 @@ class WindowsBoxProcess internal constructor(
     private val readinessDelayMs: Long,
     private val retryDelayMs: (Int) -> Long = { (it.coerceAtMost(15) * 2_000L).coerceAtMost(30_000L) },
 ) : AutoCloseable {
+    /** Raw core log lines for passive checks (the block detector). Never blocks the reader. */
+    @Volatile var lineListener: ((String) -> Unit)? = null
     constructor(directory: Path) : this(directory, { executable, configFile ->
         ProcessBuilder(executable.toString(), "run", "-c", configFile.toString())
             .directory(directory.toFile()).redirectErrorStream(true).start()
@@ -117,6 +119,7 @@ class WindowsBoxProcess internal constructor(
                         running.inputStream.bufferedReader().useLines { lines ->
                             lines.forEach { line ->
                                 if (line.contains("FATAL", ignoreCase = true)) lastFatal.set(line)
+                                runCatching { lineListener?.invoke(line) }
                                 val safeLine = SecretRedactor.redact(line)
                                 mutable.update { it.copy(logs = (it.logs + safeLine).takeLast(400)) }
                                 runCatching { appendJournal(safeLine) }

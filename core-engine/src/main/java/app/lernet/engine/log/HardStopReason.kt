@@ -10,6 +10,7 @@ object HardStopReason {
             ConnectionCause.UserDisconnected -> "user"
             is ConnectionCause.WatchdogTimeout -> "watchdog"
             is ConnectionCause.TunnelHealthFailed -> "tunnel-health"
+            is ConnectionCause.BlockingSuspected -> "blocking-" + cause.sign.name.lowercase()
             is ConnectionCause.DnsStalled,
             is ConnectionCause.DnsUnreachable,
             -> "dns"

@@ -202,8 +202,9 @@ data class ExitLifecyclePolicy(
 /** Random active checks detect broken exits. Manual candidate checks retain their separate longer budget. */
 @Serializable
 data class PolicyHealthSettings(
-    val minimumIntervalMs: Long = 3_000,
-    val maximumIntervalMs: Long = 7_000,
+    // Rare checks with a random spread (anti-DPI wave 1): a 3–7 s beat is visible on the wire.
+    val minimumIntervalMs: Long = 20_000,
+    val maximumIntervalMs: Long = 60_000,
     val activeTimeoutMs: Long = 4_000,
     val failedChecksBeforeRecovery: Int = 2,
 ) {

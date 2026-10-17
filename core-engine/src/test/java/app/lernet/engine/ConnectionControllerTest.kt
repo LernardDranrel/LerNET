@@ -15,6 +15,7 @@ import app.lernet.engine.net.HopTracer
 import app.lernet.engine.net.OutboundDialer
 import app.lernet.engine.net.OutboundEndpoint
 import app.lernet.engine.net.VpnGuard
+import app.lernet.engine.policy.TunnelProbeSchedule
 import app.lernet.engine.policy.ManualFailoverGroup
 import app.lernet.engine.policy.ReconnectSettings
 import com.google.common.truth.Truth.assertThat
@@ -290,7 +291,7 @@ class ConnectionControllerTest {
     }
 
     @Test
-    fun startupProbeWaitsForSlowNetworkWithoutSlowingConnectedRefresh() = runTest(dispatcher) {
+    fun startupProbeWaitsForSlowNetworkAndNoDirectLatencyDialFollows() = runTest(dispatcher) {
         val timeouts = mutableListOf<Int>()
         val engine = RecordingBoxEngine()
         val controller = controller(
@@ -308,14 +309,15 @@ class ConnectionControllerTest {
         assertThat(timeouts).contains(30_000)
         engine.emit(EngineEvent.DnsAlive(answers = 1))
         runCurrent()
+        val afterStart = timeouts.size
 
-        // The connected latency dial comes after the (here: shortest) random recheck pause, 45 s.
-        testScheduler.advanceTimeBy(44_000)
-        runCurrent()
-        assertThat(timeouts).doesNotContain(8_000)
-        testScheduler.advanceTimeBy(1_001)
-        runCurrent()
-        assertThat(timeouts).contains(8_000)
+        // No periodic "empty" TCP connection to the server past the tunnel any more.
+        repeat(20) {
+            engine.emit(EngineEvent.Status(100, 100, 1_000L * (it + 1), 1_000L * (it + 1), 1))
+            testScheduler.advanceTimeBy(30_000)
+            runCurrent()
+        }
+        assertThat(timeouts.size).isEqualTo(afterStart)
     }
 
     @Test
@@ -332,12 +334,18 @@ class ConnectionControllerTest {
         )
         controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
         runCurrent()
+        engine.emit(EngineEvent.DnsAlive(answers = 1))
+        runCurrent()
 
-        testScheduler.advanceTimeBy(5_000)
+        testScheduler.advanceTimeBy(5_001)
         runCurrent()
         assertThat(checks).isEqualTo(1)
         assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
 
+        // The confirmation waits a jittered 3–8 s (here 4 s), not a 2 s burst.
+        testScheduler.advanceTimeBy(2_000)
+        runCurrent()
+        assertThat(checks).isEqualTo(1)
         testScheduler.advanceTimeBy(2_000)
         runCurrent()
         assertThat(checks).isEqualTo(2)
@@ -346,40 +354,71 @@ class ConnectionControllerTest {
     }
 
     @Test
-    fun tunnelHealthSuccessResetsFailureCount() = runTest(dispatcher) {
+    fun tunnelIsCheckedOnlyWhenTrafficStaysUnanswered() = runTest(dispatcher) {
         val engine = RecordingBoxEngine()
         var checks = 0
         val controller = controller(
             this, engine, hardStopTimeoutMs = 2_500,
-            reconnect = ReconnectSettings(maxAttempts = 3, watchdogTimeoutMs = 60_000),
+            reconnect = ReconnectSettings(maxAttempts = 3, watchdogTimeoutMs = 600_000),
             tunnelHealthProbe = {
                 checks++
-                if (checks == 2) {
-                    Result.success(42L)
-                } else {
-                    Result.failure(IllegalStateException("no reply"))
-                }
+                Result.success(42L)
             },
         )
         controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
         runCurrent()
         engine.emit(EngineEvent.DnsAlive(answers = 1))
         runCurrent()
-
-        testScheduler.advanceTimeBy(7_000)
+        testScheduler.advanceTimeBy(5_001)
         runCurrent()
+        assertThat(checks).isEqualTo(1)
+
+        // Answered traffic for five minutes: no checks at all.
+        var up = 0L
+        var down = 0L
+        repeat(300) {
+            up += 2_000
+            down += 8_000
+            engine.emit(EngineEvent.Status(2_000, 8_000, up, down, 1))
+            testScheduler.advanceTimeBy(1_000)
+            runCurrent()
+        }
+        assertThat(checks).isEqualTo(1)
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
+
+        // We keep sending, nothing comes back: one check after the silence window.
+        repeat(12) {
+            up += 2_000
+            engine.emit(EngineEvent.Status(2_000, 0, up, down, 1))
+            testScheduler.advanceTimeBy(1_000)
+            runCurrent()
+        }
         assertThat(checks).isEqualTo(2)
         assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
+    }
 
-        testScheduler.advanceTimeBy(5_000)
+    @Test
+    fun repeatedHandshakeResetsAreReportedHonestlyAndLeaveTheConfig() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine()
+        val controller = controller(
+            this, engine, hardStopTimeoutMs = 2_500,
+            reconnect = ReconnectSettings(maxAttempts = 3, watchdogTimeoutMs = 600_000),
+        )
+        controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
         runCurrent()
-        assertThat(checks).isEqualTo(3)
+        engine.emit(EngineEvent.DnsAlive(answers = 1))
+        runCurrent()
         assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
-
-        testScheduler.advanceTimeBy(2_000)
-        runCurrent()
-        assertThat(checks).isEqualTo(4)
-        assertThat(controller.snapshot.value.cause).isInstanceOf(ConnectionCause.TunnelHealthFailed::class.java)
+        repeat(3) {
+            engine.emit(EngineEvent.LogLine("ERROR outbound/vless[proxy]: tls handshake: read: connection reset by peer"))
+            runCurrent()
+        }
+        val snap = controller.snapshot.value
+        assertThat(snap.state).isEqualTo(ConnectionState.RECONNECTING)
+        // No other config here: the folder-less session keeps the honest reason and rechecks later.
+        val cause = snap.cause as ConnectionCause.ReconnectExhausted
+        assertThat(cause.last).isEqualTo(ConnectionCause.BlockingSuspected(app.lernet.engine.policy.BlockingSign.RESET_AFTER_HELLO))
+        assertThat(cause.labelRu()).contains("TLS")
     }
 
     @Test
@@ -1096,8 +1135,10 @@ class ConnectionControllerTest {
             outboundDialer = dialer,
             l7UrlTestEnabled = l7UrlTestEnabled,
             tunnelHealthProbe = tunnelHealthProbe,
-            tunnelHealthIntervalMs = { 5_000L },
-            latencyRefreshMs = { 45_000L },
+            tunnelProbeSchedule = {
+                TunnelProbeSchedule(firstMs = { 5_000L }, confirmMs = { 4_000L }, cooldownMs = { 60_000L })
+            },
+            candidateGapMs = { 0L },
             pathDispatcher = dispatcher,
             underlayAvailable = underlayAvailable,
             persistSessionIntent = persist,

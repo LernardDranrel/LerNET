@@ -265,6 +265,10 @@ class ConnectionPolicyMachine {
             cause is ConnectionCause.EngineStartFailed && !state.sessionHeld &&
                 failures >= context.reconnect.maxAttempts ->
                 failNow(state, ConnectionCause.ReconnectExhausted(failures, cause))
+            // A filter pattern on this config: reconnecting to the same server would hit it
+            // again, so go straight to the next config of the folder.
+            cause is ConnectionCause.BlockingSuspected ->
+                afterReconnectBudget(state, context, outboundId, failures, cause)
             failures < context.reconnect.maxAttempts -> retrySame(state, outboundId, failures, cause, context)
             else -> afterReconnectBudget(state, context, outboundId, failures, cause)
         }

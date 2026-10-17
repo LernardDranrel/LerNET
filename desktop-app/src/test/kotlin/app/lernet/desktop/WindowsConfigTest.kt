@@ -77,6 +77,32 @@ class WindowsConfigTest {
     }
 
     @Test
+    fun windowsHealthReusesTheOpenConnectionWithoutMarkerHeader() {
+        val agents = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val peers = java.util.Collections.synchronizedSet(mutableSetOf<Int>())
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/health") { exchange ->
+            agents += exchange.requestHeaders.getFirst("User-Agent").orEmpty()
+            peers += exchange.remoteAddress.port
+            exchange.sendResponseHeaders(204, -1)
+            exchange.close()
+        }
+        server.start()
+        val url = "http://127.0.0.1:${server.address.port}/health"
+        try {
+            repeat(3) {
+                assertThat(WindowsTunnelHealth.check(url, RunMode.FULL_VPN, routeCheck = { null }).latencyMs).isNotNull()
+            }
+        } finally {
+            server.stop(0)
+            WindowsTunnelHealth.drop()
+        }
+        assertThat(agents).hasSize(3)
+        agents.forEach { assertThat(it).doesNotContain("LerNET") }
+        assertThat(peers).hasSize(1)
+    }
+
+    @Test
     fun competingVpnRouteCannotPassTheWindowsHealthCheck() {
         val result = WindowsTunnelHealth.check("https://example.com", RunMode.FULL_VPN,
             routeCheck = { "Маршрут Windows идёт через другой VPN" })

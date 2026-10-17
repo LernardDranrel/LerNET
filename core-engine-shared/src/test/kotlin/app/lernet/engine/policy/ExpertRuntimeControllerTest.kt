@@ -1080,7 +1080,12 @@ class ExpertRuntimeControllerTest {
         controller.handle(ExpertIntent.Start)
         val key = ExpertExitKey("a")
         controller.onBackendEvent(ExpertBackendEvent.ExitStatus(ExpertExitState(key, ExitPhase.READY)))
+        // Default checks are rare now (random 20–60 s): nothing at the old 3 s beat.
         advanceTimeBy(3_001)
+        controller.handle(ExpertIntent.Tick)
+        runCurrent()
+        assertTrue(backend.probeTimeouts.isEmpty())
+        advanceTimeBy(57_000)
         controller.handle(ExpertIntent.Tick)
         runCurrent()
         assertEquals(4_000L, backend.probeTimeouts.single())

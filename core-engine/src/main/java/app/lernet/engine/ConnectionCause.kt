@@ -29,6 +29,9 @@ sealed class ConnectionCause {
 
     data class TunnelHealthFailed(val detail: String) : ConnectionCause()
 
+    /** The passive detector saw a known filter pattern on ordinary traffic. */
+    data class BlockingSuspected(val sign: app.lernet.engine.policy.BlockingSign) : ConnectionCause()
+
     data class DnsStalled(val silentForSeconds: Int) : ConnectionCause()
 
     data class DnsUnreachable(val silentForSeconds: Int) : ConnectionCause()
@@ -61,6 +64,7 @@ sealed class ConnectionCause {
             is DialTimeout,
             is WatchdogTimeout,
             is TunnelHealthFailed,
+            is BlockingSuspected,
             is DnsStalled,
             is DnsUnreachable,
             is ConnectTimeout,
@@ -106,6 +110,7 @@ private object CauseTitles {
             is ConnectionCause.DialTimeout -> "Таймаут дозвона"
             is ConnectionCause.WatchdogTimeout -> "Нет трафика"
             is ConnectionCause.TunnelHealthFailed -> "Туннель не отвечает"
+            is ConnectionCause.BlockingSuspected -> "Похоже на блокировку"
             is ConnectionCause.DnsStalled -> "DNS не отвечает"
             is ConnectionCause.DnsUnreachable -> "DNS не отвечает"
             is ConnectionCause.ConnectTimeout -> "Таймаут подключения"
@@ -145,6 +150,7 @@ private object CauseDetails {
             is ConnectionCause.WatchdogTimeout ->
                 "${cause.silentForSeconds} с без прироста байт и без dns query ok"
             is ConnectionCause.TunnelHealthFailed -> cause.detail.ifBlank { null }
+            is ConnectionCause.BlockingSuspected -> app.lernet.engine.policy.BlockingDetector.message(cause.sign)
             is ConnectionCause.DnsStalled ->
                 "нет dns query ok ${cause.silentForSeconds} с — перезапуск ядра"
             is ConnectionCause.DnsUnreachable ->
