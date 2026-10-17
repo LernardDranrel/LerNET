@@ -19,6 +19,8 @@ type candidateHealth struct {
 	failedUntil         time.Time
 	transportGeneration int64
 	gate                *exitGate
+	// Recent record for the "stable" strategy; kept across samples, cleared with the network.
+	okCount, failCount int
 }
 type folderSelection struct {
 	done chan struct{}
@@ -39,6 +41,12 @@ type folderGate struct {
 	direct         adapter.Outbound
 	networkEpoch   int64
 	nextHealth     time.Time
+	// Backup checks: one candidate at a time, in rotation, at a random 45 s - 5 min pace.
+	nextBackup     time.Time
+	backupCursor   int
+	backupChecking bool
+	// "fast" strategy: when a healthy exit was last left for a faster one.
+	lastFastSwitch time.Time
 }
 
 func (f *folderGate) Type() string      { return "selector" }
@@ -125,6 +133,24 @@ func (f *folderGate) selectCandidate(ctx context.Context) (string, error) {
 	preferred := f.options.PreferredTag
 	if previous != "" {
 		preferred = previous
+	}
+	stable := f.options.Strategy == "stable"
+	if stable {
+		// After a failure the exit with the cleanest record goes first, not the fastest one.
+		f.mu.Lock()
+		now := time.Now()
+		score := func(tag string) float64 {
+			h := f.health[tag]
+			if now.Before(h.failedUntil) {
+				return -1
+			}
+			return float64(h.okCount+1) / float64(h.okCount+h.failCount+2)
+		}
+		sort.SliceStable(tags, func(i, j int) bool { return score(tags[i]) > score(tags[j]) })
+		f.mu.Unlock()
+		if len(tags) > 0 && (previous == "" || tags[0] != previous) {
+			preferred = tags[0]
+		}
 	}
 	sort.SliceStable(tags, func(i, j int) bool { return tags[i] == preferred && tags[j] != preferred })
 	ctx, cancel := context.WithCancel(ctx)
@@ -243,7 +269,7 @@ func (f *folderGate) selectCandidate(ctx context.Context) (string, error) {
 			if previous != "" && result.tag == previous && result.latency != nil {
 				return previous, nil
 			}
-			if f.options.Selection == "preferred" && !preferredPending {
+			if (f.options.Selection == "preferred" || stable) && !preferredPending {
 				if preferredResult != nil && preferredResult.latency != nil {
 					return preferredResult.tag, nil
 				}
@@ -267,7 +293,9 @@ func (f *folderGate) recordCandidateLocked(gate *exitGate, result ProbeResult, e
 	if gate.closed || gate.phase != "ready" || gate.transportGeneration != result.transportGeneration || f.networkEpoch != epoch || result.HTTPSLatencyMs == nil {
 		return false
 	}
-	f.health[gate.tag] = candidateHealth{latency: *result.HTTPSLatencyMs, checked: time.Now(), transportGeneration: result.transportGeneration, gate: gate}
+	previous := f.health[gate.tag]
+	f.health[gate.tag] = candidateHealth{latency: *result.HTTPSLatencyMs, checked: time.Now(), transportGeneration: result.transportGeneration, gate: gate,
+		okCount: previous.okCount + 1, failCount: previous.failCount}
 	return true
 }
 
@@ -276,6 +304,7 @@ func (f *folderGate) failed(tag string) {
 	defer f.mu.Unlock()
 	sample := f.health[tag]
 	sample.latency = 0
+	sample.failCount++
 	sample.failedUntil = time.Now().Add(time.Duration(f.options.CooldownMs) * time.Millisecond)
 	f.health[tag] = sample
 }
@@ -287,6 +316,7 @@ func (f *folderGate) failedEpoch(tag string, epoch int64) {
 	}
 	sample := f.health[tag]
 	sample.latency = 0
+	sample.failCount++
 	sample.failedUntil = time.Now().Add(time.Duration(f.options.CooldownMs) * time.Millisecond)
 	f.health[tag] = sample
 }
@@ -432,7 +462,7 @@ func (f *folderGate) ListenPacket(ctx context.Context, destination M.Socksaddr) 
 func (f *folderGate) checkHealth() {
 	f.mu.Lock()
 	tag := f.selected
-	if tag == "" || f.healthChecking || time.Now().Before(f.nextHealth) {
+	if tag == "" || f.healthChecking || f.backupChecking || time.Now().Before(f.nextHealth) {
 		f.mu.Unlock()
 		return
 	}
@@ -491,6 +521,7 @@ func (f *folderGate) checkHealth() {
 		}
 		sample := f.health[tag]
 		sample.latency = 0
+		sample.failCount++
 		sample.failedUntil = time.Now().Add(time.Duration(f.options.CooldownMs) * time.Millisecond)
 		f.health[tag] = sample
 		f.mu.Unlock()
@@ -516,9 +547,100 @@ func (f *folderGate) invalidateNetwork() {
 	for tag, sample := range f.health {
 		sample.latency = 0
 		sample.failedUntil = time.Time{}
+		sample.okCount, sample.failCount = 0, 0
 		f.health[tag] = sample
 	}
 	f.failures = 0
+	f.nextBackup = time.Time{}
+}
+
+// fastSwitchAllowed: a faster neighbour replaces a healthy exit only with a gain of at least
+// MinGainMs AND MinGainPercent, and at most once per SwitchMinIntervalMs (defaults 40 ms, 25 %, 10 min).
+func (f *folderGate) fastSwitchAllowed(currentMs, candidateMs int64, now time.Time) bool {
+	minMs, minPercent, interval := f.options.MinGainMs, f.options.MinGainPercent, f.options.SwitchMinIntervalMs
+	if minMs == 0 {
+		minMs = 40
+	}
+	if minPercent == 0 {
+		minPercent = 25
+	}
+	if interval == 0 {
+		interval = 600000
+	}
+	if currentMs <= 0 || candidateMs <= 0 {
+		return false
+	}
+	gain := currentMs - candidateMs
+	if gain < minMs || gain*100 < currentMs*minPercent {
+		return false
+	}
+	return f.lastFastSwitch.IsZero() || now.Sub(f.lastFastSwitch) >= time.Duration(interval)*time.Millisecond
+}
+
+// backupCheckGap is a variable so tests can make it zero.
+var backupCheckGap = func() time.Duration { return healthInterval(45000, 300000) }
+
+// checkBackup checks one backup candidate: always (also on mobile data), one at a time and never
+// together with the active exit's check, at a random pace. A cold exit is never woken for it.
+func (f *folderGate) checkBackup() {
+	if !f.options.BackupChecks {
+		return
+	}
+	f.mu.Lock()
+	now := time.Now()
+	if f.selected == "" || f.backupChecking || f.healthChecking || now.Before(f.nextBackup) {
+		f.mu.Unlock()
+		return
+	}
+	backups := make([]string, 0, len(f.options.CandidateTags))
+	for _, tag := range f.options.CandidateTags {
+		if tag != f.selected {
+			backups = append(backups, tag)
+		}
+	}
+	if len(backups) == 0 {
+		f.mu.Unlock()
+		return
+	}
+	f.backupCursor = (f.backupCursor + 1) % len(backups)
+	tag := backups[f.backupCursor]
+	f.nextBackup = now.Add(backupCheckGap())
+	f.backupChecking = true
+	epoch := f.networkEpoch
+	selected := f.selected
+	f.mu.Unlock()
+	go func() {
+		defer func() { f.mu.Lock(); f.backupChecking = false; f.mu.Unlock() }()
+		gate, err := f.registry.gate(tag)
+		if err != nil || gate.coldExit() {
+			return
+		}
+		ctx, cancel := context.WithTimeout(f.ctx, time.Duration(f.options.ProbeTimeoutMs)*time.Millisecond)
+		defer cancel()
+		if err = gate.wake(ctx); err != nil {
+			f.failedEpoch(tag, epoch)
+			return
+		}
+		result := probeGate(ctx, gate, f.options.ProbeURL, f.options.ProbeTimeoutMs)
+		if result.HTTPSLatencyMs == nil {
+			if probeNeedsRecovery(result) {
+				f.failedEpoch(tag, epoch)
+			}
+			return
+		}
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if !f.recordCandidateLocked(gate, result, epoch) || f.options.Strategy != "fast" || f.selected != selected {
+			return
+		}
+		current := f.health[selected]
+		fresh := current.latency > 0 && time.Since(current.checked) < time.Duration(f.options.HealthTTLms)*time.Millisecond
+		if fresh && f.fastSwitchAllowed(current.latency, *result.HTTPSLatencyMs, time.Now()) {
+			// New flows use the faster exit; open ones finish on the old one.
+			f.selected = tag
+			f.lastFastSwitch = time.Now()
+		}
+	}()
 }
 
 func (f *folderGate) status() any {
@@ -530,4 +652,11 @@ func (f *folderGate) status() any {
 		PendingFlows int    `json:"pending_flows"`
 		Failures     int    `json:"failures"`
 	}{f.options.Tag, f.selected, f.pending, f.failures}
+}
+
+// coldExit: a cold exit sleeps until user traffic needs it; maintenance never wakes it.
+func (g *exitGate) coldExit() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.limits.Mode == "cold"
 }

@@ -103,12 +103,26 @@ internal fun ExpertExits(
                     OutlinedButton(onClick = { update(settings.copy(selection = mode)) }, modifier = Modifier.fillMaxWidth()) {
                         Text(
                             stringResource(
-                                if (mode == FolderSelection.PREFERRED) R.string.expert_folder_preferred else R.string.expert_folder_fastest,
+                                when (mode) {
+                                    FolderSelection.PREFERRED -> R.string.expert_folder_preferred
+                                    FolderSelection.STABLE -> R.string.expert_folder_stable
+                                    FolderSelection.LOWEST_LATENCY -> R.string.expert_folder_fastest
+                                },
                             )
                         )
                         if (settings.selection == mode) Text(" ✓")
                     }
                 }
+                Text(
+                    stringResource(
+                        when (settings.selection) {
+                            FolderSelection.PREFERRED -> R.string.expert_folder_preferred_hint
+                            FolderSelection.STABLE -> R.string.expert_folder_stable_hint
+                            FolderSelection.LOWEST_LATENCY -> R.string.expert_folder_fastest_hint
+                        },
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 OutlinedButton({ preferredOpen = true }, Modifier.fillMaxWidth()) {
                     Text(
                         bundle.profiles.firstOrNull { it.id == settings.preferredProfileId }?.name

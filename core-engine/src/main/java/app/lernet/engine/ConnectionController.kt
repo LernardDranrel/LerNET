@@ -87,12 +87,17 @@ class ConnectionController(
     /** The platform excludes the VPN itself. Offline is not a reason to rebuild its TUN. */
     private val underlayAvailable: () -> Boolean = { true },
     private val persistSessionIntent: suspend (SimpleSessionConfig?) -> Unit = {},
+    /** Background checks of folder backups while connected; null disables them (tests). */
+    private val backupProbe: app.lernet.engine.net.BackupProbe? = null,
+    private val backupDelayMs: () -> Long = { app.lernet.engine.policy.BackupRotation.nextDelayMs() },
 ) {
     private val mutex = Mutex()
     private var engineReady = false
     private var machineState = MachineState.idle()
     private var context = MachineContext(ReconnectSettings(), app.lernet.engine.policy.FailoverSettings(), null)
     private var retryJob: Job? = null
+    /** Wall clock of the last network appearance/change; null until the first change. */
+    @Volatile private var networkChangedAtMs: Long? = null
     /** A long random recheck (all configs unavailable) that is still waiting; cut short when the network returns. */
     private var pendingRecheck: PolicyCommand.ScheduleRetry? = null
     /** Replies through the VPN exit only; direct sites never reset the failure counter. */
@@ -106,6 +111,10 @@ class ConnectionController(
     private var connectTimeoutJob: Job? = null
     private var probeJob: Job? = null
     private var tunnelHealthJob: Job? = null
+    private var backupJob: Job? = null
+    private val backupRotation = app.lernet.engine.policy.BackupRotation()
+    /** What background checks learned about backups; valid for the current network only. */
+    private val backupHealth = java.util.concurrent.ConcurrentHashMap<String, app.lernet.engine.policy.BackupHealth>()
     @Volatile private var probeSchedule: TunnelProbeSchedule? = null
     /** Monotonic clock of the health ticker; virtual in tests. */
     @Volatile private var healthClockMs = 0L
@@ -177,6 +186,7 @@ class ConnectionController(
             reconnect = reconnect,
             failover = app.lernet.engine.policy.FailoverSettings(failoverEnabled, group?.id),
             group = group,
+            msSinceNetworkChange = { networkChangedAtMs?.let { System.currentTimeMillis() - it } ?: Long.MAX_VALUE },
         )
     }
 
@@ -518,6 +528,13 @@ class ConnectionController(
 
     suspend fun onUnderlayRestored() {
         if (!underlayAvailable()) return
+        networkChangedAtMs = System.currentTimeMillis()
+        // Bytes that stalled while the network was gone say nothing about filters.
+        blockingDetector.reset()
+        // Results from the previous network say nothing about this one.
+        backupHealth.clear()
+        backupRotation.reset()
+        if (_snapshot.value.waitingForNetwork) _snapshot.value = _snapshot.value.copy(waitingForNetwork = false)
         if (_snapshot.value.state == ConnectionState.RECONNECTING && retryJob?.isActive == true) {
             // The configs looked unavailable while the phone itself had no network: do not sit
             // out the long random recheck, try again right after the network is back.
@@ -545,6 +562,7 @@ class ConnectionController(
             (engineReady || event !is PolicyEvent.EngineFailed)
         ) {
             LerNetLog.w(TAG, "Нет исходной сети: сохраняем VPN/TUN и ждём восстановления")
+            if (!_snapshot.value.waitingForNetwork) _snapshot.value = _snapshot.value.copy(waitingForNetwork = true)
             return
         }
         // A generic start exception while offline can be retried once the underlay returns.
@@ -556,6 +574,7 @@ class ConnectionController(
         machineState = next
         val hops = _snapshot.value
         _snapshot.value = next.snapshot.copy(
+            waitingForNetwork = hops.waitingForNetwork && !underlayAvailable(),
             serverTcpMs = if (next.snapshot.activeProfileId == hops.activeProfileId &&
                 next.snapshot.state != ConnectionState.DISCONNECTED &&
                 next.snapshot.state != ConnectionState.FAILED
@@ -634,6 +653,7 @@ class ConnectionController(
                 connectTimeoutJob?.cancel()
                 probeJob?.cancel()
                 tunnelHealthJob?.cancel()
+                backupJob?.cancel()
                 groupProbeJob?.cancel()
                 failoverSwitchJob?.cancel()
                 dropInFlightPath()
@@ -649,6 +669,7 @@ class ConnectionController(
                 retryJob?.cancel()
                 healthJob?.cancel()
                 tunnelHealthJob?.cancel()
+                backupJob?.cancel()
                 dnsHealthJob?.cancel()
                 connectTimeoutJob?.cancel()
                 groupProbeJob?.cancel()
@@ -692,7 +713,9 @@ class ConnectionController(
                     val resolve = resolveFailoverProfile
                     var winner: String? = null
                     if (resolve != null) {
-                        for ((index, outboundId) in command.outboundIds.withIndex()) {
+                        // Backups verified by the background checks go first: the switch takes seconds.
+                        val ordered = app.lernet.engine.policy.BackupHealth.order(command.outboundIds, backupHealth, System.currentTimeMillis())
+                        for ((index, outboundId) in ordered.withIndex()) {
                             if (index > 0) delay(candidateGapMs())
                             val profile = try {
                                 resolve(outboundId)?.first
@@ -839,8 +862,44 @@ class ConnectionController(
      * start, after a network change, or when our traffic stays unanswered. No fixed beat and no
      * retry burst; the probe reuses an open keep-alive connection (see the app's probe).
      */
+    /**
+     * While connected, check one folder backup at a time at a random 45 s – 5 min pace, also on
+     * mobile data. Through the running tunnel when possible, so the local network does not see
+     * connections to backup servers. Failover then tries verified backups first.
+     */
+    private fun armBackupWatch() {
+        backupJob?.cancel()
+        val probe = backupProbe ?: return
+        backupJob = scope.launch {
+            while (true) {
+                delay(backupDelayMs())
+                val snap = _snapshot.value
+                if (snap.state != ConnectionState.CONNECTED || !context.failover.enabled) continue
+                val group = context.group ?: continue
+                val id = backupRotation.next(group.outboundIds, snap.activeOutboundId) ?: continue
+                val profile = try {
+                    resolveFailoverProfile?.invoke(id)?.first
+                } catch (error: Exception) {
+                    if (error is CancellationException) throw error
+                    null
+                } ?: continue
+                val endpoint = profile.selectedOutbound()?.singBoxJson?.let(OutboundEndpoint::parse) ?: continue
+                val access = (AppTraffic.route as? AppTraffic.Route.Through)?.access
+                val result = try {
+                    probe.check(endpoint, access, userAsked = false)
+                } catch (error: Exception) {
+                    if (error is CancellationException) throw error
+                    null
+                } ?: continue
+                backupHealth[id] = app.lernet.engine.policy.BackupHealth(result.ok, result.latencyMs, System.currentTimeMillis(), result.throughTunnel)
+                LerNetLog.i(TAG, "backup check ${endpoint.label()} ok=${result.ok} tunnel=${result.throughTunnel}")
+            }
+        }
+    }
+
     private fun armTunnelHealth() {
         tunnelHealthJob?.cancel()
+        armBackupWatch()
         val probe = tunnelHealthProbe ?: run {
             probeSchedule = null
             return

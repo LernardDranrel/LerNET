@@ -550,10 +550,12 @@ internal fun ExpertFolderEditor(
             "Как выбирать профиль",
             listOf(
                 FolderSelection.PREFERRED to "Предпочтительный",
-                FolderSelection.LOWEST_LATENCY to "Наименьшая задержка"
+                FolderSelection.STABLE to "Самый стабильный",
+                FolderSelection.LOWEST_LATENCY to "Самый быстрый"
             ),
             policy.selection
         ) { policy = policy.copy(selection = it) }
+        ExpertMessage(folderStrategyTitle(policy.selection), folderStrategyText(policy.selection))
         ExpertSelect(
             "Предпочтительный профиль",
             listOf(null to "Первый доступный") + members.map {
@@ -761,4 +763,17 @@ private fun withFallback(target: PolicyTarget, fallback: UnavailableFallback): P
     is PolicyTarget.Profile -> target.copy(fallback = fallback)
     is PolicyTarget.Folder -> target.copy(fallback = fallback)
     PolicyTarget.Direct, PolicyTarget.Block, PolicyTarget.CurrentExit, is PolicyTarget.Channel -> target
+}
+
+internal fun folderStrategyTitle(selection: FolderSelection): String = when (selection) {
+    FolderSelection.PREFERRED -> "Предпочтительный"
+    FolderSelection.STABLE -> "Самый стабильный"
+    FolderSelection.LOWEST_LATENCY -> "Самый быстрый"
+}
+
+internal fun folderStrategyText(selection: FolderSelection): String = when (selection) {
+    FolderSelection.PREFERRED -> "Работает выбранный профиль. Соседи — только если он перестал отвечать."
+    FolderSelection.STABLE -> "Рабочий выход не меняется. После сбоя берётся тот, у кого меньше всего сбоев за последние 30 минут."
+    FolderSelection.LOWEST_LATENCY -> "На более быстрый выход переходим, только если он быстрее на 40 мс и на 25 %, и не чаще раза в 10 минут. " +
+        "Открытые соединения доживают на прежнем выходе, новые идут через новый."
 }

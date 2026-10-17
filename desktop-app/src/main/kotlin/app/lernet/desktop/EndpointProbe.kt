@@ -77,4 +77,35 @@ object EndpointProbe {
             ProbeResult(message = error.message?.take(100) ?: "Сервер не отвечает", serverProtocol = protocol)
         }
     }
+
+    /** UDP-based configs cannot pass a CONNECT on the local listener. */
+    fun isTcp(profile: StoredProfile): Boolean {
+        val type = profile.selectedOutbound?.singBoxJson?.let { raw ->
+            runCatching { json.parseToJsonElement(raw).jsonObject["type"]?.jsonPrimitive?.content }.getOrNull()
+        }
+        return type !in setOf("hysteria", "hysteria2", "tuic", "wireguard")
+    }
+
+    /**
+     * With the VPN on: reach the server through the running tunnel (CONNECT on LerNET's internal
+     * listener), so this network sees no connection to it. Proves the server is alive, not that
+     * this network lets it through.
+     */
+    fun checkThroughTunnel(profile: StoredProfile, access: app.lernet.config.net.LocalProxyAccess, timeoutMs: Int = 15_000): ProbeResult {
+        val protocol = protocol(profile)
+        val outbound = profile.selectedOutbound ?: return ProbeResult(message = "Нет выбранного сервера")
+        val endpoint = OutboundPatch.read(outbound.singBoxJson)
+        val port = endpoint.port.toIntOrNull()
+        if (endpoint.server.isBlank() || port == null || port !in 1..65535) {
+            return ProbeResult(message = "Не указан сервер или порт", serverProtocol = protocol)
+        }
+        return try {
+            val started = TimeSource.Monotonic.markNow()
+            app.lernet.config.net.LocalProxyHttp.connectTunnel(access, endpoint.server, port, timeoutMs)
+            ProbeResult(latencyMs = started.elapsedNow().inWholeMilliseconds.coerceAtLeast(1),
+                message = "Сервер отвечает · проверено через VPN", serverProtocol = protocol)
+        } catch (error: Exception) {
+            ProbeResult(message = "Через VPN сервер не ответил", serverProtocol = protocol)
+        }
+    }
 }

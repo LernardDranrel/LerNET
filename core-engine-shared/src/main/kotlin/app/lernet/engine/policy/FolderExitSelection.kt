@@ -27,6 +27,7 @@ object FolderExitSelection {
         nowMs: Long,
         currentProfileId: String? = null,
         recovering: Boolean = false,
+        lastSwitchAtMs: Long? = null,
     ): FolderExitDecision {
         require(nowMs >= 0)
         val order = members.distinct()
@@ -40,8 +41,17 @@ object FolderExitSelection {
                 nowMs >= sample.failedUntilMs
         }
         fun retryable(id: String): Boolean = byId[id]?.let { nowMs >= it.failedUntilMs } ?: true
-        // Keep a healthy current exit until an actual failure. A faster sample is not a reason to churn sessions.
+        // Keep a healthy current exit until an actual failure. Only «самый быстрый» may leave it, and only
+        // for a clear and rare gain (FastSwitchRule), so sessions do not churn between similar servers.
         if (!recovering && currentProfileId in order && currentProfileId != null && fresh(currentProfileId)) {
+            if (policy.selection == FolderSelection.LOWEST_LATENCY && policy.autoSwap) {
+                val currentMs = byId.getValue(currentProfileId).httpsLatencyMs!!
+                val faster = order.filter { it != currentProfileId && fresh(it) }
+                    .minByOrNull { byId.getValue(it).httpsLatencyMs!! }
+                if (faster != null && FastSwitchRule.shouldSwitch(currentMs, byId.getValue(faster).httpsLatencyMs!!, lastSwitchAtMs, nowMs)) {
+                    return FolderExitDecision.Selected(faster)
+                }
+            }
             return FolderExitDecision.Selected(currentProfileId)
         }
         val preferred = policy.preferredProfileId?.takeIf { it in order } ?: order.first()
@@ -63,6 +73,7 @@ object FolderExitSelection {
         val selected = when (policy.selection) {
             FolderSelection.PREFERRED -> candidates.firstOrNull { it == preferred } ?: candidates.firstOrNull()
             FolderSelection.LOWEST_LATENCY -> candidates.minByOrNull { byId.getValue(it).httpsLatencyMs!! }
+            FolderSelection.STABLE -> StableRank.order(candidates, samples, nowMs).firstOrNull()
         }
         if (selected != null) return FolderExitDecision.Selected(selected)
         val checks = order.filter(::retryable)

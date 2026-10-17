@@ -169,7 +169,14 @@ data class DestinationRedirect(val address: String? = null, val port: Int? = nul
 }
 
 @Serializable
-enum class FolderSelection { PREFERRED, LOWEST_LATENCY }
+enum class FolderSelection {
+    /** The chosen profile while it works; neighbours only on failure. */
+    PREFERRED,
+    /** «Самый быстрый»: a faster neighbour only with a clear gain (≥40 ms and ≥25 %), at most once per 10 min. */
+    LOWEST_LATENCY,
+    /** «Самый стабильный»: keep a working exit; after a failure take the one with the cleanest record. */
+    STABLE,
+}
 
 @Serializable
 data class FolderPolicy(

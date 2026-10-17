@@ -38,6 +38,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitAll
@@ -86,6 +87,8 @@ data class ProfileProbe(
     val tunnelMs: Long? = null,
     val tunnelChecked: Boolean = false,
     val requestId: Long = 0,
+    /** The server was reached through the running VPN, not from this network directly. */
+    val throughTunnel: Boolean = false,
 )
 
 sealed class HomeIntent {
@@ -450,44 +453,39 @@ class HomeViewModel @Inject constructor(
         overlay.update { old ->
             old.copy(probes = old.probes + unique.associateWith { ProfileProbe(running = true, requestId = requestId) })
         }
-        val slots = Semaphore(4)
+        // One by one with a random pause, not a burst of parallel handshakes to every server.
+        // With the VPN on, servers are reached through it, so this network sees no new connections.
+        val probe = app.lernet.engine.net.TunnelFirstBackupProbe(AndroidProtectedDialer(), timeoutMs = 15_000)
         try {
-            coroutineScope {
-                unique.map { id ->
-                    async {
-                        slots.withPermit {
-                            val endpoint = profiles[id]?.selectedOutbound()?.singBoxJson?.let(OutboundEndpoint::parse)
-                            val server = if (endpoint == null) {
-                                ProfileProbe(reachable = false)
-                            } else {
-                                val startedAt = System.nanoTime()
-                                val ok = AndroidProtectedDialer().dial(endpoint, 30_000).isSuccess
-                                ProfileProbe(
-                                    tcpMs = if (ok) ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(1) else null,
-                                    reachable = ok,
-                                )
-                            }
-                            val snapshot = controller.snapshot.value
-                            val tunnel = if (snapshot.state == ConnectionState.CONNECTED && snapshot.activeProfileId == id) {
-                                AndroidTunnelProbe.measure(LocalListeners.appProxy(snapshot.compiledJson))
-                            } else {
-                                null
-                            }
-                            val result = server.copy(
-                                tunnelMs = tunnel?.getOrNull(),
-                                tunnelChecked = tunnel != null,
-                                requestId = requestId,
-                            )
-                            overlay.update { old ->
-                                if (old.probes[id]?.requestId == requestId) {
-                                    old.copy(probes = old.probes + (id to result))
-                                } else {
-                                    old
-                                }
-                            }
-                        }
+            for ((index, id) in unique.withIndex()) {
+                if (index > 0) delay(app.lernet.engine.policy.BackupRotation.buttonGapMs())
+                val snapshot = controller.snapshot.value
+                val connected = snapshot.state == ConnectionState.CONNECTED
+                val endpoint = profiles[id]?.selectedOutbound()?.singBoxJson?.let(OutboundEndpoint::parse)
+                val active = connected && snapshot.activeProfileId == id
+                val server = when {
+                    endpoint == null -> ProfileProbe(reachable = false)
+                    // The running config is already connected: measure it through the tunnel only.
+                    active -> ProfileProbe(reachable = true, tcpMs = snapshot.serverTcpMs)
+                    else -> {
+                        val access = if (connected) (app.lernet.config.net.AppTraffic.route as? app.lernet.config.net.AppTraffic.Route.Through)?.access else null
+                        val result = probe.check(endpoint, access, userAsked = true)
+                        ProfileProbe(tcpMs = result?.latencyMs, reachable = result?.ok == true, throughTunnel = result?.throughTunnel == true)
                     }
-                }.awaitAll()
+                }
+                val tunnel = if (active) AndroidTunnelProbe.measure(LocalListeners.appProxy(snapshot.compiledJson)) else null
+                val result = server.copy(
+                    tunnelMs = tunnel?.getOrNull(),
+                    tunnelChecked = tunnel != null,
+                    requestId = requestId,
+                )
+                overlay.update { old ->
+                    if (old.probes[id]?.requestId == requestId) {
+                        old.copy(probes = old.probes + (id to result))
+                    } else {
+                        old
+                    }
+                }
             }
         } finally {
             overlay.update { old ->

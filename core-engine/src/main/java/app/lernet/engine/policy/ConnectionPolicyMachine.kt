@@ -12,6 +12,8 @@ data class MachineContext(
     val group: ManualFailoverGroup?,
     /** Draws the random recheck pause for configs that stayed unavailable ([RecheckJitter]). */
     val recheckMs: () -> Long = { RecheckJitter.nextMs() },
+    /** Time since the underlying network last appeared or changed ([LinkJudge.SETTLE_MS]). */
+    val msSinceNetworkChange: () -> Long = { Long.MAX_VALUE },
 )
 
 data class MachineState(
@@ -265,10 +267,13 @@ class ConnectionPolicyMachine {
             cause is ConnectionCause.EngineStartFailed && !state.sessionHeld &&
                 failures >= context.reconnect.maxAttempts ->
                 failNow(state, ConnectionCause.ReconnectExhausted(failures, cause))
-            // A filter pattern on this config: reconnecting to the same server would hit it
-            // again, so go straight to the next config of the folder.
-            cause is ConnectionCause.BlockingSuspected ->
+            // «Нет сети / умер конфиг»: the controller never lets failures through while the
+            // network is gone, so here the network is up. A dead or blocked config switches at
+            // once; a single core error gets one quick retry on the same server.
+            judge(state, context, outboundId, failures, cause) == LinkDecision.SWITCH_NOW ->
                 afterReconnectBudget(state, context, outboundId, failures, cause)
+            failures == 1 && failures < context.reconnect.maxAttempts && linkFailure(cause) != null ->
+                retrySame(state, outboundId, failures, cause, context, delayMs = LinkJudge.QUICK_RETRY_MS)
             failures < context.reconnect.maxAttempts -> retrySame(state, outboundId, failures, cause, context)
             else -> afterReconnectBudget(state, context, outboundId, failures, cause)
         }
@@ -280,6 +285,29 @@ class ConnectionPolicyMachine {
      * unrecoverable causes end the session: missing VPN permission, revoke, an invalid config or
      * route tree, a missing engine, an app selection Android cannot honour (all non-retryable).
      */
+    private fun linkFailure(cause: ConnectionCause): LinkFailure? = when (cause) {
+        is ConnectionCause.TunnelHealthFailed -> LinkFailure.TUNNEL_DEAD
+        is ConnectionCause.BlockingSuspected -> LinkFailure.BLOCKED
+        is ConnectionCause.TlsFailure, is ConnectionCause.HandshakeFailure, is ConnectionCause.ConnectionReset,
+        is ConnectionCause.DialFailure, is ConnectionCause.DialTimeout, is ConnectionCause.OutboundUnreachable,
+        is ConnectionCause.WatchdogTimeout -> LinkFailure.ENGINE_ERROR
+        else -> null
+    }
+
+    private fun judge(
+        state: MachineState,
+        context: MachineContext,
+        outboundId: String,
+        failures: Int,
+        cause: ConnectionCause,
+    ): LinkDecision? {
+        val kind = linkFailure(cause) ?: return null
+        val dead = state.knownDead + outboundId
+        val hasAlternative = GroupFailoverPolicy.isEligible(context.failover, context.group, outboundId) &&
+            context.group?.let { GroupFailoverPolicy.candidates(it, outboundId, dead) }.orEmpty().isNotEmpty()
+        return LinkJudge.decide(true, kind, failures, context.msSinceNetworkChange(), hasAlternative)
+    }
+
     private fun keepsSession(cause: ConnectionCause): Boolean =
         cause.isRetryable() || cause is ConnectionCause.EngineStartFailed
 

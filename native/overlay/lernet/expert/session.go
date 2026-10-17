@@ -858,6 +858,7 @@ func (s *Session) idleLoop() {
 			g.registry.mu.Unlock()
 			for _, folder := range folders {
 				folder.checkHealth()
+				folder.checkBackup()
 			}
 		}
 	}

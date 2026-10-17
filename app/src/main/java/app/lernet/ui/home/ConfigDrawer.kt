@@ -814,6 +814,8 @@ private fun ProfileActionBlock(
                 when {
                     moving -> stringResource(R.string.drawer_move_selected)
                     probe?.running == true -> stringResource(R.string.drawer_probe_running)
+                    probe?.reachable == true && probe.tcpMs == null -> "${protocolOf(profile)} · подключён"
+                    probe?.reachable == true && probe.throughTunnel -> "${protocolOf(profile)} · через VPN ${probe.tcpMs} мс"
                     probe?.reachable == true -> "${protocolOf(profile)} · TCP ${probe.tcpMs} мс"
                     probe != null -> "${protocolOf(profile)} · ${stringResource(R.string.diag_ping_fail)}"
                     else -> protocolOf(profile)
