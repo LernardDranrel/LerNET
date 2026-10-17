@@ -8,7 +8,8 @@ sealed interface SimpleGuardStatus {
     data object Off : SimpleGuardStatus
     data object Closed : SimpleGuardStatus
     data object Active : SimpleGuardStatus
-    data class Unavailable(val reason: String) : SimpleGuardStatus
+    /** [reason] goes to the journal; [networkClosed] means the internet stays closed until Stop. */
+    data class Unavailable(val reason: String, val networkClosed: Boolean = false) : SimpleGuardStatus
 }
 
 /**
@@ -70,7 +71,7 @@ class SimpleTunnelGuard internal constructor(
             if (active == null || active !== engagedSession || core == null) return mutable.value
             if (luid == null) {
                 // Still closed: better no network than traffic around the VPN.
-                return SimpleGuardStatus.Unavailable("не найден адаптер LerNET, доступ в сеть закрыт до перезапуска")
+                return SimpleGuardStatus.Unavailable("не найден адаптер LerNET, доступ в сеть закрыт до перезапуска", networkClosed = true)
                     .also { mutable.value = it }
             }
             if (luid == tunLuid && mutable.value == SimpleGuardStatus.Active) return mutable.value

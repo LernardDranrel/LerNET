@@ -809,9 +809,11 @@ class DesktopController(
     }
 
     private fun showGuard(status: SimpleGuardStatus) {
-        val problem = (status as? SimpleGuardStatus.Unavailable)?.let { SecurityTexts.GUARD_PROBLEM_PREFIX + it.reason }
-        if (problem != null) tunnel.logDiagnostic(problem)
-        mutable.update { it.copy(guardProblem = problem) }
+        guardProblemText(status)?.let { shown ->
+            // The technical reason goes only to the journal; the screen gets a plain sentence.
+            tunnel.logDiagnostic(SecurityTexts.GUARD_JOURNAL_PREFIX + (status as SimpleGuardStatus.Unavailable).reason)
+            mutable.update { it.copy(guardProblem = shown) }
+        } ?: mutable.update { it.copy(guardProblem = null) }
     }
 
     private fun reportConnectionError(message: String, routeOwnerId: String? = null) {
@@ -998,3 +1000,10 @@ class DesktopController(
 /** A free loopback port for the internal listener; sing-box binds it right after. */
 internal fun freeLoopbackPort(): Int =
     java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress()).use { it.localPort }
+
+/** What the main screen says about the leak guard; null while it simply works. */
+internal fun guardProblemText(status: SimpleGuardStatus): String? = when (status) {
+    is SimpleGuardStatus.Unavailable ->
+        if (status.networkClosed) SecurityTexts.GUARD_NETWORK_CLOSED else SecurityTexts.GUARD_PROBLEM
+    else -> null
+}

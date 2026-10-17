@@ -168,4 +168,14 @@ class SimpleTunnelGuardTest {
             closed = true
         }
     }
+
+    @Test
+    fun screenTextIsPlainAndSaysWhenTheInternetIsClosed() {
+        val technical = SimpleGuardStatus.Unavailable("FwpmEngineOpen0 0x5")
+        assertThat(app.lernet.desktop.guardProblemText(technical)).isEqualTo(app.lernet.desktop.SecurityTexts.GUARD_PROBLEM)
+        assertThat(app.lernet.desktop.guardProblemText(technical)).doesNotContain("Fwpm")
+        assertThat(app.lernet.desktop.guardProblemText(SimpleGuardStatus.Unavailable("x", networkClosed = true)))
+            .isEqualTo(app.lernet.desktop.SecurityTexts.GUARD_NETWORK_CLOSED)
+        assertThat(app.lernet.desktop.guardProblemText(SimpleGuardStatus.Active)).isNull()
+    }
 }

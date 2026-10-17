@@ -14,7 +14,10 @@ internal object SecurityTexts {
         "Если выключить, Windows может спрашивать адреса сайтов у провайдера в обход VPN. " +
             "Выключайте, только если без этого перестала работать какая-то программа."
     const val APPLIES_ON_RECONNECT = "Изменения вступят в силу при следующем подключении."
-    const val GUARD_PROBLEM_PREFIX = "Защита при сбое не работает: "
+    const val GUARD_PROBLEM = "Защита при сбое не включилась. VPN работает, подробности — в журнале."
+    const val GUARD_NETWORK_CLOSED =
+        "LerNET не нашёл свой сетевой адаптер. Чтобы не было утечки, интернет закрыт. Нажмите «Стоп» и подключитесь снова."
+    const val GUARD_JOURNAL_PREFIX = "Защита при сбое не работает: "
 
     const val PROXY_TAG = "ПРОКСИ"
     const val PROXY_TITLE = "Пароль локального прокси"

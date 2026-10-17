@@ -477,7 +477,7 @@ private fun DesktopScreen(controller: DesktopController, onRequestElevation: () 
             if (ui.message.isNotBlank() && ui.message != statusLine)
                 Text(ui.message, color = if (ui.connectionError != null) desktopColors.error else muted, maxLines = 2)
                 if (ui.networkWarning.isNotBlank()) Text(ui.networkWarning, color = Color(0xFFF1CC80), fontSize = 12.sp, maxLines = 3)
-            ui.guardProblem?.let { Text(it, color = desktopColors.error, fontSize = 12.sp, maxLines = 2) }
+            ui.guardProblem?.let { Text(it, color = desktopColors.error, fontSize = 12.sp, maxLines = 3) }
             Spacer(Modifier.height(18.dp))
             when (tab) {
                 Tab.PROFILES -> Profiles(ui.saved, tunnel, ui.busy, ui.probes, ui.tunnelLatencyMs, trace, controller,
