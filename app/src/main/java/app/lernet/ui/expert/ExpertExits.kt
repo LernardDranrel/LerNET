@@ -97,7 +97,7 @@ internal fun ExpertExits(
                 Text(stringResource(R.string.expert_external_add))
             }
         }
-        ExpertHint(R.string.expert_folder_hint)
+        if (bundle.profiles.isNotEmpty()) ExpertHint(R.string.expert_folder_hint)
         bundle.groups.forEach { folder ->
             val settings = policy.folderPolicies.firstOrNull { it.folderId == folder.id } ?: FolderPolicy(folder.id)
             var preferredOpen by remember(folder.id) { mutableStateOf(false) }
@@ -162,7 +162,7 @@ internal fun ExpertExits(
                 )
             }
         }
-        ExpertHint(R.string.expert_lifecycle_priority)
+        if (bundle.profiles.isNotEmpty()) ExpertHint(R.string.expert_lifecycle_priority)
         bundle.profiles.forEach { profile ->
             val settings = policy.profilePolicies.firstOrNull { it.profileId == profile.id } ?: ProfileExitPolicy(profile.id)
             val external = remember(profile) { ExternalExitProfiles.describe(profile) }
@@ -228,7 +228,10 @@ internal fun ExpertExits(
                 OutlinedButton({ editingChannel = channel }, Modifier.fillMaxWidth()) { Text(stringResource(R.string.expert_rule_editor)) }
             }
         }
-        Button({ chooseOwner = true }, Modifier.fillMaxWidth()) { Text(stringResource(R.string.expert_channel_add)) }
+        // A shared channel needs configs to pick from; with none the button only leads to an empty list.
+        if (bundle.profiles.isNotEmpty()) {
+            Button({ chooseOwner = true }, Modifier.fillMaxWidth()) { Text(stringResource(R.string.expert_channel_add)) }
+        }
     }
     liveDetails?.let { initial ->
         val current = runtime.exits.firstOrNull { it.key == initial.key }

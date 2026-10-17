@@ -121,7 +121,7 @@
     <string name="expert_exit_no_live">Выход ещё не активирован. Состояние появится после запуска схемы и выбора этого пути.</string>
     <string name="expert_wake_exit">Разбудить выход</string>
     <string name="expert_sleep_exit">Усыпить выход</string>
-    <string name="expert_activity_empty">Пока нет наблюдаемых запросов. Включите управление сетью; здесь появятся приложение, назначение и причина выбранного пути.</string>
+    <string name="expert_activity_empty">Соединений пока нет. Когда Эксперт включён, здесь появятся приложение, адрес и почему выбран такой путь.</string>
     <string name="expert_journal_empty">Событий пока нет</string>
     <string name="expert_unknown_app">Приложение не определено Android</string>
     <string name="expert_observation_rule">Веток в пути: %1$d</string>
