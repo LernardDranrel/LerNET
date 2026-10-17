@@ -3,6 +3,7 @@ package app.lernet.engine
 import app.lernet.config.model.DnsPolicy
 import app.lernet.config.model.Profile
 import app.lernet.config.repo.RuleNodeRecord
+import app.lernet.config.net.LocalProxyAccess
 import app.lernet.engine.compile.ConfigAssembler
 import app.lernet.engine.compile.DnsBlock
 import app.lernet.engine.compile.EngineDefaults
@@ -97,6 +98,8 @@ class ConnectionController(
     private var pendingOutboundId: String? = null
     private var pendingLogLevel: String = "warn"
     private var pendingDefaults: EngineDefaults = EngineDefaults()
+    /** Proxy mode credentials of the current session; a reconnect keeps them. */
+    private var pendingUserProxy: LocalProxyAccess? = null
     private var resolveFailoverProfile: (suspend (String) -> Pair<Profile, List<RuleNodeRecord>>?)? = null
     private var onFailoverSelected: (suspend (String) -> Unit)? = null
     private var pendingProxyTag: String? = null
@@ -245,6 +248,7 @@ class ConnectionController(
         mode: RunMode,
         logLevel: String = "warn",
         defaults: EngineDefaults = EngineDefaults(),
+        userProxy: LocalProxyAccess? = pendingUserProxy,
     ) {
         val epoch = userIntentEpoch.incrementAndGet()
         CrashTrail.mark("controller.connect enter profile=${profile.id} mode=$mode")
@@ -271,6 +275,7 @@ class ConnectionController(
                 dnsPolicy = profile.dnsPolicy,
                 ruleSetDirectory = ruleSetDirectory,
                 defaults = defaults,
+                userProxy = userProxy,
             )
         } catch (error: Throwable) {
             CrashTrail.recordFailure("ConfigAssembler.assemble", error)
@@ -298,6 +303,7 @@ class ConnectionController(
             pendingOutboundId = outbound.id
             pendingLogLevel = logLevel
             pendingDefaults = defaults
+            pendingUserProxy = assembled.userProxy
             pendingProxyTag = assembled.proxyTag
             resetConnectMarkersLocked()
             try {

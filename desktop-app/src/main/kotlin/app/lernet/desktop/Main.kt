@@ -1,5 +1,7 @@
 package app.lernet.desktop
 
+import app.lernet.config.net.LocalProxyAccess
+
 import app.lernet.engine.policy.ExpertVpnHandover
 import app.lernet.routing.policy.PolicyTarget
 import app.lernet.routing.policy.NetworkPolicy
@@ -396,10 +398,7 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
         readDiagnosticLog = { controller.tunnel.state.value.logs },
         onClose = { networkWindowOpen = false },
         useLerNetProxy = {
-            val saved = controller.state.value.saved
-            val profile = saved.profiles.firstOrNull { it.id == saved.selectedProfileId }
-            controller.tunnel.state.value.status == TunnelStatus.RUNNING &&
-                DesktopRunMode.effective(profile?.modeOverride ?: saved.mode, WindowsElevation.isElevated) == app.lernet.engine.RunMode.PROXY
+            controller.state.value.localProxy?.takeIf { controller.tunnel.state.value.status == TunnelStatus.RUNNING }
         },
         readClientContext = {
             val saved = controller.state.value.saved
@@ -480,7 +479,8 @@ private fun DesktopScreen(controller: DesktopController, onRequestElevation: () 
                     onRequestElevation = onRequestElevation,
                     onImport = { groupId -> importGroupId = groupId; importOpen = true }, onDiagnostics = { traceDetailsRequest++; tab = Tab.DIAGNOSTICS },
                     onGroupRoutes = { groupId -> routeOwnerId = "grp_$groupId"; tab = Tab.ROUTES },
-                    onExportGroup = { group -> exportRequest = ExportSelection(group.id, "LerNET-${group.name.take(30)}.lernet.json") })
+                    onExportGroup = { group -> exportRequest = ExportSelection(group.id, "LerNET-${group.name.take(30)}.lernet.json") },
+                    localProxy = ui.localProxy.takeIf { tunnel.status == TunnelStatus.RUNNING })
                 Tab.ROUTES -> DesktopRoutes(ui.saved, controller, routeOwnerId)
                 Tab.DIAGNOSTICS -> Diagnostics(ui.saved, tunnel, diagnostics, connectionHistory, trace, traceDetailsRequest, controller)
                 Tab.SETTINGS -> Settings(ui.saved, controller, onRequestElevation)
@@ -571,7 +571,7 @@ private fun NavSymbol(tab: Tab, selected: Boolean) {
 @Composable
 private fun Profiles(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, probes: Map<String, ProbeResult>, tunnelLatencyMs: Long?, trace: TraceSnapshot,
     controller: DesktopController, onRequestElevation: () -> Unit, onImport: (String?) -> Unit, onDiagnostics: () -> Unit, onGroupRoutes: (String) -> Unit,
-    onExportGroup: (StoredGroup) -> Unit) {
+    onExportGroup: (StoredGroup) -> Unit, localProxy: LocalProxyAccess? = null) {
     val selected = saved.profiles.firstOrNull { it.id == saved.selectedProfileId }
     LaunchedEffect(selected?.id) { selected?.let { controller.probe(listOf(it.id)) } }
     val selectionLocked = busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RECONNECTING)
@@ -805,6 +805,7 @@ private fun Profiles(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, 
                         })
                     }
                     HomeModeSelector(saved, selected, selectionLocked, controller, onRequestElevation)
+                    localProxy?.let { LocalProxyCard(it) }
                     Spacer(Modifier.height(2.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         val probe = probes[selected.id]
@@ -982,9 +983,9 @@ private fun HomeModeSelector(saved: StoredState, profile: StoredProfile?, locked
             },
         )
         Text(if (!WindowsElevation.isElevated && requestedMode == RunMode.FULL_VPN.name)
-            "Без прав администратора используется локальный прокси SOCKS/HTTP 127.0.0.1:2080. Для полного VPN выберите его снова и подтвердите запрос Windows."
+            "Без прав администратора используется локальный прокси SOCKS/HTTP 127.0.0.1:2080 с логином и паролем. Для полного VPN выберите его снова и подтвердите запрос Windows."
         else if (effectiveMode == RunMode.PROXY.name)
-            "Только приложения с прокси SOCKS/HTTP 127.0.0.1:2080. Системный трафик идёт напрямую."
+            "Только приложения с прокси SOCKS/HTTP 127.0.0.1:2080. Логин и пароль видны здесь после подключения. Системный трафик идёт напрямую."
         else "Направляет трафик устройства по правилам LerNET. Права администратора подтверждены.",
             color = muted, fontSize = 11.sp, lineHeight = 16.sp)
         if (locked) Text("Дождитесь завершения переключения.", color = blue, fontSize = 11.sp)
@@ -1576,7 +1577,7 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
         Panel { DesktopUpdateCard() }
         Panel {
             SettingHeading("ЗАПУСК", "Режим по умолчанию",
-                "VPN направляет трафик устройства через туннель. Прокси работает только для приложений, настроенных на 127.0.0.1:2080.")
+                "VPN направляет трафик устройства через туннель. Прокси работает только для приложений, настроенных на 127.0.0.1:2080 с логином и паролем.")
             SegmentedChoice(
                 listOf(RunMode.FULL_VPN.name to "VPN · весь трафик", RunMode.PROXY.name to "Локальный прокси"),
                 saved.mode,
@@ -1598,6 +1599,7 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
             SecurityToggle(SecurityTexts.STRICT_ROUTE, SecurityTexts.STRICT_ROUTE_HINT, saved.strictRoute, controller::setStrictRoute)
             Text(SecurityTexts.APPLIES_ON_RECONNECT, color = muted, fontSize = 12.sp)
         }
+        Panel { ProxyPasswordSettings(saved, controller) }
         Panel {
             Text("Параметры подключения", style = MaterialTheme.typography.titleLarge)
             Text("Общие значения для профилей. Если профиль содержит собственную настройку, она имеет приоритет. Изменения вступят в силу при следующем подключении.",
@@ -1696,6 +1698,51 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
             Button(onClick = { controller.setCorePath(path) }, enabled = path != saved.corePath) { Text("Сохранить путь") }
         }
     }
+}
+
+@Composable
+private fun LocalProxyCard(access: LocalProxyAccess) {
+    Surface(color = desktopColors.background, shape = RoundedCornerShape(10.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, desktopColors.outline), modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            SelectionContainer(Modifier.weight(1f)) {
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    ProxyLine(SecurityTexts.PROXY_ADDRESS, access.address)
+                    ProxyLine(SecurityTexts.PROXY_LOGIN, access.username)
+                    ProxyLine(SecurityTexts.PROXY_PASSWORD, access.password)
+                }
+            }
+            OutlinedButton(onClick = { copyToClipboard(access.url()) }) { Text(SecurityTexts.COPY) }
+        }
+    }
+}
+
+@Composable
+private fun ProxyLine(label: String, value: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, color = muted, fontSize = 13.sp, modifier = Modifier.width(64.dp))
+        Text(value, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun ProxyPasswordSettings(saved: StoredState, controller: DesktopController) {
+    var user by remember(saved.proxyUsername) { mutableStateOf(saved.proxyUsername) }
+    var password by remember(saved.proxyPassword) { mutableStateOf(saved.proxyPassword) }
+    val clearing = user.isBlank() && password.isEmpty()
+    val valid = clearing || (LocalProxyAccess.valid(user.trim()) && LocalProxyAccess.valid(password))
+    val changed = user.trim() != saved.proxyUsername || password != saved.proxyPassword
+    SettingHeading(SecurityTexts.PROXY_TAG, SecurityTexts.PROXY_TITLE, SecurityTexts.PROXY_BODY)
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(user, { user = it.take(64) }, modifier = Modifier.width(220.dp), singleLine = true,
+            label = { Text(SecurityTexts.PROXY_LOGIN) }, isError = user.isNotEmpty() && !LocalProxyAccess.valid(user.trim()))
+        OutlinedTextField(password, { password = it.take(64) }, modifier = Modifier.width(220.dp), singleLine = true,
+            label = { Text(SecurityTexts.PROXY_PASSWORD) }, isError = password.isNotEmpty() && !LocalProxyAccess.valid(password),
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
+        Button(onClick = { controller.setProxyCredentials(user, password) }, enabled = valid && changed) { Text(SecurityTexts.SAVE) }
+    }
+    Text(SecurityTexts.PROXY_RULES, color = muted, fontSize = 12.sp)
 }
 
 @Composable

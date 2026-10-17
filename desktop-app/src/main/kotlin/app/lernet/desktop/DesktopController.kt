@@ -1,5 +1,7 @@
 package app.lernet.desktop
 
+import app.lernet.config.net.LocalProxyAccess
+
 import app.lernet.desktop.protection.SimpleGuardStatus
 import app.lernet.desktop.protection.SimpleTunnelGuard
 
@@ -85,6 +87,8 @@ data class DesktopUiState(
     val tunnelLatencyMs: Long? = null,
     /** Shown only when the VPN-mode guard could not close Windows outside LerNET. */
     val guardProblem: String? = null,
+    /** Proxy mode: login and password the running local proxy requires. */
+    val localProxy: LocalProxyAccess? = null,
 )
 
 class DesktopController(
@@ -166,7 +170,7 @@ class DesktopController(
                     val tag = profile?.selectedOutbound?.tag
                     if (tag != null) {
                         val ticket = connectGeneration.get()
-                        val health = WindowsTunnelHealth.check(saved.healthUrl, effectiveMode(profile))
+                        val health = WindowsTunnelHealth.check(saved.healthUrl, effectiveMode(profile), proxyAccess = state.value.localProxy)
                         if (ticket == connectGeneration.get() && tunnel.state.value.status == TunnelStatus.RUNNING) {
                             if (health.routeConflict) {
                                 failedChecks = 0
@@ -520,6 +524,14 @@ class DesktopController(
     fun dismissConnectionError() { mutable.update { it.copy(connectionError = null) } }
     fun setHealthUrl(url: String) = change { it.copy(healthUrl = url.trim()) }
     fun setStrictRoute(enabled: Boolean) = change { it.copy(strictRoute = enabled) }
+
+    /** Empty pair returns to random credentials; applies on the next connection. */
+    fun setProxyCredentials(username: String, password: String): Boolean {
+        val user = username.trim()
+        if (user.isEmpty() && password.isEmpty()) return change { it.copy(proxyUsername = "", proxyPassword = "") }
+        if (!LocalProxyAccess.valid(user) || !LocalProxyAccess.valid(password)) return false
+        return change { it.copy(proxyUsername = user, proxyPassword = password) }
+    }
     fun setCrashGuard(enabled: Boolean) = change { it.copy(crashGuard = enabled) }
     fun setDefaultDnsPolicy(policy: DnsPolicy) = change { it.copy(defaultDnsPolicy = policy.name) }
     fun setJournalMaxMb(value: Int) = change { it.copy(journalMaxMb = value.coerceIn(1, 500)) }
@@ -610,7 +622,8 @@ class DesktopController(
         previewSaved(state.value.saved, profileId, draftProfile, draftRules, draftOwnerId)
 
     private fun previewSaved(source: StoredState, profileId: String?, draftProfile: StoredProfile? = null,
-                             draftRules: List<StoredRule>? = null, draftOwnerId: String? = null): AssembledConfig {
+                             draftRules: List<StoredRule>? = null, draftOwnerId: String? = null,
+                             userProxy: LocalProxyAccess? = null): AssembledConfig {
         val saved = if (draftRules != null && draftOwnerId != null) source.copy(
             rules = source.rules.filterNot { it.profileId == draftOwnerId } + draftRules
         ) else source
@@ -662,6 +675,7 @@ class DesktopController(
             ruleSetDirectory = ruleSetDir.toString(),
             defaults = EngineDefaults(saved.tunMtu, saved.xmuxConcurrency, saved.directDnsServer, strictRoute = saved.strictRoute),
             platform = EnginePlatform.WINDOWS,
+            userProxy = userProxy,
         )
         return if (assembled.isValid) assembled.copy(json = coreApi.inject(assembled.json)) else assembled
     }
@@ -718,7 +732,9 @@ class DesktopController(
         thread(name = "lernet-windows-connect", isDaemon = true) {
             var routeErrorOwner: String? = null
             try {
-                val assembled = previewSaved(savedAtStart, profileAtStart?.id)
+                // A fresh random login/password for every connection unless the user saved their own.
+                val assembled = previewSaved(savedAtStart, profileAtStart?.id,
+                    userProxy = LocalProxyAccess.forUserProxy(savedAtStart.proxyUsername, savedAtStart.proxyPassword))
                 if (!assembled.isValid) {
                     routeErrorOwner = profileAtStart?.groupId?.let { "grp_$it" } ?: profileAtStart?.id
                 }
@@ -746,6 +762,7 @@ class DesktopController(
                         } else {
                             releaseGuard()
                         }
+                        mutable.update { it.copy(localProxy = assembled.userProxy.takeIf { runMode == RunMode.PROXY }) }
                         tunnel.start(launch)
                     }
                 }
@@ -765,7 +782,7 @@ class DesktopController(
 
     private fun releaseGuard() {
         simpleGuard.release()
-        mutable.update { it.copy(guardProblem = null) }
+        mutable.update { it.copy(guardProblem = null, localProxy = null) }
     }
 
     private fun showGuard(status: SimpleGuardStatus) {

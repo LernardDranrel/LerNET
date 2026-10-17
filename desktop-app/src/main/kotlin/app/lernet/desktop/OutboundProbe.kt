@@ -1,5 +1,7 @@
 package app.lernet.desktop
 
+import app.lernet.config.net.LocalProxyAccess
+
 import app.lernet.config.model.DnsPolicy
 import app.lernet.engine.RunMode
 import app.lernet.engine.compile.ConfigAssembler
@@ -93,7 +95,8 @@ object OutboundProbe {
             }
             val elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
             val httpDetail = if (delayFailed && error !is InterruptedException && !Thread.currentThread().isInterrupted)
-                ProbeDiagnostics.httpDetail(saved.healthUrl, inboundPort, (timeoutMs - elapsed).toInt()) else ""
+                ProbeDiagnostics.httpDetail(saved.healthUrl, inboundPort, (timeoutMs - elapsed).toInt(),
+                    assembled.userProxy?.let { LocalProxyAccess(inboundPort, it.username, it.password) }) else ""
             val coreLines = runCatching { Files.readAllLines(logFile).filter(String::isNotBlank).takeLast(40) }
                 .getOrDefault(emptyList())
                 .map(ProbeDiagnostics::clean)

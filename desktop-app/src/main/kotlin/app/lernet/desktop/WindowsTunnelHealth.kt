@@ -1,5 +1,11 @@
 package app.lernet.desktop
 
+import app.lernet.config.net.LocalProxyAccess
+import app.lernet.config.net.LocalProxyHttp
+import java.util.concurrent.TimeUnit
+import okhttp3.OkHttpClient
+import okhttp3.Request
+
 import app.lernet.engine.RunMode
 import app.lernet.engine.compile.ConfigAssembler
 import com.sun.jna.Memory
@@ -148,12 +154,17 @@ internal object WindowsRouteInspector {
 /** An HTTP request from the Windows process tests the path used by applications. */
 internal object WindowsTunnelHealth {
     fun check(url: String, mode: RunMode, timeoutMs: Int = 5_000,
-              routeCheck: (String) -> String? = WindowsRouteInspector::check): TunnelHealthResult {
+              routeCheck: (String) -> String? = WindowsRouteInspector::check,
+              proxyAccess: LocalProxyAccess? = null): TunnelHealthResult {
         if (mode == RunMode.FULL_VPN) {
             routeCheck(url)?.let { return TunnelHealthResult(error = it, routeConflict = true) }
         }
-        val proxy = if (mode == RunMode.PROXY)
-            Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", 2080)) else Proxy.NO_PROXY
+        if (mode == RunMode.PROXY) {
+            // The local proxy requires a login and password; never fall back to a direct request.
+            return proxyAccess?.let { checkThroughProxy(url, it, timeoutMs) }
+                ?: TunnelHealthResult(error = "Нет данных для входа в локальный прокси")
+        }
+        val proxy = Proxy.NO_PROXY
         val start = System.nanoTime()
         var connection: HttpURLConnection? = null
         return try {
@@ -169,6 +180,29 @@ internal object WindowsTunnelHealth {
             TunnelHealthResult(error = error.message?.take(100) ?: error.javaClass.simpleName)
         } finally {
             connection?.disconnect()
+        }
+    }
+
+    private fun checkThroughProxy(url: String, access: LocalProxyAccess, timeoutMs: Int): TunnelHealthResult {
+        val client = LocalProxyHttp.via(OkHttpClient.Builder(), access)
+            .connectTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            .readTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            .callTimeout(timeoutMs.toLong() * 2, TimeUnit.MILLISECONDS)
+            .followRedirects(false).followSslRedirects(false)
+            .retryOnConnectionFailure(false)
+            .build()
+        val start = System.nanoTime()
+        return try {
+            val request = Request.Builder().url(url).header("User-Agent", "LerNET-health/1").build()
+            client.newCall(request).execute().use { response ->
+                if (response.code in 200..399) TunnelHealthResult((System.nanoTime() - start) / 1_000_000)
+                else TunnelHealthResult(error = "HTTP ${response.code}")
+            }
+        } catch (error: Exception) {
+            TunnelHealthResult(error = error.message?.take(100) ?: error.javaClass.simpleName)
+        } finally {
+            client.connectionPool.evictAll()
+            client.dispatcher.executorService.shutdown()
         }
     }
 

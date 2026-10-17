@@ -1,5 +1,9 @@
 package app.lernet.ui.home
 
+import app.lernet.config.net.LocalProxyAccess
+
+import androidx.compose.foundation.text.selection.SelectionContainer
+
 import android.app.Activity
 import android.content.Context
 import android.os.Build
@@ -224,7 +228,7 @@ private fun HomeBody(
         if (liveMode == RunMode.PROXY) {
             ProxyModeBanner()
         }
-        ProxyAddressRow(visible = snapshot.state == ConnectionState.CONNECTED && liveMode == RunMode.PROXY)
+        ProxyAddressRow(access = state.proxyAccess?.takeIf { snapshot.state == ConnectionState.CONNECTED && liveMode == RunMode.PROXY })
         if (!state.engineAvailable) {
             Text(
                 stringResource(R.string.engine_stub_hint),
@@ -600,19 +604,33 @@ private fun openVpnSettings(context: android.content.Context) {
 }
 
 @Composable
-private fun ProxyAddressRow(visible: Boolean) {
-    if (!visible) return
+private fun ProxyAddressRow(access: LocalProxyAccess?) {
+    if (access == null) return
     val clipboard = LocalClipboardManager.current
-    val address = stringResource(R.string.proxy_addr)
-    OutlinedButton(
-        onClick = { clipboard.setText(AnnotatedString(address)) },
-        modifier = Modifier.fillMaxWidth().lernetButton(),
-    ) {
-        Icon(LerNetSymbols.copy(), contentDescription = null)
-        Spacer(Modifier.size(8.dp))
-        Text(stringResource(R.string.copy_proxy))
-        Spacer(Modifier.size(8.dp))
-        Text(address)
+    PanelCard {
+        SelectionContainer {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                ProxyLine(stringResource(R.string.copy_proxy), access.address)
+                ProxyLine(stringResource(R.string.proxy_login), access.username)
+                ProxyLine(stringResource(R.string.proxy_password), access.password)
+            }
+        }
+        OutlinedButton(
+            onClick = { clipboard.setText(AnnotatedString(access.url())) },
+            modifier = Modifier.fillMaxWidth().lernetButton(),
+        ) {
+            Icon(LerNetSymbols.copy(), contentDescription = null)
+            Spacer(Modifier.size(8.dp))
+            Text(stringResource(R.string.copy))
+        }
+    }
+}
+
+@Composable
+private fun ProxyLine(label: String, value: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+        Text(value, style = MaterialTheme.typography.bodyMedium)
     }
 }
 

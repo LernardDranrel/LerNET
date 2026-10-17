@@ -1,5 +1,7 @@
 package app.lernet.ui.settings
 
+import app.lernet.config.net.LocalProxyAccess
+
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import app.lernet.BuildConfig
@@ -46,6 +48,8 @@ sealed class SettingsIntent {
     data class SetDefaultDnsPolicy(val value: DnsPolicy) : SettingsIntent()
 
     data class SetDirectDnsServer(val value: String) : SettingsIntent()
+
+    data class SetProxyCredentials(val username: String, val password: String) : SettingsIntent()
 
     data class ProposeJournal(val mb: Int) : SettingsIntent()
 
@@ -95,6 +99,12 @@ class SettingsViewModel @Inject constructor(
                 is SettingsIntent.SetDefaultDnsPolicy -> settingsStore.setDefaultDnsPolicy(intent.value)
                 is SettingsIntent.SetDirectDnsServer -> if (EngineDefaults.validIpv4(intent.value)) {
                     settingsStore.setEngineDefaults(current.engineDefaults.copy(directDnsServer = intent.value))
+                }
+                is SettingsIntent.SetProxyCredentials -> {
+                    val clear = intent.username.isBlank() && intent.password.isEmpty()
+                    if (clear || (LocalProxyAccess.valid(intent.username.trim()) && LocalProxyAccess.valid(intent.password))) {
+                        settingsStore.setProxyCredentials(intent.username, intent.password)
+                    }
                 }
                 is SettingsIntent.ProposeJournal -> pendingJournal.value = JournalCeiling.mb(intent.mb)
                 SettingsIntent.ConfirmJournal -> confirmJournal()

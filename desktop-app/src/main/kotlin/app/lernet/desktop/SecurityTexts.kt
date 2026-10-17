@@ -15,4 +15,17 @@ internal object SecurityTexts {
             "Выключайте, только если без этого перестала работать какая-то программа."
     const val APPLIES_ON_RECONNECT = "Изменения вступят в силу при следующем подключении."
     const val GUARD_PROBLEM_PREFIX = "Защита при сбое не работает: "
+
+    const val PROXY_TAG = "ПРОКСИ"
+    const val PROXY_TITLE = "Пароль локального прокси"
+    const val PROXY_BODY =
+        "Без логина и пароля другие программы не могут пользоваться прокси LerNET. " +
+            "Если оставить поля пустыми, при каждом подключении создаются новые случайные логин и пароль."
+    const val PROXY_RULES =
+        "До 64 символов, латиница, цифры и знаки, без пробелов и двоеточия. Действует со следующего подключения."
+    const val PROXY_ADDRESS = "Адрес"
+    const val PROXY_LOGIN = "Логин"
+    const val PROXY_PASSWORD = "Пароль"
+    const val COPY = "Копировать"
+    const val SAVE = "Сохранить"
 }

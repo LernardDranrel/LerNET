@@ -1,6 +1,7 @@
 package app.lernet.engine.compile
 
 import app.lernet.config.model.NormalizedOutbound
+import app.lernet.config.net.LocalProxyAccess
 import app.lernet.engine.RunMode
 import app.lernet.routing.RouteAction
 import app.lernet.routing.RouteCompiler
@@ -33,6 +34,39 @@ class SecurityConfigTest {
     fun androidNeverEmitsStrictRoute() {
         assertThat(tun(EnginePlatform.ANDROID, EngineDefaults(strictRoute = true))["strict_route"]!!.jsonPrimitive.content)
             .isEqualTo("false")
+    }
+
+    @Test
+    fun proxyModeListenerRequiresLoginAndPasswordOnBothPlatforms() {
+        for (platform in EnginePlatform.entries) {
+            val config = assemble(RunMode.PROXY, platform)
+            val mixed = inbounds(config).first { it["tag"]!!.jsonPrimitive.content == LocalListeners.USER_PROXY_TAG }
+            assertThat(mixed["listen"]!!.jsonPrimitive.content).isEqualTo("127.0.0.1")
+            assertThat(mixed["listen_port"]!!.jsonPrimitive.content).isEqualTo("2080")
+            val user = mixed["users"]!!.jsonArray.single().jsonObject
+            val access = checkNotNull(config.userProxy)
+            assertThat(user["username"]!!.jsonPrimitive.content).isEqualTo(access.username)
+            assertThat(user["password"]!!.jsonPrimitive.content).isEqualTo(access.password)
+            assertThat(LocalListeners.userProxy(config.json)).isEqualTo(access)
+        }
+    }
+
+    @Test
+    fun savedProxyPairIsUsedAsIs() {
+        val own = LocalProxyAccess.forUserProxy("me", "s3cret!")
+        val config = ConfigAssembler.assemble(outbound(), catchAllProxy(), RunMode.PROXY, "warn",
+            platform = EnginePlatform.WINDOWS, userProxy = own)
+        assertThat(config.userProxy).isEqualTo(LocalProxyAccess(2080, "me", "s3cret!"))
+        assertThat(LocalListeners.userProxy(config.json)).isEqualTo(own)
+    }
+
+    @Test
+    fun vpnModeHasNoUserProxyListener() {
+        for (platform in EnginePlatform.entries) {
+            val config = assemble(RunMode.FULL_VPN, platform)
+            assertThat(config.userProxy).isNull()
+            assertThat(inbounds(config).none { it["tag"]!!.jsonPrimitive.content == LocalListeners.USER_PROXY_TAG }).isTrue()
+        }
     }
 
     private fun tun(platform: EnginePlatform, defaults: EngineDefaults): JsonObject =

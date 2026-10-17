@@ -30,6 +30,8 @@ import app.lernet.engine.redact.LerNetLog
 import app.lernet.settings.AppSettings
 import app.lernet.settings.SettingsStore
 import app.lernet.vpn.AndroidProtectedDialer
+import app.lernet.config.net.LocalProxyAccess
+import app.lernet.engine.compile.LocalListeners
 import app.lernet.vpn.expert.AndroidVpnLockdown
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -68,6 +70,8 @@ data class HomeUiState(
     val offerLastLogs: Boolean = false,
     val probes: Map<String, ProfileProbe> = emptyMap(),
     val showLockdownHint: Boolean = false,
+    /** Proxy mode: address, login and password the user needs in other apps. */
+    val proxyAccess: LocalProxyAccess? = null,
 ) {
     val effectiveMode: RunMode get() = RunMode.resolve(activeProfile?.modeOverride, settings.mode)
 }
@@ -280,6 +284,7 @@ class HomeViewModel @Inject constructor(
             offerLastLogs = extra.offerLastLogs,
             probes = extra.probes,
             showLockdownHint = LockdownHint.visible(snapshot, settings.lockdownHintDismissed, extra.lockdown),
+            proxyAccess = LocalListeners.userProxy(snapshot.compiledJson),
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
@@ -603,7 +608,9 @@ class HomeViewModel @Inject constructor(
         LerNetLog.i(TAG, "ui startEngine profile=${profile.id} mode=${request.mode} routes=$ownerId")
         controller.connect(
             profile, nodes, request.mode, settings.logLevel,
-            settings.engineDefaults
+            settings.engineDefaults,
+            // A fresh random pair for every connection unless the user saved their own.
+            userProxy = LocalProxyAccess.forUserProxy(settings.proxyUsername, settings.proxyPassword),
         )
     }
 

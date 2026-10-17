@@ -2,11 +2,13 @@ package app.lernet.desktop.observation
 
 import java.net.HttpURLConnection
 import java.util.concurrent.CancellationException
+import okhttp3.Call
 
 /** Prevents a connection created after window disposal from escaping cleanup. */
 internal class ObservationConnectionSlot : AutoCloseable {
     private var closed = false
-    private var connection: HttpURLConnection? = null
+    /** Cancels the registered request: disconnect for HttpURLConnection, cancel for an OkHttp call. */
+    private var connection: (() -> Unit)? = null
     private var generation = 0L
 
     @Synchronized
@@ -19,14 +21,18 @@ internal class ObservationConnectionSlot : AutoCloseable {
     @Synchronized
     fun isCurrent(request: Long) = !closed && request == generation
 
+    fun attach(value: HttpURLConnection, request: Long) = attachCancel({ value.disconnect() }, request)
+
+    fun attach(value: Call, request: Long) = attachCancel({ value.cancel() }, request)
+
     @Synchronized
-    fun attach(value: HttpURLConnection, request: Long) {
+    private fun attachCancel(cancel: () -> Unit, request: Long) {
         if (!isCurrent(request)) {
-            value.disconnect()
+            cancel()
             throw CancellationException("Observation request was cancelled")
         }
         check(connection == null) { "Another observation request is still registered" }
-        connection = value
+        connection = cancel
     }
 
     @Synchronized
@@ -37,7 +43,7 @@ internal class ObservationConnectionSlot : AutoCloseable {
             generation++
             connection.also { connection = null }
         }
-        active?.disconnect()
+        active?.invoke()
     }
 
     override fun close() {
@@ -46,6 +52,6 @@ internal class ObservationConnectionSlot : AutoCloseable {
             generation++
             connection.also { connection = null }
         }
-        active?.disconnect()
+        active?.invoke()
     }
 }

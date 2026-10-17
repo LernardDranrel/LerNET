@@ -55,6 +55,16 @@ class SettingsStore(private val context: Context) {
 
     suspend fun dismissLockdownHint() = edit { it[LOCKDOWN_HINT_DISMISSED] = true }
 
+    suspend fun setProxyCredentials(username: String, password: String) = edit {
+        if (username.isBlank() || password.isEmpty()) {
+            it.remove(PROXY_USERNAME)
+            it.remove(PROXY_PASSWORD)
+        } else {
+            it[PROXY_USERNAME] = username.trim()
+            it[PROXY_PASSWORD] = password
+        }
+    }
+
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         context.dataStore.edit(block)
     }
@@ -83,6 +93,8 @@ class SettingsStore(private val context: Context) {
             ),
             defaultDnsPolicy = DnsPolicy.fromStorage(this[DEFAULT_DNS_POLICY] ?: DnsPolicy.UNDERLAY.name),
             lockdownHintDismissed = this[LOCKDOWN_HINT_DISMISSED] ?: false,
+            proxyUsername = this[PROXY_USERNAME].orEmpty(),
+            proxyPassword = this[PROXY_PASSWORD].orEmpty(),
         )
     }
 
@@ -103,5 +115,7 @@ class SettingsStore(private val context: Context) {
         val DEFAULT_DNS_POLICY = stringPreferencesKey("default_dns_policy")
         val DIRECT_DNS_SERVER = stringPreferencesKey("direct_dns_server")
         val LOCKDOWN_HINT_DISMISSED = booleanPreferencesKey("lockdown_hint_dismissed")
+        val PROXY_USERNAME = stringPreferencesKey("proxy_username")
+        val PROXY_PASSWORD = stringPreferencesKey("proxy_password")
     }
 }

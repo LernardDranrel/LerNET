@@ -101,6 +101,9 @@ data class StoredState(
     val crashGuard: Boolean = true,
     /** VPN mode: Windows may not ask DNS or use IPv6 past the VPN adapter. */
     val strictRoute: Boolean = true,
+    /** Own login/password for the local proxy; empty means a new random pair for every connection. */
+    val proxyUsername: String = "",
+    val proxyPassword: String = "",
 )
 
 class DesktopStore(private val directory: Path = defaultDirectory()) {

@@ -2,6 +2,7 @@ package app.lernet.engine.compile
 
 import app.lernet.config.model.DnsPolicy
 import app.lernet.config.model.NormalizedOutbound
+import app.lernet.config.net.LocalProxyAccess
 import app.lernet.config.policy.ExternalExitProfiles
 import app.lernet.engine.RunMode
 import app.lernet.routing.CompiledRoute
@@ -26,6 +27,8 @@ data class AssembledConfig(
     val proxyTag: String,
     val errors: List<String>,
     val notes: List<String> = emptyList(),
+    /** Proxy mode: the only login/password the 127.0.0.1:2080 listener accepts. */
+    val userProxy: LocalProxyAccess? = null,
 ) {
     val isValid: Boolean get() = errors.isEmpty()
 }
@@ -52,6 +55,8 @@ object ConfigAssembler {
         ruleSetDirectory: String = "",
         defaults: EngineDefaults = EngineDefaults(),
         platform: EnginePlatform = EnginePlatform.ANDROID,
+        /** Proxy mode only. Null asks for a fresh random login and password. */
+        userProxy: LocalProxyAccess? = null,
     ): AssembledConfig {
         if (!compiledRoute.isValid) {
             return AssembledConfig(
@@ -85,7 +90,8 @@ object ConfigAssembler {
         val pipeNames = activeRoute.rules.map { it.pipeName.trim() }.filter { it.isNotEmpty() }.distinct()
         val pipeTags = PipeAffinity.tags(pipeNames, setOf(outbound.tag, "direct"))
         val clones = pipeNames.map { name -> PipeAffinity.clone(taggedRaw, pipeTags.getValue(name), defaults.xmuxConcurrency) }
-        val inbound = inboundFor(mode, defaults, platform)
+        val proxyAccess = if (mode == RunMode.PROXY) userProxy ?: LocalProxyAccess.random(LocalProxyAccess.USER_PORT) else null
+        val inbound = inboundFor(mode, defaults, platform, proxyAccess)
         val preparedDns = DnsBlock.prepare(dnsJson, outbound.tag, dnsPolicy, defaults.directDnsServer)
         val dns = preparedDns.dns
         val rules = platformRules(mode, platform, outbound.tag) +
@@ -126,6 +132,7 @@ object ConfigAssembler {
             proxyTag = outbound.tag,
             errors = graphProblems,
             notes = notes,
+            userProxy = proxyAccess,
         )
     }
 
@@ -237,7 +244,12 @@ object ConfigAssembler {
         put("final", finalTag)
     }
 
-    private fun inboundFor(mode: RunMode, defaults: EngineDefaults, platform: EnginePlatform): JsonObject =
+    private fun inboundFor(
+        mode: RunMode,
+        defaults: EngineDefaults,
+        platform: EnginePlatform,
+        proxyAccess: LocalProxyAccess?,
+    ): JsonObject =
         when (mode) {
             RunMode.FULL_VPN -> buildJsonObject {
                 put("type", "tun")
@@ -259,13 +271,22 @@ object ConfigAssembler {
                 // Windows: without it DNS can leave through the physical adapter. Android has no use for it.
                 put("strict_route", platform == EnginePlatform.WINDOWS && defaults.strictRoute)
             }
-            RunMode.PROXY -> buildJsonObject {
-                put("type", "mixed")
-                put("tag", "mixed-in")
-                put("listen", "127.0.0.1")
-                put("listen_port", 2080)
-            }
+            RunMode.PROXY -> localListener(LocalListeners.USER_PROXY_TAG, checkNotNull(proxyAccess))
         }
+
+    /** Loopback SOCKS/HTTP listener that refuses everyone without the login and password. */
+    private fun localListener(tag: String, access: LocalProxyAccess): JsonObject = buildJsonObject {
+        put("type", "mixed")
+        put("tag", tag)
+        put("listen", LocalProxyAccess.HOST)
+        put("listen_port", access.port)
+        put("users", buildJsonArray {
+            add(buildJsonObject {
+                put("username", access.username)
+                put("password", access.password)
+            })
+        })
+    }
 
     private data class RuleSetAttach(val entries: List<JsonObject>, val error: String?)
 }

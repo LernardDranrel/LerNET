@@ -39,6 +39,11 @@
     <string name="copied">Скопировано</string>
     <string name="copy_proxy">Адрес прокси</string>
     <string name="proxy_addr">127.0.0.1:2080</string>
+    <string name="proxy_login">Логин</string>
+    <string name="proxy_password">Пароль</string>
+    <string name="settings_proxy_password_title">Пароль локального прокси</string>
+    <string name="settings_proxy_password_help">Без логина и пароля другие приложения не могут пользоваться прокси LerNET. Если оставить поля пустыми, при каждом подключении создаются новые случайные логин и пароль.</string>
+    <string name="settings_proxy_password_rules">До 64 символов, латиница, цифры и знаки, без пробелов и двоеточия. Действует со следующего подключения.</string>
     <string name="dismiss">Скрыть</string>
     <string name="lockdown_hint_body">Если LerNET внезапно закроется, Android может пустить трафик мимо VPN. Чтобы этого не было, включите для LerNET «Постоянный VPN» и «Блокировать соединения без VPN».</string>
     <string name="lockdown_hint_open">Открыть настройки</string>

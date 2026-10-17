@@ -32,6 +32,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.lernet.R
 import app.lernet.config.model.DnsPolicy
+import app.lernet.config.net.LocalProxyAccess
 import app.lernet.engine.compile.EngineDefaults
 import app.lernet.engine.log.JournalCeiling
 import app.lernet.ui.components.PanelCard
@@ -45,6 +46,7 @@ internal fun GlobalDefaultsCard(state: SettingsUiState, onIntent: (SettingsInten
     DnsDefaultsCard(state, onIntent)
     XmuxDefaultsCard(state, onIntent)
     MtuDefaultsCard(state, onIntent)
+    ProxyPasswordCard(state, onIntent)
     JournalDefaultsCard(state, onIntent)
 }
 
@@ -158,6 +160,43 @@ private fun MtuDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) -
         FilledTonalButton(
             onClick = { draft.toIntOrNull()?.let { onIntent(SettingsIntent.SetTunMtu(it)) } },
             enabled = valid && draft.toIntOrNull() != saved,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(stringResource(R.string.settings_journal_apply)) }
+    }
+}
+
+@Composable
+private fun ProxyPasswordCard(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
+    val savedUser = state.settings.proxyUsername
+    val savedPassword = state.settings.proxyPassword
+    var user by remember(savedUser) { mutableStateOf(savedUser) }
+    var password by remember(savedPassword) { mutableStateOf(savedPassword) }
+    val clearing = user.isBlank() && password.isEmpty()
+    val valid = clearing || (LocalProxyAccess.valid(user.trim()) && LocalProxyAccess.valid(password))
+    PanelCard {
+        Text(stringResource(R.string.settings_proxy_password_title), style = MaterialTheme.typography.titleMedium)
+        SettingHelp(stringResource(R.string.settings_proxy_password_help))
+        OutlinedTextField(
+            value = user,
+            onValueChange = { user = it.take(64) },
+            label = { Text(stringResource(R.string.proxy_login)) },
+            singleLine = true,
+            isError = !valid && user.isNotEmpty() && !LocalProxyAccess.valid(user.trim()),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = password,
+            onValueChange = { password = it.take(64) },
+            label = { Text(stringResource(R.string.proxy_password)) },
+            singleLine = true,
+            isError = !valid && password.isNotEmpty() && !LocalProxyAccess.valid(password),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        SettingHelp(stringResource(R.string.settings_proxy_password_rules))
+        FilledTonalButton(
+            onClick = { onIntent(SettingsIntent.SetProxyCredentials(user, password)) },
+            enabled = valid && (user.trim() != savedUser || password != savedPassword),
             modifier = Modifier.fillMaxWidth(),
         ) { Text(stringResource(R.string.settings_journal_apply)) }
     }

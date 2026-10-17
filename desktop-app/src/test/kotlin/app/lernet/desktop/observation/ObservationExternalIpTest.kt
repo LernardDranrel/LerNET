@@ -22,10 +22,10 @@ class ObservationExternalIpTest {
         override fun getInputStream() = ByteArrayInputStream(text.toByteArray()).also { reads++ }
     }
 
-    @Test fun freshRequestDisablesCacheAndUsesExplicitProxy() {
+    @Test fun freshDirectRequestDisablesCacheAndUsesNoHiddenProxy() {
         val connection = Connection()
-        val result = ObservationExternalIp.read(true, openConnection = { proxy ->
-            assertEquals(Proxy.Type.HTTP, proxy.type()); connection
+        val result = ObservationExternalIp.read(null, openConnection = { proxy ->
+            assertEquals(Proxy.NO_PROXY, proxy); connection
         }, countryLookup = { null })
         assertFalse(connection.useCaches)
         assertEquals("no-cache", connection.getRequestProperty("Cache-Control"))
@@ -37,7 +37,7 @@ class ObservationExternalIpTest {
 
     @Test fun redirectOrOversizedResponseCannotBecomeAnIp() {
         for (connection in listOf(Connection(code = 302), Connection("203.0.113.2" + " ".repeat(70)))) {
-            val result = runCatching { ObservationExternalIp.read(false, openConnection = { connection }, countryLookup = { null }) }
+            val result = runCatching { ObservationExternalIp.read(null, openConnection = { connection }, countryLookup = { null }) }
             assertTrue(result.isFailure)
             assertTrue(connection.disconnected)
         }
@@ -49,7 +49,7 @@ class ObservationExternalIpTest {
         slot.close()
         val connection = Connection()
         val result = runCatching {
-            ObservationExternalIp.read(false, onConnection = { slot.attach(it, request) }, openConnection = { connection }, countryLookup = { null })
+            ObservationExternalIp.read(null, onConnection = { slot.attach(it, request) }, openConnection = { connection }, countryLookup = { null })
         }
         assertTrue(result.exceptionOrNull() is CancellationException)
         assertEquals(0, connection.reads)

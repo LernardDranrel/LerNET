@@ -1,5 +1,12 @@
 package app.lernet.desktop
 
+import app.lernet.config.net.LocalProxyAccess
+import app.lernet.config.net.LocalProxyHttp
+import java.util.concurrent.TimeUnit
+import okhttp3.Call
+import okhttp3.OkHttpClient
+import okhttp3.Request
+
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -27,7 +34,7 @@ import kotlinx.serialization.json.Json
 
 /** This window never owns the VPN controller. Closing it only cancels its own observation work. */
 @Composable
-internal fun DesktopNetworkWindow(onClose: () -> Unit, useLerNetProxy: () -> Boolean, readClientContext: () -> ClientObservationContext, readDiagnosticLog: () -> List<String> = { emptyList() }) {
+internal fun DesktopNetworkWindow(onClose: () -> Unit, useLerNetProxy: () -> LocalProxyAccess?, readClientContext: () -> ClientObservationContext, readDiagnosticLog: () -> List<String> = { emptyList() }) {
     val scope = rememberCoroutineScope()
     var history by remember { mutableStateOf(ObservationSnapshotHistory()) }
     val snapshot = history.report
@@ -104,7 +111,7 @@ internal fun DesktopNetworkWindow(onClose: () -> Unit, useLerNetProxy: () -> Boo
                             probeResult = "Запрашиваем внешний адрес у api.ipify.org…"
                             val proxy = useLerNetProxy()
                             try {
-                                val result = runInterruptible(Dispatchers.IO) { ObservationExternalIp.read(proxy, onConnection = { ipConnection.attach(it, request) }) }
+                                val result = runInterruptible(Dispatchers.IO) { ObservationExternalIp.read(proxy, onConnection = { ipConnection.attach(it, request) }, onCall = { ipConnection.attach(it, request) }) }
                                 if (ipConnection.isCurrent(request)) probeResult = result
                             }
                             catch (cancelled: CancellationException) { throw cancelled }
@@ -130,14 +137,32 @@ internal fun DesktopNetworkWindow(onClose: () -> Unit, useLerNetProxy: () -> Boo
 }
 
 internal object ObservationExternalIp {
+    private const val URL = "https://api.ipify.org"
+
+    /**
+     * [access] set: the request goes only through LerNET's local proxy with its login and password,
+     * never directly. Null: the request follows the current Windows routes (VPN mode included).
+     */
     fun read(
-        useProxy: Boolean,
+        access: LocalProxyAccess?,
         onConnection: (HttpURLConnection) -> Unit = {},
-        openConnection: (Proxy) -> HttpURLConnection = { URI("https://api.ipify.org").toURL().openConnection(it) as HttpURLConnection },
+        openConnection: (Proxy) -> HttpURLConnection = { URI(URL).toURL().openConnection(it) as HttpURLConnection },
+        onCall: (Call) -> Unit = {},
+        proxyClient: (LocalProxyAccess) -> OkHttpClient = ::proxyClient,
         countryLookup: (String) -> String? = { ip -> LocalGeoIp { requireNotNull(javaClass.getResourceAsStream("/hop-geoip.idx")) }.country(ip) },
     ): String {
-        val proxy = if (useProxy) Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", 2080)) else Proxy.NO_PROXY
-        val connection = openConnection(proxy)
+        val bytes = if (access != null) readThroughProxy(proxyClient(access), onCall) else readDirect(onConnection, openConnection)
+        val ip = bytes.toString(Charsets.UTF_8).trim()
+        check(bytes.size <= 64 && NetworkRouteSelection.isNumericAddress(ip)) { "Сервис вернул неожиданный ответ" }
+        val country = runCatching { countryLookup(ip) }.getOrNull()
+        val time = SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(Date())
+        return "Внешний ${if (':' in ip) "IPv6" else "IPv4"}: $ip${country?.let { " · страна выхода $it (локальная база)" }.orEmpty()}\n" +
+            "api.ipify.org · $time · ${if (access != null) "через работающий прокси LerNET" else "по текущим маршрутам Windows"}. " +
+            "Это адрес выхода для этого запроса. Провайдер и домашний IP за VPN отсюда не определяются."
+    }
+
+    private fun readDirect(onConnection: (HttpURLConnection) -> Unit, openConnection: (Proxy) -> HttpURLConnection): ByteArray {
+        val connection = openConnection(Proxy.NO_PROXY)
         try {
             onConnection(connection)
             connection.connectTimeout = 30_000; connection.readTimeout = 30_000
@@ -146,14 +171,26 @@ internal object ObservationExternalIp {
             connection.setRequestProperty("Cache-Control", "no-cache")
             connection.setRequestProperty("Accept", "text/plain")
             check(connection.responseCode == 200) { "HTTP ${connection.responseCode}" }
-            val bytes = connection.inputStream.use { it.readNBytes(65) }
-            val ip = bytes.toString(Charsets.UTF_8).trim()
-            check(bytes.size <= 64 && NetworkRouteSelection.isNumericAddress(ip)) { "Сервис вернул неожиданный ответ" }
-            val country = runCatching { countryLookup(ip) }.getOrNull()
-            val time = SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(Date())
-            return "Внешний ${if (':' in ip) "IPv6" else "IPv4"}: $ip${country?.let { " · страна выхода $it (локальная база)" }.orEmpty()}\n" +
-                "api.ipify.org · $time · ${if (useProxy) "через работающий прокси LerNET" else "по текущим маршрутам Windows"}. " +
-                "Это адрес выхода для этого запроса. Провайдер и домашний IP за VPN отсюда не определяются."
+            return connection.inputStream.use { it.readNBytes(65) }
         } finally { connection.disconnect() }
     }
+
+    private fun readThroughProxy(client: OkHttpClient, onCall: (Call) -> Unit): ByteArray {
+        val request = Request.Builder().url(URL).header("Cache-Control", "no-cache").header("Accept", "text/plain").build()
+        val call = client.newCall(request)
+        try {
+            onCall(call)
+            return call.execute().use { response ->
+                check(response.code == 200) { "HTTP ${response.code}" }
+                response.body?.byteStream()?.use { it.readNBytes(65) } ?: ByteArray(0)
+            }
+        } finally { call.cancel() }
+    }
+
+    internal fun proxyClient(access: LocalProxyAccess): OkHttpClient =
+        LocalProxyHttp.via(OkHttpClient.Builder(), access)
+            .connectTimeout(30, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
+            .followRedirects(false).followSslRedirects(false)
+            .cache(null)
+            .build()
 }
