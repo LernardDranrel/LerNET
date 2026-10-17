@@ -22,6 +22,27 @@ object LocalListeners {
 
     fun appProxy(config: String?): LocalProxyAccess? = read(config)[APP_PROXY_TAG]
 
+    /**
+     * True when a config would open a local proxy without a password, as configs saved by versions
+     * before the password existed did (open 2080, open probe listener). Such a config must not be
+     * started again; an unreadable config counts as open too.
+     */
+    fun hasOpenListener(config: String?): Boolean {
+        if (config.isNullOrBlank()) return false
+        return runCatching {
+            json.parseToJsonElement(config).jsonObject["inbounds"]?.jsonArray.orEmpty().any { element ->
+                val inbound = element.jsonObject
+                val type = inbound["type"]?.jsonPrimitive?.contentOrNull
+                val tag = inbound["tag"]?.jsonPrimitive?.contentOrNull
+                tag == LEGACY_PROBE_TAG ||
+                    (type in PROXY_TYPES && inbound["users"]?.jsonArray.isNullOrEmpty())
+            }
+        }.getOrDefault(true)
+    }
+
+    private const val LEGACY_PROBE_TAG = "probe-in"
+    private val PROXY_TYPES = setOf("mixed", "socks", "http")
+
     internal fun read(config: String?): Map<String, LocalProxyAccess> {
         if (config.isNullOrBlank()) return emptyMap()
         cache?.let { (raw, parsed) -> if (raw === config || raw == config) return parsed }

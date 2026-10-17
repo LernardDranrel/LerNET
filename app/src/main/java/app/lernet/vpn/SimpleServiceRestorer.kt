@@ -1,5 +1,6 @@
 package app.lernet.vpn
 
+import app.lernet.engine.compile.LocalListeners
 import android.content.Context
 import android.net.VpnService
 import app.lernet.engine.ConnectionController
@@ -43,7 +44,13 @@ class SimpleSessionCoordinator @Inject constructor(
         restoreJob = scope.launch(Dispatchers.IO) {
             try {
                 val saved = store.read()
-                if (saved == null) {
+                // A session saved by an older version would reopen the local proxy without a password.
+                val outdated = saved != null && LocalListeners.hasOpenListener(saved.config().compiledJson)
+                if (outdated) {
+                    LerNetLog.w("LerNET.Restore", "saved session has a local listener without password; not restored")
+                    store.write(null)
+                }
+                if (saved == null || outdated) {
                     // Started as always-on VPN with nothing to restore: offer to connect instead of staying silent.
                     if (!ExpertServiceRestorer.shouldRestore() && !ExpertVpnSession.isOwned) AlwaysOnOffer.show(context)
                     return@launch

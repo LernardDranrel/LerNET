@@ -108,6 +108,28 @@ class SecurityConfigTest {
         assertThat(config.json).doesNotContain("probe-in")
     }
 
+    @Test
+    fun freshConfigsAreNeverTakenForOldOpenOnes() {
+        val app = LocalProxyAccess.random(ConfigAssembler.APP_PROXY_PORT)
+        for (platform in EnginePlatform.entries) for (mode in RunMode.entries) {
+            val config = ConfigAssembler.assemble(outbound(), catchAllProxy(), mode, "warn", platform = platform, appProxy = app)
+            assertThat(LocalListeners.hasOpenListener(config.json)).isFalse()
+        }
+    }
+
+    @Test
+    fun sessionSavedByOldVersionIsRecognisedAsOpen() {
+        val openProxy = """{"inbounds":[{"type":"mixed","tag":"mixed-in","listen":"127.0.0.1","listen_port":2080}]}"""
+        val openProbe = """{"inbounds":[{"type":"tun","tag":"tun-in"},""" +
+            """{"type":"mixed","tag":"probe-in","listen":"127.0.0.1","listen_port":2081,"users":[{"username":"a","password":"b"}]}]}"""
+        val emptyUsers = """{"inbounds":[{"type":"socks","tag":"x","listen":"127.0.0.1","listen_port":1,"users":[]}]}"""
+        assertThat(LocalListeners.hasOpenListener(openProxy)).isTrue()
+        assertThat(LocalListeners.hasOpenListener(openProbe)).isTrue()
+        assertThat(LocalListeners.hasOpenListener(emptyUsers)).isTrue()
+        assertThat(LocalListeners.hasOpenListener("{not json")).isTrue()
+        assertThat(LocalListeners.hasOpenListener("""{"inbounds":[{"type":"tun","tag":"tun-in"}]}""")).isFalse()
+    }
+
     private fun tun(platform: EnginePlatform, defaults: EngineDefaults): JsonObject =
         inbounds(assemble(RunMode.FULL_VPN, platform, defaults)).first { it["type"]!!.jsonPrimitive.content == "tun" }
 
