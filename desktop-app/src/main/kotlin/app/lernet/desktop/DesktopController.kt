@@ -119,7 +119,10 @@ class DesktopController(
                 thread(name = "lernet-windows-guard", isDaemon = true) { showGuard(simpleGuard.permitAdapter()) }
             }
 
-            override fun tunnelFailed() = releaseGuard()
+            // Only a terminal failure gives the network back; otherwise it stays closed until the retry or Stop.
+            override fun tunnelFailed() {
+                if (SimpleRecovery.releasesGuard(process.state.value.failure)) releaseGuard()
+            }
         }
     }
     val tracer = WindowsTracer()
@@ -149,6 +152,7 @@ class DesktopController(
                     .getOrElse { previous -> CoreDiagnostics(error = previous.message ?: "Нет данных от ядра") }
                 recordConnections(mutableDiagnostics.value.connections)
                 if (lastStatus != TunnelStatus.RUNNING) {
+                    recoveryAttempt.set(0)
                     nextHealthAt = 0L
                     failedChecks = 0
                     mutable.update { it.copy(message = "", healthMessage = "Проверяем соединение", healthFailures = 0, healthVerified = null, tunnelLatencyMs = null) }
@@ -720,7 +724,7 @@ class DesktopController(
         connectInternal(resetFailover = true)
     }
 
-    private fun connectInternal(resetFailover: Boolean) {
+    private fun connectInternal(resetFailover: Boolean, holdOnError: Boolean = false) {
         simpleRestriction()?.let { reportConnectionError(it); return }
         if (expertReserved.get()) {
             reportConnectionError("Устройством управляет экспертный режим. Остановите его перед включением обычного VPN.")
@@ -792,13 +796,36 @@ class DesktopController(
                 mutable.update { it.copy(message = "Запускаем ядро") }
             } catch (error: Exception) {
                 if (connectGeneration.get() == ticket) {
-                    desiredConnection = false
-                    releaseGuard()
-                    reportConnectionError(error.message ?: "Не удалось запустить ядро", routeErrorOwner)
+                    val reason = error.message ?: "Не удалось запустить ядро"
+                    if (holdOnError && desiredConnection && !expertReserved.get()) {
+                        // A recovery/failover start failed while the VPN is wanted: keep Windows closed and retry.
+                        tunnel.logDiagnostic("Повторный запуск не удался: $reason")
+                        scheduleRecovery(reason)
+                    } else {
+                        desiredConnection = false
+                        releaseGuard()
+                        reportConnectionError(reason, routeErrorOwner)
+                    }
                 }
             } finally {
                 connectBusy.set(false)
                 mutable.update { it.copy(busy = false) }
+            }
+        }
+    }
+
+    private val recoveryAttempt = java.util.concurrent.atomic.AtomicInteger()
+
+    /** Retries the wanted connection after a growing random pause; the guard (if on) keeps the network closed meanwhile. */
+    private fun scheduleRecovery(reason: String) {
+        val ticket = connectGeneration.get()
+        val pause = SimpleRecovery.pauseMs(recoveryAttempt.incrementAndGet())
+        mutable.update { it.copy(message = SimpleRecovery.message(simpleGuard.isEngaged(), pause, reason)) }
+        thread(name = "lernet-windows-retry", isDaemon = true) {
+            try { Thread.sleep(pause) } catch (_: InterruptedException) { return@thread }
+            if (desiredConnection && !expertReserved.get() && connectGeneration.get() == ticket &&
+                tunnel.state.value.status in setOf(TunnelStatus.FAILED, TunnelStatus.STOPPED)) {
+                connectInternal(resetFailover = false, holdOnError = true)
             }
         }
     }
@@ -844,7 +871,8 @@ class DesktopController(
                 }
                 change { it.copy(selectedProfileId = candidate.id) }
                 mutable.update { it.copy(message = "Переключаемся на ${candidate.name} из папки «${group.name}»") }
-                connectInternal(resetFailover = false)
+                // The guard stays engaged across stop → start; a failed switch keeps it closed and retries.
+                connectInternal(resetFailover = false, holdOnError = true)
                 return true
             }
             synchronized(failedInGroup) { failedInGroup += candidate.id }
