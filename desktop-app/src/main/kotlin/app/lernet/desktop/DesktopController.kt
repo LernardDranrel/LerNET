@@ -397,7 +397,7 @@ class DesktopController(
                         profiles = saved.profiles + added,
                         selectedProfileId = saved.selectedProfileId ?: added.firstOrNull()?.id,
                     )
-                }.also { mutable.update { it.copy(busy = false, message = "Добавлено профилей: ${result.drafts.size}") } }
+                }.also { mutable.update { it.copy(busy = false, message = importMessage(result.drafts.size, result.unusedParts)) } }
                 is ImportResult.Failure -> mutable.update {
                     it.copy(busy = false, message = result.errors.joinToString("; ") { error -> error.message })
                 }
@@ -1029,3 +1029,8 @@ internal fun guardProblemText(status: SimpleGuardStatus): String? = when (status
         if (status.networkClosed) SecurityTexts.GUARD_NETWORK_CLOSED else SecurityTexts.GUARD_PROBLEM
     else -> null
 }
+
+/** Import result line; unused parts of the config are named on screen, not only in the journal. */
+internal fun importMessage(added: Int, unusedParts: List<String>): String =
+    if (unusedParts.isEmpty()) "Добавлено профилей: $added"
+    else "Добавлено профилей: $added. Эти части конфига не используются: ${unusedParts.joinToString("; ")}"

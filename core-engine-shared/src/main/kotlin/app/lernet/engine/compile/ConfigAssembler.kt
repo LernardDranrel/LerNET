@@ -33,6 +33,9 @@ data class AssembledConfig(
     val appProxy: LocalProxyAccess? = null,
 ) {
     val isValid: Boolean get() = errors.isEmpty()
+
+    /** What LerNET changed in the user's config, for the screen (see [ConfigNotes]). */
+    val userChanges: List<String> get() = ConfigNotes.userVisible(notes)
 }
 
 object ConfigAssembler {

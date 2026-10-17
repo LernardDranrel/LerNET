@@ -110,6 +110,7 @@
     <string name="importing">Импорт…</string>
     <string name="import_saved">Сохранено профилей: %1$d</string>
     <string name="import_added">Добавлено</string>
+    <string name="import_unused_title">Эти части конфига не используются:</string>
     <string name="import_unsaved_title">Импорт не завершён</string>
     <string name="import_unsaved_body">При выходе введённый текст и текущая проверка пропадут.</string>
     <string name="paste_clipboard">Вставить из буфера</string>

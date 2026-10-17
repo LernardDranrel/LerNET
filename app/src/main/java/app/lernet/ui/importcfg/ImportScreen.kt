@@ -39,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
@@ -285,7 +286,10 @@ private fun ImportFeedback(
         Text(importErrorText(error), color = MaterialTheme.colorScheme.error)
     }
     AnimatedVisibility(visible = state.done) {
-        Text(stringResource(R.string.import_saved, state.savedCount), color = MaterialTheme.colorScheme.secondary)
+        Column(verticalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap)) {
+            Text(stringResource(R.string.import_saved, state.savedCount), color = MaterialTheme.colorScheme.secondary)
+            ImportUnusedParts(state.unusedParts)
+        }
     }
 }
 
@@ -371,3 +375,21 @@ private fun importErrorText(error: FieldError): String {
 }
 
 internal fun looksLikeConfig(raw: String): Boolean = ImportHint.detect(raw).mode != null
+
+@Composable
+internal fun ImportUnusedParts(parts: List<String>) {
+    if (parts.isEmpty()) return
+    Column(
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+        modifier = Modifier.testTag("import_unused_parts"),
+    ) {
+        Text(
+            stringResource(R.string.import_unused_title),
+            color = MaterialTheme.colorScheme.tertiary,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        parts.forEach { part ->
+            Text("• $part", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}

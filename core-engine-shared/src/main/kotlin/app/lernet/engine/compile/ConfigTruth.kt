@@ -56,6 +56,8 @@ data class ConfigPreview(
     val engineJson: String,
     val errors: List<String>,
     val fullEngineJson: String = "",
+    /** What LerNET changed in the user's config, plain Russian (see [ConfigNotes]). */
+    val userChanges: List<String> = emptyList(),
 )
 
 object ConfigTruth {
@@ -103,6 +105,7 @@ object ConfigTruth {
             engineJson = redactedEngineJson(assembled.json),
             errors = assembled.errors,
             fullEngineJson = prettyEngineJson(assembled.json),
+            userChanges = assembled.userChanges,
         )
     }
 

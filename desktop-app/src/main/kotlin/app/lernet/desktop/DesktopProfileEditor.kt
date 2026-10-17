@@ -97,6 +97,10 @@ fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller:
                                     FilterChip(dnsPolicy == "PROFILE", onClick = { dnsPolicy = "PROFILE" }, label = { Text("DNS профиля") })
                                 }
                                 if (dnsPolicy == "SYSTEM") Text("Глобально: ${if (saved.defaultDnsPolicy == "PROFILE") "DNS профиля" else "DNS устройства"}", color = editorWarning, fontSize = 12.sp)
+                                preview?.userChanges?.takeIf { it.isNotEmpty() }?.let { changes ->
+                                    Text(app.lernet.engine.compile.ConfigNotes.HEADER, color = editorWarning, fontSize = 12.sp)
+                                    changes.forEach { Text("• $it", color = editorMuted, fontSize = 12.sp) }
+                                }
                                 if (effectiveDnsPolicy == "PROFILE") {
                                     Box {
                                         OutlinedButton(onClick = { dnsTypeOpen = true }) { Text("Тип: $dnsType") }

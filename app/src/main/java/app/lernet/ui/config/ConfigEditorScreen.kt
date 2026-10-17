@@ -38,12 +38,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import app.lernet.R
 import app.lernet.config.model.DnsPolicy
+import app.lernet.engine.compile.ConfigNotes
 import app.lernet.engine.compile.DnsDraft
 import app.lernet.engine.compile.DnsServerDraft
 import app.lernet.engine.compile.FieldView
@@ -272,6 +275,14 @@ private fun DnsCard(
             ConfigOverrideRow(dns, stringResource(R.string.cfg_dns_servers))
         }
         PolicyChoice(state.dnsPolicy, onIntent)
+        if (state.configChanges.isNotEmpty()) {
+            Column(Modifier.testTag("config_dns_changes"), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(ConfigNotes.HEADER, color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.bodyMedium)
+                state.configChanges.forEach { change ->
+                    Text("• $change", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
         if (state.dnsPolicy == DnsPolicy.PROFILE) {
             state.dnsServers.forEach { draft ->
                 DnsEditor(draft, state.fieldError, onIntent)

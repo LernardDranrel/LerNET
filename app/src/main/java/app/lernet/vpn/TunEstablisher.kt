@@ -101,6 +101,9 @@ object TunEstablisher {
                 builder.addRoute(prefix.address, prefix.prefix)
                 LerNetLog.i(TAG, "Builder.addRoute ${prefix.label()}")
             }
+            // Below Android 13 there is no excludeRoute, but nothing is lost: libbox already
+            // subtracts the excluded ranges from inet4/6RouteRange, which TunRoutePlan uses there.
+            // LerNET itself never generates route_exclude_address, so there is no setting to mark.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 planned.excludes.forEach { prefix ->
                     builder.excludeRoute(IpPrefix(InetAddress.getByName(prefix.address), prefix.prefix))

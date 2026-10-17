@@ -56,6 +56,8 @@ data class ConfigEditorUiState(
     val engineJson: String = "",
     val fullEngineJson: String = "",
     val assembleError: String? = null,
+    /** What LerNET changed in this profile's config (DNS), shown under the DNS card. */
+    val configChanges: List<String> = emptyList(),
     val fieldError: ConfigFieldError? = null,
     val confirmProfileDns: Boolean = false,
     val showEngine: Boolean = false,
@@ -202,6 +204,7 @@ class ConfigEditorViewModel @Inject constructor(
                     engineJson = rendered.engineJson,
                     fullEngineJson = rendered.fullEngineJson,
                     assembleError = rendered.assembleError,
+                    configChanges = rendered.configChanges,
                 )
             }
         }
@@ -320,6 +323,7 @@ class ConfigEditorViewModel @Inject constructor(
             engineJson = preview.engineJson,
             fullEngineJson = preview.fullEngineJson,
             assembleError = preview.errors.firstOrNull(),
+            configChanges = preview.userChanges,
         )
     }
 

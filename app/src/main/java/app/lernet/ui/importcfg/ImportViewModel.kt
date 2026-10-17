@@ -43,6 +43,8 @@ data class ImportUiState(
     val savedCount: Int = 0,
     val done: Boolean = false,
     val firstSavedId: String? = null,
+    /** Parts of the imported config LerNET does not use; shown with the result, not only in the journal. */
+    val unusedParts: List<String> = emptyList(),
 ) {
     val effectiveMode: ImportMode? get() = modeOverride ?: guess.mode?.toImportMode()
 }
@@ -146,6 +148,7 @@ class ImportViewModel @Inject constructor(
                 input = "",
                 guess = ImportGuess.EMPTY,
                 firstSavedId = ids.firstOrNull(),
+                unusedParts = if (ids.isNotEmpty()) named.unusedParts else emptyList(),
             )
         }
         events.emit(ImportEvent.Saved(ids.size, ids.firstOrNull(), ids))
