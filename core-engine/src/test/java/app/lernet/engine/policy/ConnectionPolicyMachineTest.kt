@@ -200,16 +200,71 @@ class ConnectionPolicyMachineTest {
     }
 
     @Test
-    fun firstStartFailureIsNotRetried() {
-        val starting = machine.reduce(MachineState.idle(), ctx(), startEvent()).first
-        val (next, commands) = machine.reduce(
-            starting,
+    fun firstStartFailureRetriesOneBurstThenFailsClearly() {
+        var state = machine.reduce(MachineState.idle(), ctx(), startEvent()).first
+        // maxAttempts = 3: two paused retries, the third failure ends the fresh attempt.
+        repeat(2) {
+            val (next, commands) = machine.reduce(
+                state,
+                ctx(),
+                PolicyEvent.EngineFailed(ConnectionCause.EngineStartFailed("setup exploded")),
+            )
+            assertThat(next.snapshot.state).isEqualTo(ConnectionState.RECONNECTING)
+            assertThat(commands.filterIsInstance<PolicyCommand.ScheduleRetry>().single().delayMs).isGreaterThan(0)
+            assertThat(commands.filterIsInstance<PolicyCommand.StopEngine>()).isEmpty()
+            state = next
+        }
+        val (last, commands) = machine.reduce(
+            state,
             ctx(),
             PolicyEvent.EngineFailed(ConnectionCause.EngineStartFailed("setup exploded")),
         )
-        assertThat(next.snapshot.state).isEqualTo(ConnectionState.FAILED)
-        assertThat(commands.filterIsInstance<PolicyCommand.ScheduleRetry>()).isEmpty()
+        assertThat(last.snapshot.state).isEqualTo(ConnectionState.FAILED)
+        assertThat(last.snapshot.cause).isInstanceOf(ConnectionCause.ReconnectExhausted::class.java)
+        assertThat(last.snapshot.cause?.labelRu()).contains("Ядро не запустилось")
         assertThat(commands.filterIsInstance<PolicyCommand.StopEngine>()).isNotEmpty()
+    }
+
+    @Test
+    fun coreFailureOnFailoverRestartKeepsTheVpn() {
+        // Session was up, then a failover restarted the core on another config (state CONNECTING again).
+        var state = connected()
+        state = machine.reduce(state, ctx(), startEvent().copy(outboundId = "out-b")).first
+        assertThat(state.snapshot.state).isEqualTo(ConnectionState.CONNECTING)
+        assertThat(state.sessionHeld).isTrue()
+        repeat(6) {
+            val (next, commands) = machine.reduce(
+                state,
+                ctx(),
+                PolicyEvent.EngineFailed(ConnectionCause.EngineStartFailed("failover core exploded")),
+            )
+            assertThat(next.snapshot.state).isEqualTo(ConnectionState.RECONNECTING)
+            assertThat(commands.filterIsInstance<PolicyCommand.StopEngine>()).isEmpty()
+            assertThat(commands.filterIsInstance<PolicyCommand.ScheduleRetry>()).isNotEmpty()
+            state = next
+        }
+    }
+
+    @Test
+    fun freshConnectAfterStopDoesNotInheritTheHold() {
+        var state = connected()
+        state = machine.reduce(state, ctx(), PolicyEvent.UserDisconnect).first
+        state = machine.reduce(state, ctx(), startEvent()).first
+        assertThat(state.sessionHeld).isFalse()
+    }
+
+    @Test
+    fun unrecoverableCausesStillEndAHeldSession() {
+        listOf(
+            ConnectionCause.VpnPermissionDenied,
+            ConnectionCause.ServiceRevoked,
+            ConnectionCause.InvalidConfig(listOf("x")),
+            ConnectionCause.EngineUnavailable,
+        ).forEach { cause ->
+            val (next, commands) = machine.reduce(connected(), ctx(), PolicyEvent.EngineFailed(cause))
+            assertThat(next.snapshot.state).isEqualTo(ConnectionState.FAILED)
+            assertThat(commands.filterIsInstance<PolicyCommand.StopEngine>()).isNotEmpty()
+        }
     }
 
     @Test

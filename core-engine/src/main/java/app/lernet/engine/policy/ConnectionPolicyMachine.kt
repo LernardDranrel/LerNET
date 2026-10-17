@@ -17,6 +17,11 @@ data class MachineState(
     val consecutiveFailures: Int,
     val knownDead: Set<String>,
     val softReloads: Int = 0,
+    /**
+     * The VPN has been up in this session (survives a failover restart to another config).
+     * While true, no core failure except a truly unrecoverable one may drop the VPN.
+     */
+    val sessionHeld: Boolean = false,
 ) {
     companion object {
         fun idle(mode: RunMode = RunMode.FULL_VPN): MachineState =
@@ -63,7 +68,11 @@ class ConnectionPolicyMachine {
             downlinkTotal = 0,
             dnsOk = false,
         )
-        return MachineState(snapshot, consecutiveFailures = 0, knownDead = emptySet(), softReloads = 0) to
+        // A restart while the VPN is up (failover to the next config, manual switch) keeps the
+        // session's protection: a failing core there is retried with the interface held closed.
+        val held = !isTerminal(state) &&
+            (state.sessionHeld || state.snapshot.state == ConnectionState.CONNECTED || state.snapshot.state == ConnectionState.RECONNECTING)
+        return MachineState(snapshot, consecutiveFailures = 0, knownDead = emptySet(), softReloads = 0, sessionHeld = held) to
             listOf(PolicyCommand.StartEngine(event.outboundId))
     }
 
@@ -180,7 +189,7 @@ class ConnectionPolicyMachine {
             cause = null,
             attempt = 0,
         )
-        return state.copy(snapshot = snapshot) to emptyList()
+        return state.copy(snapshot = snapshot, sessionHeld = true) to emptyList()
     }
 
     private fun userDisconnect(state: MachineState): Pair<MachineState, List<PolicyCommand>> {
@@ -236,21 +245,26 @@ class ConnectionPolicyMachine {
         val outboundId = state.snapshot.activeOutboundId
         val failures = state.consecutiveFailures + 1
         return when {
-            !keepsSession(state, cause) -> failNow(state, cause)
+            !keepsSession(cause) -> failNow(state, cause)
             outboundId == null -> failNow(state, cause)
+            // A core that never came up for a fresh connect gets one retry burst, then a clear
+            // final error: the user is watching and nothing was protected yet.
+            cause is ConnectionCause.EngineStartFailed && !state.sessionHeld &&
+                failures >= context.reconnect.maxAttempts ->
+                failNow(state, ConnectionCause.ReconnectExhausted(failures, cause))
             failures < context.reconnect.maxAttempts -> retrySame(state, outboundId, failures, cause, context)
             else -> afterReconnectBudget(state, context, outboundId, failures, cause)
         }
     }
 
     /**
-     * A first start that cannot even launch the core ends the attempt. Once the session has been
-     * up (or is already recovering), an unexpected core failure is retried instead: the VPN stays
-     * closed while it restarts, so traffic never falls back to the open network behind the user's back.
+     * A core that failed to start is retried with a pause, and the Android interface stays held
+     * closed meanwhile ([TunHoldPolicy]), so traffic never falls back to the open network. Only
+     * unrecoverable causes end the session: missing VPN permission, revoke, an invalid config or
+     * route tree, a missing engine, an app selection Android cannot honour (all non-retryable).
      */
-    private fun keepsSession(state: MachineState, cause: ConnectionCause): Boolean =
-        cause.isRetryable() ||
-            (cause is ConnectionCause.EngineStartFailed && state.snapshot.state != ConnectionState.CONNECTING)
+    private fun keepsSession(cause: ConnectionCause): Boolean =
+        cause.isRetryable() || cause is ConnectionCause.EngineStartFailed
 
     private fun retrySame(
         state: MachineState,

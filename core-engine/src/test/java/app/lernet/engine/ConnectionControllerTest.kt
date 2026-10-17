@@ -646,7 +646,7 @@ class ConnectionControllerTest {
     }
 
     @Test
-    fun engineStartThrowableBecomesFailedWithoutReconnect() = runTest(dispatcher) {
+    fun engineStartThrowableRetriesOneBurstThenFails() = runTest(dispatcher) {
         val engine = RecordingBoxEngine(startError = UnsatisfiedLinkError("dlopen failed"))
         val controller = controller(
             this,
@@ -656,13 +656,18 @@ class ConnectionControllerTest {
         )
         controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
         runCurrent()
-        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.FAILED)
+        // Fresh connect: the failed core is retried with a pause (VPN not dropped yet)...
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.RECONNECTING)
         assertThat(controller.snapshot.value.cause).isInstanceOf(ConnectionCause.EngineStartFailed::class.java)
-        assertThat(controller.snapshot.value.cause?.technicalDetail()).contains("dlopen failed")
         assertThat(engine.startCount).isEqualTo(1)
-        testScheduler.advanceTimeBy(15_000)
+        assertThat(engine.stopCount).isEqualTo(0)
+        testScheduler.advanceTimeBy(30_000)
         runCurrent()
-        assertThat(engine.startCount).isEqualTo(1)
+        // ...and after one burst (maxAttempts = 3) ends with a clear message.
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.FAILED)
+        assertThat(controller.snapshot.value.cause).isInstanceOf(ConnectionCause.ReconnectExhausted::class.java)
+        assertThat(controller.snapshot.value.cause?.technicalDetail()).contains("dlopen failed")
+        assertThat(engine.startCount).isEqualTo(3)
         assertThat(engine.stopCount).isEqualTo(1)
     }
 
