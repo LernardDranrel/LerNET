@@ -176,7 +176,7 @@ private fun HomeBody(
         }
         ConnectionHero(
             connection = snapshot.state,
-            status = phaseLabel(snapshot.state),
+            status = if (snapshot.waitingForNetwork) stringResource(R.string.state_waiting_network) else phaseLabel(snapshot.state),
             enabled = state.activeProfile != null || isSessionActive(snapshot.state),
             onToggle = { onIntent(HomeIntent.ToggleConnect) },
             onOpenRoutes = homeRouteOwnerId(state)?.let { ownerId -> { onOpenRoutes(ownerId) } },

@@ -93,6 +93,8 @@ class ConnectionController(
     private var machineState = MachineState.idle()
     private var context = MachineContext(ReconnectSettings(), app.lernet.engine.policy.FailoverSettings(), null)
     private var retryJob: Job? = null
+    /** Wall clock of the last network appearance/change; null until the first change. */
+    @Volatile private var networkChangedAtMs: Long? = null
     /** A long random recheck (all configs unavailable) that is still waiting; cut short when the network returns. */
     private var pendingRecheck: PolicyCommand.ScheduleRetry? = null
     /** Replies through the VPN exit only; direct sites never reset the failure counter. */
@@ -177,6 +179,7 @@ class ConnectionController(
             reconnect = reconnect,
             failover = app.lernet.engine.policy.FailoverSettings(failoverEnabled, group?.id),
             group = group,
+            msSinceNetworkChange = { networkChangedAtMs?.let { System.currentTimeMillis() - it } ?: Long.MAX_VALUE },
         )
     }
 
@@ -518,6 +521,10 @@ class ConnectionController(
 
     suspend fun onUnderlayRestored() {
         if (!underlayAvailable()) return
+        networkChangedAtMs = System.currentTimeMillis()
+        // Bytes that stalled while the network was gone say nothing about filters.
+        blockingDetector.reset()
+        if (_snapshot.value.waitingForNetwork) _snapshot.value = _snapshot.value.copy(waitingForNetwork = false)
         if (_snapshot.value.state == ConnectionState.RECONNECTING && retryJob?.isActive == true) {
             // The configs looked unavailable while the phone itself had no network: do not sit
             // out the long random recheck, try again right after the network is back.
@@ -545,6 +552,7 @@ class ConnectionController(
             (engineReady || event !is PolicyEvent.EngineFailed)
         ) {
             LerNetLog.w(TAG, "Нет исходной сети: сохраняем VPN/TUN и ждём восстановления")
+            if (!_snapshot.value.waitingForNetwork) _snapshot.value = _snapshot.value.copy(waitingForNetwork = true)
             return
         }
         // A generic start exception while offline can be retried once the underlay returns.
@@ -556,6 +564,7 @@ class ConnectionController(
         machineState = next
         val hops = _snapshot.value
         _snapshot.value = next.snapshot.copy(
+            waitingForNetwork = hops.waitingForNetwork && !underlayAvailable(),
             serverTcpMs = if (next.snapshot.activeProfileId == hops.activeProfileId &&
                 next.snapshot.state != ConnectionState.DISCONNECTED &&
                 next.snapshot.state != ConnectionState.FAILED

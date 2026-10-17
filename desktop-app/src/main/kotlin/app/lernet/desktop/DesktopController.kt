@@ -43,6 +43,9 @@ import app.lernet.engine.policy.BlockingSign
 import app.lernet.engine.policy.FlowSample
 import app.lernet.engine.policy.ProxiedTraffic
 import app.lernet.engine.policy.TunnelProbeSchedule
+import app.lernet.engine.policy.LinkDecision
+import app.lernet.engine.policy.LinkFailure
+import app.lernet.engine.policy.LinkJudge
 import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -155,6 +158,8 @@ class DesktopController(
     private var activeSimpleConnection: WindowsSimpleConnection? = null
     private var simpleRestoreLease: WindowsSimpleRestoreLease? = null
     @Volatile private var monitorOpen = true
+    /** When the physical network last changed; a fresh network gets a few seconds to settle. */
+    @Volatile private var networkChangedAt = 0L
     private val monitorThread = thread(name = "lernet-windows-diagnostics", isDaemon = true) {
         var lastStatus = TunnelStatus.STOPPED
         // Checks only with a reason (start, network change, unanswered traffic); no fixed beat.
@@ -163,7 +168,6 @@ class DesktopController(
         var failedChecks = 0
         var lastNetwork = runCatching { WindowsTunnelHealth.networkSignature() }.getOrDefault("")
         var lastNetworkScanAt = 0L
-        var networkChangedAt = 0L
         while (monitorOpen) {
             val status = tunnel.state.value.status
             if (status == TunnelStatus.RUNNING) {
@@ -205,7 +209,6 @@ class DesktopController(
                         }
                     }
                 }
-                if (networkChangedAt != 0L) networkChangedAt = 0L
                 if (schedule.takeDue(now) != null) {
                     val saved = state.value.saved
                     val profile = saved.profiles.firstOrNull { it.id == saved.selectedProfileId }
@@ -234,15 +237,11 @@ class DesktopController(
                                     if (failedChecks >= 2 && desiredConnection) {
                                         val failedId = profile.id
                                         val error = health.error
+                                        // A live node with a dead Windows path is not proof the config died.
+                                        val failure = if (nodeAlive) LinkFailure.ENGINE_ERROR else LinkFailure.TUNNEL_DEAD
                                         // Off the loop: a silent neighbour can take up to a minute to probe.
-                                        failoverRunner.launch {
-                                            val swapped = runCatching { WindowsPhysicalNetwork.select() }.isSuccess && tryFailover(failedId)
-                                            if (!swapped && desiredConnection) {
-                                                // A failed probe is not evidence that ingress is dead.
-                                                // Keep the existing TUN/routes; later probes recover in place.
-                                                mutable.update { it.copy(healthMessage = "VPN включён · ждём восстановления сети · $error") }
-                                            }
-                                        }
+                                        val failures = failedChecks
+                                        failoverRunner.launch { actOnLinkFailure(failedId, failure, failures, "$reason · $error") }
                                         failedChecks = 0
                                     }
                                 }
@@ -906,11 +905,35 @@ class DesktopController(
         mutable.update { it.copy(healthMessage = text, healthVerified = false) }
         if (!desiredConnection) return
         val failedId = state.value.saved.selectedProfileId ?: return
-        failoverRunner.launch {
-            if (!tryFailover(failedId) && desiredConnection) {
-                // No other config to switch to: keep the tunnel, say honestly what we saw.
-                mutable.update { it.copy(healthMessage = "$text Другого конфига в папке нет.") }
+        failoverRunner.launch { actOnLinkFailure(failedId, LinkFailure.BLOCKED, 1, text) }
+    }
+
+    /**
+     * Same rule as Android (shared LinkJudge): no network → keep the tunnel and wait;
+     * live network and a dead config → switch at once; otherwise let the next check retry.
+     */
+    private fun actOnLinkFailure(failedId: String, failure: LinkFailure, failures: Int, detail: String) {
+        if (!desiredConnection) return
+        val saved = state.value.saved
+        val profile = saved.profiles.firstOrNull { it.id == failedId } ?: return
+        val hasAlternative = saved.groups.any { it.id == profile.groupId && it.autoSwap } &&
+            saved.profiles.any { it.groupId == profile.groupId && it.id != failedId }
+        val networkUp = runCatching { WindowsPhysicalNetwork.select() }.isSuccess
+        val changedAt = networkChangedAt
+        val since = if (changedAt == 0L) Long.MAX_VALUE else System.currentTimeMillis() - changedAt
+        when (LinkJudge.decide(networkUp, failure, failures, since, hasAlternative)) {
+            LinkDecision.WAIT_FOR_NETWORK ->
+                // A failed probe is not evidence that ingress is dead: keep the guard and routes.
+                mutable.update { it.copy(healthMessage = LinkJudge.message(LinkDecision.WAIT_FOR_NETWORK)) }
+            LinkDecision.SWITCH_NOW -> {
+                mutable.update { it.copy(healthMessage = LinkJudge.message(LinkDecision.SWITCH_NOW)) }
+                if (!tryFailover(failedId) && desiredConnection) {
+                    mutable.update { it.copy(healthMessage = "$detail · другой рабочий конфиг в папке не найден") }
+                }
             }
+            LinkDecision.RETRY_SAME ->
+                mutable.update { it.copy(healthMessage = if (hasAlternative) "$detail · ${LinkJudge.message(LinkDecision.RETRY_SAME)}"
+                    else "$detail · другого конфига в папке нет, пробуем этот же") }
         }
     }
 

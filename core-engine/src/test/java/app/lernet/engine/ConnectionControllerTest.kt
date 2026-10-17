@@ -415,10 +415,9 @@ class ConnectionControllerTest {
         }
         val snap = controller.snapshot.value
         assertThat(snap.state).isEqualTo(ConnectionState.RECONNECTING)
-        // No other config here: the folder-less session keeps the honest reason and rechecks later.
-        val cause = snap.cause as ConnectionCause.ReconnectExhausted
-        assertThat(cause.last).isEqualTo(ConnectionCause.BlockingSuspected(app.lernet.engine.policy.BlockingSign.RESET_AFTER_HELLO))
-        assertThat(cause.labelRu()).contains("TLS")
+        // No other config here: the session keeps the honest reason and retries the same server.
+        assertThat(snap.cause).isEqualTo(ConnectionCause.BlockingSuspected(app.lernet.engine.policy.BlockingSign.RESET_AFTER_HELLO))
+        assertThat(snap.cause!!.labelRu()).contains("TLS")
     }
 
     @Test
@@ -462,6 +461,50 @@ class ConnectionControllerTest {
             assertThat(config).contains("\"mtu\":1380")
             assertThat(config).contains("9.9.9.9")
         }
+    }
+
+    @Test
+    fun deadConfigWithLiveNetworkSwitchesWithoutRetryBurst() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine()
+        val first = sampleProfile()
+        val second = first.copy(id = "p2", name = "резерв", selectedOutboundId = "out-2",
+            outbounds = first.outbounds.map { it.copy(id = "out-2", singBoxJson = it.singBoxJson.replace("example.com", "backup.example.com")) })
+        val controller = controller(this, engine, hardStopTimeoutMs = 2_500)
+        var selected: String? = null
+        controller.setFailoverHandlers(
+            resolve = { id -> if (id == "out-2") second to catchAllNodes().map { it.copy(profileId = "p2") } else null },
+            onSelected = { selected = it },
+        )
+        controller.updateSettings(ReconnectSettings(maxAttempts = 5), failoverEnabled = true,
+            group = ManualFailoverGroup("g", "Резерв", listOf("out-1", "out-2")))
+        controller.connect(first, catchAllNodes(), RunMode.FULL_VPN)
+        runCurrent()
+        controller.onEngineSignal(ConnectionCause.TunnelHealthFailed("HTTP 504"))
+        runCurrent()
+        assertThat(selected).isEqualTo("p2")
+        assertThat(engine.startCount).isEqualTo(2)
+    }
+
+    @Test
+    fun noNetworkHoldsTheConfigAndSaysSo() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine()
+        var online = true
+        val controller = controller(this, engine, hardStopTimeoutMs = 2_500,
+            reconnect = ReconnectSettings(maxAttempts = 3, watchdogTimeoutMs = 600_000), underlayAvailable = { online })
+        controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
+        runCurrent()
+        engine.emit(EngineEvent.DnsAlive(answers = 1))
+        runCurrent()
+        online = false
+        controller.onEngineSignal(ConnectionCause.TunnelHealthFailed("timeout"))
+        runCurrent()
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
+        assertThat(controller.snapshot.value.waitingForNetwork).isTrue()
+        assertThat(engine.startCount).isEqualTo(1)
+        online = true
+        controller.onUnderlayRestored()
+        runCurrent()
+        assertThat(controller.snapshot.value.waitingForNetwork).isFalse()
     }
 
     @Test

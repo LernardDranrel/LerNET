@@ -13,6 +13,7 @@
     <string name="state_connecting">Подключение…</string>
     <string name="state_connected">Подключено</string>
     <string name="state_reconnecting">Переподключение…</string>
+    <string name="state_waiting_network">Нет сети · VPN держим, ждём, когда сеть вернётся</string>
     <string name="state_failed">Сбой</string>
     <string name="active_profile">Профиль: %1$s</string>
     <string name="no_profile">Нет профиля</string>

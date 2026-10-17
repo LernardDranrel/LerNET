@@ -41,6 +41,8 @@ data class ConnectionSnapshot(
     val hops: List<HopStop> = emptyList(),
     /** TCP setup time to the server over the underlying network; not ICMP RTT. */
     val serverTcpMs: Long? = null,
+    /** No underlying network: the VPN is held and nothing is blamed on the config ([app.lernet.engine.policy.LinkJudge]). */
+    val waitingForNetwork: Boolean = false,
 ) {
     companion object {
         fun idle(mode: RunMode = RunMode.FULL_VPN): ConnectionSnapshot =
