@@ -5,6 +5,8 @@ data class EngineDefaults(
     val tunMtu: Int = ConfigAssembler.TUN_MTU,
     val xmuxConcurrency: String = XhttpMode.MUX_CONCURRENCY,
     val directDnsServer: String = DnsBlock.DIRECT_SERVER,
+    /** Windows VPN mode: forbid DNS and IPv6 on other adapters. Android ignores it. */
+    val strictRoute: Boolean = true,
 ) {
     companion object {
         fun validIpv4(value: String): Boolean {

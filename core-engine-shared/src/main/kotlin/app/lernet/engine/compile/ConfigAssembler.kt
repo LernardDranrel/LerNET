@@ -256,7 +256,8 @@ object ConfigAssembler {
                 // QUIC/packet alive, TCP dials dead. Never emit mixed.
                 put("stack", TUN_STACK)
                 put("auto_route", true)
-                put("strict_route", false)
+                // Windows: without it DNS can leave through the physical adapter. Android has no use for it.
+                put("strict_route", platform == EnginePlatform.WINDOWS && defaults.strictRoute)
             }
             RunMode.PROXY -> buildJsonObject {
                 put("type", "mixed")

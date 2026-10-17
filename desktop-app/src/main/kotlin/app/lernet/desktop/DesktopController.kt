@@ -519,9 +519,8 @@ class DesktopController(
     fun showMessage(message: String) { mutable.update { it.copy(message = message) } }
     fun dismissConnectionError() { mutable.update { it.copy(connectionError = null) } }
     fun setHealthUrl(url: String) = change { it.copy(healthUrl = url.trim()) }
-    fun setCrashGuard(enabled: Boolean) {
-        if (change { it.copy(crashGuard = enabled) } && !enabled) synchronized(connectLock) { releaseGuard() }
-    }
+    fun setStrictRoute(enabled: Boolean) = change { it.copy(strictRoute = enabled) }
+    fun setCrashGuard(enabled: Boolean) = change { it.copy(crashGuard = enabled) }
     fun setDefaultDnsPolicy(policy: DnsPolicy) = change { it.copy(defaultDnsPolicy = policy.name) }
     fun setJournalMaxMb(value: Int) = change { it.copy(journalMaxMb = value.coerceIn(1, 500)) }
     fun setDefaults(mtu: Int, xmux: String, dnsServer: String, logLevel: String) = change {
@@ -661,7 +660,7 @@ class DesktopController(
                 DnsPolicy.valueOf(if (profile.dnsPolicy == "SYSTEM") saved.defaultDnsPolicy else profile.dnsPolicy)
             }.getOrDefault(DnsPolicy.UNDERLAY),
             ruleSetDirectory = ruleSetDir.toString(),
-            defaults = EngineDefaults(saved.tunMtu, saved.xmuxConcurrency, saved.directDnsServer),
+            defaults = EngineDefaults(saved.tunMtu, saved.xmuxConcurrency, saved.directDnsServer, strictRoute = saved.strictRoute),
             platform = EnginePlatform.WINDOWS,
         )
         return if (assembled.isValid) assembled.copy(json = coreApi.inject(assembled.json)) else assembled

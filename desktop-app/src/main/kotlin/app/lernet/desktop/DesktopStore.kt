@@ -99,6 +99,8 @@ data class StoredState(
     val journalMaxMb: Int = 100,
     /** VPN mode: Windows keeps traffic closed outside LerNET while the core restarts. */
     val crashGuard: Boolean = true,
+    /** VPN mode: Windows may not ask DNS or use IPv6 past the VPN adapter. */
+    val strictRoute: Boolean = true,
 )
 
 class DesktopStore(private val directory: Path = defaultDirectory()) {

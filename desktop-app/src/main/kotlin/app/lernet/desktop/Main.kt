@@ -887,7 +887,7 @@ private fun Profiles(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, 
                     }
                 }
                 Spacer(Modifier.height(14.dp))
-                val preview = remember(selected, saved.rules, saved.mode, saved.defaultDnsPolicy, saved.tunMtu, saved.xmuxConcurrency, saved.directDnsServer) {
+                val preview = remember(selected, saved.rules, saved.mode, saved.defaultDnsPolicy, saved.tunMtu, saved.xmuxConcurrency, saved.directDnsServer, saved.strictRoute) {
                     runCatching { controller.preview(selected.id) }.getOrNull()
                 }
                 Panel {
@@ -1595,6 +1595,8 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
         Panel {
             SettingHeading(SecurityTexts.PANEL_TAG, SecurityTexts.PANEL_TITLE, SecurityTexts.PANEL_BODY)
             SecurityToggle(SecurityTexts.CRASH_GUARD, SecurityTexts.CRASH_GUARD_HINT, saved.crashGuard, controller::setCrashGuard)
+            SecurityToggle(SecurityTexts.STRICT_ROUTE, SecurityTexts.STRICT_ROUTE_HINT, saved.strictRoute, controller::setStrictRoute)
+            Text(SecurityTexts.APPLIES_ON_RECONNECT, color = muted, fontSize = 12.sp)
         }
         Panel {
             Text("Параметры подключения", style = MaterialTheme.typography.titleLarge)
