@@ -10,6 +10,8 @@ data class MachineContext(
     val reconnect: ReconnectSettings,
     val failover: FailoverSettings,
     val group: ManualFailoverGroup?,
+    /** Draws the random recheck pause for configs that stayed unavailable ([RecheckJitter]). */
+    val recheckMs: () -> Long = { RecheckJitter.nextMs() },
 )
 
 data class MachineState(
@@ -272,6 +274,7 @@ class ConnectionPolicyMachine {
         failures: Int,
         cause: ConnectionCause,
         context: MachineContext,
+        delayMs: Long? = null,
     ): Pair<MachineState, List<PolicyCommand>> {
         val snapshot = state.snapshot.copy(
             state = ConnectionState.RECONNECTING,
@@ -282,7 +285,7 @@ class ConnectionPolicyMachine {
             uplinkTotal = 0,
             downlinkTotal = 0,
         )
-        val delay = context.reconnect.backoffMs(failures)
+        val delay = delayMs ?: context.reconnect.backoffMs(failures)
         return state.copy(snapshot = snapshot, consecutiveFailures = failures) to listOf(
             PolicyCommand.ScheduleRetry(outboundId, delay, failures),
         )
@@ -309,13 +312,15 @@ class ConnectionPolicyMachine {
             )
         }
         // Exhausting a retry burst must not leave an otherwise valid VPN off forever.
-        // Continue with capped backoff and allow a fresh group probe next burst.
+        // Every config is unavailable now: recheck after a fresh random pause (45 s – 5 min,
+        // whole seconds), then allow a fresh group probe on the next burst.
         return retrySame(
             state.copy(knownDead = emptySet()),
             outboundId,
             failures.coerceAtMost(context.reconnect.maxAttempts),
             ConnectionCause.ReconnectExhausted(failures, cause),
             context,
+            delayMs = context.recheckMs(),
         )
     }
 

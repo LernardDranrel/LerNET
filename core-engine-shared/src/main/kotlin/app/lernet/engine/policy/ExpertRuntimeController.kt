@@ -49,6 +49,8 @@ class ExpertRuntimeController(
     initialDraft: NetworkPolicy = initial,
     private val probeSchedule: ExpertProbeSchedule? = null,
     private val nextProbeIntervalMs: (() -> Long)? = null,
+    /** Pause before an unavailable exit is looked at again; argument is the folder cooldown. */
+    private val nextRecheckMs: (Long) -> Long = { atLeast -> RecheckJitter.nextMs(atLeastMs = atLeast) },
     private val maintenanceIntervalMs: Long? = 1_000,
 ) {
     private val mutex = Mutex()
@@ -1168,7 +1170,11 @@ class ExpertRuntimeController(
                 reason = result.reason?.let(SecretRedactor::redact),
             )
         }
-        probeDue[key] = now + probeInterval()
+        val nativeRecovery = mutableState.value.capabilities.nativeHealthRecovery
+        // An exit that stays unavailable is not hammered every few seconds: the next look
+        // (probe and recovery) comes after a fresh random pause, 45 s – 5 min, at least the folder cooldown.
+        val recheck = if (!nativeRecovery && failed >= recoveryThreshold) nextRecheckMs(cooldown) else null
+        probeDue[key] = now + (recheck ?: probeInterval())
         if (result.healthy) {
             exitReasons.remove(key)
             recoveryDue.remove(key)
@@ -1188,11 +1194,11 @@ class ExpertRuntimeController(
                 "Выход ${key.profileId}: $failed проверки подряд не прошли. Следующий поток получит восстановление.",
             )
         }
-        if (!mutableState.value.capabilities.nativeHealthRecovery &&
+        if (!nativeRecovery &&
             failed >= recoveryThreshold &&
             now >= recoveryDue.getOrDefault(key, 0)
         ) {
-            recoveryDue[key] = now + cooldown
+            recoveryDue[key] = now + (recheck ?: cooldown)
             scope.launch { wakeExplicit(key) }
         }
     }

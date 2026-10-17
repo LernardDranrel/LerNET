@@ -58,6 +58,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import app.lernet.engine.policy.RecheckJitter
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -72,6 +73,8 @@ class ConnectionController(
     private val l7UrlTestEnabled: Boolean = DEFAULT_L7_URL_TEST_ENABLED,
     private val tunnelHealthProbe: (suspend () -> Result<Long>)? = null,
     private val tunnelHealthIntervalMs: () -> Long = { Random.nextLong(5_000L, 10_001L) },
+    /** Pause between direct latency dials to the connected config's server (random 45 s – 5 min). */
+    private val latencyRefreshMs: () -> Long = { RecheckJitter.nextMs() },
     val liveFeed: LiveFeed = LiveFeed(),
     private val ruleSetDirectory: String = "",
     /** Hop walk only — never Main. Tests inject the test dispatcher. */
@@ -85,6 +88,8 @@ class ConnectionController(
     private var machineState = MachineState.idle()
     private var context = MachineContext(ReconnectSettings(), app.lernet.engine.policy.FailoverSettings(), null)
     private var retryJob: Job? = null
+    /** A long random recheck (all configs unavailable) that is still waiting; cut short when the network returns. */
+    private var pendingRecheck: PolicyCommand.ScheduleRetry? = null
     private var healthJob: Job? = null
     private var dnsHealthJob: Job? = null
     private val dnsHealth = DnsHealthGate()
@@ -484,7 +489,16 @@ class ConnectionController(
     }
 
     suspend fun onUnderlayRestored() {
-        if (!underlayAvailable() || !engineReady) return
+        if (!underlayAvailable()) return
+        if (_snapshot.value.state == ConnectionState.RECONNECTING && retryJob?.isActive == true) {
+            // The configs looked unavailable while the phone itself had no network: do not sit
+            // out the long random recheck, try again right after the network is back.
+            mutex.withLock {
+                val waiting = pendingRecheck ?: return@withLock
+                if (retryJob?.isActive == true) execute(waiting.copy(delayMs = UNDERLAY_RETURN_RETRY_MS))
+            }
+        }
+        if (!engineReady) return
         val current = _snapshot.value.state
         if (current == ConnectionState.CONNECTED) {
             armTrafficWatch()
@@ -616,8 +630,13 @@ class ConnectionController(
                 failoverSwitchJob?.cancel()
                 scheduleTrace(force = true)
                 val restoreGate = pendingRestoreGate
+                pendingRecheck = command.takeIf { it.delayMs >= RecheckJitter.MIN_MS }
+                if (pendingRecheck != null) {
+                    LerNetLog.i(TAG, "Конфиг недоступен: перепроверка через ${RecheckJitter.label(command.delayMs)}")
+                }
                 retryJob = scope.launch {
                     delay(command.delayMs)
+                    pendingRecheck = null
                     // An already scheduled retry must also respect a later network outage.
                     while (!underlayAvailable()) delay(1_000)
                     if (restoreGate != null && !restoreGate()) return@launch
@@ -797,7 +816,9 @@ class ConnectionController(
         val profileId = _snapshot.value.activeProfileId
         latencyJob = scope.launch {
             while (true) {
-                delay(30_000L)
+                // Direct dial to the config's server for the latency figure: a fresh random
+                // pause each time (45 s – 5 min), not a fixed 30 s beat.
+                delay(latencyRefreshMs())
                 if (_snapshot.value.state != ConnectionState.CONNECTED ||
                     _snapshot.value.activeProfileId != profileId
                 ) {
@@ -1159,6 +1180,7 @@ class ConnectionController(
         const val HARD_STOP_TIMEOUT_MS = 2_500L
         const val PROBE_TIMEOUT_MS = 30_000
         private const val ACTIVE_PROBE_TIMEOUT_MS = 8_000
+        private const val UNDERLAY_RETURN_RETRY_MS = 1_000L
         const val L7_PROBE_URL = "https://cp.cloudflare.com/generate_204"
         const val DEFAULT_L7_URL_TEST_ENABLED = false
         private const val STATUS_LOG_EVERY = 5

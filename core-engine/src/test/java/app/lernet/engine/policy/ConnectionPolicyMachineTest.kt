@@ -168,6 +168,28 @@ class ConnectionPolicyMachineTest {
     }
 
     @Test
+    fun unavailableConfigIsRecheckedAfterARandomPauseUpTo5Minutes() {
+        val ctx = ctx(failover = FailoverSettings(enabled = false), group = sampleGroup())
+        val pauses = List(40) {
+            var state = connected()
+            var last: List<PolicyCommand> = emptyList()
+            repeat(3) {
+                val step = machine.reduce(state, ctx, PolicyEvent.EngineFailed(ConnectionCause.DialTimeout(5)))
+                state = step.first
+                last = step.second
+            }
+            assertThat(state.snapshot.state).isEqualTo(ConnectionState.RECONNECTING)
+            last.filterIsInstance<PolicyCommand.ScheduleRetry>().single().delayMs
+        }
+        pauses.forEach { pause ->
+            assertThat(pause).isAtLeast(45_000L)
+            assertThat(pause).isAtMost(300_000L)
+            assertThat(pause % 1_000).isEqualTo(0L)
+        }
+        assertThat(pauses.toSet().size).isGreaterThan(20)
+    }
+
+    @Test
     fun watchdogUsesFakeClock() {
         val clock = FakeClock(10_000)
         val watchdog = Watchdog(clock, timeoutMs = 20_000)

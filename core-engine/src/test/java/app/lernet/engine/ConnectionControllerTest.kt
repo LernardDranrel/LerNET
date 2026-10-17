@@ -309,7 +309,11 @@ class ConnectionControllerTest {
         engine.emit(EngineEvent.DnsAlive(answers = 1))
         runCurrent()
 
-        testScheduler.advanceTimeBy(30_000)
+        // The connected latency dial comes after the (here: shortest) random recheck pause, 45 s.
+        testScheduler.advanceTimeBy(44_000)
+        runCurrent()
+        assertThat(timeouts).doesNotContain(8_000)
+        testScheduler.advanceTimeBy(1_001)
         runCurrent()
         assertThat(timeouts).contains(8_000)
     }
@@ -1093,6 +1097,7 @@ class ConnectionControllerTest {
             l7UrlTestEnabled = l7UrlTestEnabled,
             tunnelHealthProbe = tunnelHealthProbe,
             tunnelHealthIntervalMs = { 5_000L },
+            latencyRefreshMs = { 45_000L },
             pathDispatcher = dispatcher,
             underlayAvailable = underlayAvailable,
             persistSessionIntent = persist,

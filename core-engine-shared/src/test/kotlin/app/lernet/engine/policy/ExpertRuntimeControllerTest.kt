@@ -679,6 +679,40 @@ class ExpertRuntimeControllerTest {
         assertEquals(TunIdentity("tun"), controller.state.value.tun)
     }
 
+    @Test fun `unavailable exit is rechecked after a random pause not every probe`() = runTest {
+        val backend = FakeBackend()
+        val policy = NetworkPolicy(folderPolicies = listOf(FolderPolicy("folder", autoSwap = true)))
+        val asked = mutableListOf<Long>()
+        val controller = ExpertRuntimeController(
+            policy, inventory, RoutePlatform.WINDOWS, backend, { _, _ -> }, backgroundScope,
+            clockMs = { testScheduler.currentTime }, initialDraft = policy, maintenanceIntervalMs = null,
+            nextProbeIntervalMs = { 3_000 },
+            nextRecheckMs = { cooldown -> asked += cooldown; 187_000 },
+        )
+        controller.handle(ExpertIntent.Start)
+        val target = PolicyExit(PolicyTarget.Folder("folder", routeScope = null))
+        val first = (controller.requestExit(target, "one") as ExpertExitResolution.Ready).key
+        repeat(2) { controller.onBackendEvent(ExpertBackendEvent.Health(first, ExpertProbeResult(null, "dead"))) }
+        runCurrent()
+        assertEquals(1, backend.recoveries.size)
+        // Folder cooldown (30 s default) is the floor handed to the jitter.
+        assertEquals(30_000L, asked.first())
+        advanceTimeBy(186_000)
+        controller.onBackendEvent(ExpertBackendEvent.Health(first, ExpertProbeResult(null, "dead")))
+        runCurrent()
+        assertEquals(1, backend.recoveries.size)
+        advanceTimeBy(2_000)
+        controller.onBackendEvent(ExpertBackendEvent.Health(first, ExpertProbeResult(null, "dead")))
+        runCurrent()
+        assertEquals(2, backend.recoveries.size)
+    }
+
+    @Test fun `default recheck pauses for unavailable exits are random within 45 s and 5 min`() {
+        val draws = List(300) { RecheckJitter.nextMs(atLeastMs = 30_000) }
+        assertTrue(draws.all { it in 45_000L..300_000L && it % 1_000 == 0L })
+        assertTrue(draws.toSet().size > 100)
+    }
+
     @Test fun `native health authority disables duplicate periodic Kotlin probes`() = runTest {
         val backend = FakeBackend().apply { actualCapabilities = PolicyControlCapabilities(true, true, true, true) }
         val controller = controller(backend)

@@ -37,6 +37,7 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import app.lernet.engine.policy.RecheckJitter
 import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -133,6 +134,8 @@ class DesktopController(
     private val mutableHistory = MutableStateFlow<List<LiveConnection>>(emptyList())
     val connectionHistory: StateFlow<List<LiveConnection>> = mutableHistory
     private val failedInGroup = mutableSetOf<String>()
+    /** Failed folder configs are looked at again after a random 45 s – 5 min pause. */
+    private val failedRecheck = UnavailableRecheck()
     @Volatile private var desiredConnection = false
     private val expertReserved = AtomicBoolean(false)
     private var activeSimpleConnection: WindowsSimpleConnection? = null
@@ -733,7 +736,10 @@ class DesktopController(
             connectBusy.set(false)
             return
         }
-        if (resetFailover) synchronized(failedInGroup) { failedInGroup.clear() }
+        if (resetFailover) {
+            synchronized(failedInGroup) { failedInGroup.clear() }
+            failedRecheck.reset()
+        }
         val ticket = synchronized(connectLock) {
             if (expertReserved.get()) {
                 connectBusy.set(false)
@@ -846,10 +852,15 @@ class DesktopController(
         val saved = state.value.saved
         val failed = saved.profiles.firstOrNull { it.id == failedProfileId } ?: return false
         val group = saved.groups.firstOrNull { it.id == failed.groupId && it.autoSwap } ?: return false
+        if (failedRecheck.consumeIfDue(System.currentTimeMillis())) synchronized(failedInGroup) { failedInGroup.clear() }
         synchronized(failedInGroup) { failedInGroup += failedProfileId }
         val candidates = saved.profiles.filter { it.groupId == group.id && it.id != failedProfileId &&
             synchronized(failedInGroup) { it.id !in failedInGroup } }
-        if (candidates.isEmpty()) return false
+        if (candidates.isEmpty()) {
+            val wait = failedRecheck.arm(System.currentTimeMillis())
+            mutable.update { it.copy(message = "В папке «${group.name}» нет доступной замены · перепроверка через ${RecheckJitter.label(wait)}") }
+            return false
+        }
         // Keep current ingress while searching. An offline/failed folder probe
         // must never remove capture routes and silently return to Direct.
         for (candidate in candidates) {
@@ -871,7 +882,8 @@ class DesktopController(
             }
             synchronized(failedInGroup) { failedInGroup += candidate.id }
         }
-        mutable.update { it.copy(message = "В папке «${group.name}» нет доступной замены") }
+        val wait = failedRecheck.arm(System.currentTimeMillis())
+        mutable.update { it.copy(message = "В папке «${group.name}» нет доступной замены · перепроверка через ${RecheckJitter.label(wait)}") }
         return false
     }
 
