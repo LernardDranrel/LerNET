@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import app.lernet.R
 import app.lernet.engine.log.CrashTrail
+import app.lernet.engine.net.AllowedAppsGuard
 import app.lernet.engine.net.CidrPrefix
 import app.lernet.engine.net.OpenTunInput
 import app.lernet.engine.net.PlannedTun
@@ -110,11 +111,17 @@ object TunEstablisher {
                 builder.addDnsServer(server)
                 LerNetLog.i(TAG, "Builder.addDnsServer $server")
             }
+            val allowed = mutableListOf<String>()
             snapshot.includePackages.forEach { pkg ->
                 runCatching { builder.addAllowedApplication(pkg) }
                     .onFailure { LerNetLog.w(TAG, "addAllowedApplication failed: $pkg ${it.message}", it) }
-                    .onSuccess { LerNetLog.i(TAG, "Builder.addAllowedApplication $pkg") }
+                    .onSuccess {
+                        allowed += pkg
+                        LerNetLog.i(TAG, "Builder.addAllowedApplication $pkg")
+                    }
             }
+            // Without a single accepted package Android would capture every app: refuse instead.
+            AllowedAppsGuard.requireSomeAllowed(snapshot.includePackages, allowed)
             val excluded = snapshot.excludePackages.toMutableSet()
             excluded.forEach { pkg ->
                 runCatching { builder.addDisallowedApplication(pkg) }

@@ -1,10 +1,13 @@
 package app.lernet.engine
 
+import app.lernet.engine.net.AllowedAppsGuard
+
 object EngineErrorMapper {
     fun map(raw: String): ConnectionCause {
         val detail = raw.trim().ifBlank { "unknown" }
         val lower = detail.lowercase()
         return when {
+            AllowedAppsGuard.MARKER in lower -> ConnectionCause.InvalidConfig(listOf(AllowedAppsGuard.USER_MESSAGE))
             isPermission(lower) -> ConnectionCause.VpnPermissionDenied
             isRevoked(lower) -> ConnectionCause.ServiceRevoked
             isConfig(lower) -> ConnectionCause.InvalidConfig(listOf(detail))
