@@ -95,7 +95,7 @@ data class StoredState(
     val directDnsServer: String = "1.1.1.1",
     val logLevel: String = "info",
     val healthUrl: String = "https://www.gstatic.com/generate_204",
-    val defaultDnsPolicy: String = "UNDERLAY",
+    val defaultDnsPolicy: String = "TUNNEL",
     val journalMaxMb: Int = 100,
     /** VPN mode: Windows keeps traffic closed outside LerNET while the core restarts. */
     val crashGuard: Boolean = true,

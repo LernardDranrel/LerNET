@@ -875,7 +875,8 @@ private fun Profiles(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, 
                     ProfileDetail("DNS", when (selected.dnsPolicy) {
                         "SYSTEM" -> "Глобальная настройка"
                         "PROFILE" -> "Из профиля"
-                        else -> "DNS устройства"
+                        "TUNNEL" -> "Через VPN"
+                        else -> "DNS сети (мимо VPN)"
                     })
                 }
                 Spacer(Modifier.height(14.dp))
@@ -1613,7 +1614,7 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
             SettingHeading("DNS", "Кто определяет адреса сайтов",
                 "DNS переводит имя сайта в IP-адрес. Выберите источник настройки рядом с адресом сервера.")
             Box(Modifier.fillMaxWidth()) {
-                SegmentedChoice(listOf("UNDERLAY" to "LerNET · вручную", "PROFILE" to "Из профиля"), dnsPolicy) { dnsPolicy = it }
+                SegmentedChoice(listOf("TUNNEL" to "Через VPN", "UNDERLAY" to "Напрямую", "PROFILE" to "Из профиля"), dnsPolicy) { dnsPolicy = it }
             }
             OutlinedTextField(directDns, { directDns = it }, modifier = Modifier.fillMaxWidth(),
                 label = { Text(if (dnsPolicy == "PROFILE") "Резервный DNS · IPv4" else "DNS-сервер · IPv4") },
@@ -1621,7 +1622,8 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
                 supportingText = { Text(if (!dnsValid) "Введите один IPv4-адрес, например 1.1.1.1." else "Один IPv4-адрес. Список через запятую здесь не поддерживается.") })
             Text(if (dnsPolicy == "PROFILE")
                 "Если в профиле есть DNS, используются его серверы и правила. Импортированный JSON может содержать несколько серверов; их выбор задаёт конфигурация. Если DNS в профиле отсутствует, используется адрес выше. Он также нужен для прямых DNS-зависимостей."
-            else "Для DNS используется адрес, заданный здесь, через прямое подключение. Несколько DNS можно задать в JSON профиля и выбрать «Из профиля». Это отдельная настройка LerNET, а не автоматический выбор DNS Windows.",
+            else if (dnsPolicy == "TUNNEL") "По умолчанию. Адрес выше спрашивается внутри туннеля (TCP и DNS-over-HTTPS), поэтому сеть не видит, какие сайты ты открываешь. Напрямую идёт только запрос адреса самого VPN-сервера. Если на каком-то сервере DNS через VPN не отвечает (бывает, когда хостинг сервера режет DNS), выбери для этого профиля «DNS сети»."
+            else "Для DNS используется адрес, заданный здесь, через прямое подключение мимо VPN: сеть и провайдер видят имена сайтов. Несколько DNS можно задать в JSON профиля и выбрать «Из профиля».",
                 color = muted, fontSize = 12.sp, lineHeight = 18.sp)
             HorizontalDivider(Modifier.padding(vertical = 5.dp), color = desktopColors.outlineVariant)
             SettingHeading("MTU", "Размер пакета VPN",

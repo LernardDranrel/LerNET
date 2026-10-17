@@ -50,7 +50,7 @@ data class ConfigEditorUiState(
     val mode: String = "",
     val hasTransport: Boolean = false,
     val transportType: String = "",
-    val dnsPolicy: DnsPolicy = DnsPolicy.UNDERLAY,
+    val dnsPolicy: DnsPolicy = DnsPolicy.DEFAULT,
     val dnsServers: List<DnsServerDraft> = emptyList(),
     val fields: List<FieldView> = emptyList(),
     val engineJson: String = "",
@@ -87,6 +87,7 @@ sealed class ConfigEditorIntent {
     data class DnsType(val index: Int, val value: String) : ConfigEditorIntent()
 
     data object KeepSystemDns : ConfigEditorIntent()
+    data object TunnelDns : ConfigEditorIntent()
 
     data object RequestProfileDns : ConfigEditorIntent()
 
@@ -134,6 +135,9 @@ class ConfigEditorViewModel @Inject constructor(
             is ConfigEditorIntent.Mode -> edit { it.copy(mode = intent.value, fieldError = null) }
             is ConfigEditorIntent.DnsServer -> editDns(intent.index) { it.copy(server = intent.value) }
             is ConfigEditorIntent.DnsType -> editDns(intent.index) { it.copy(type = intent.value) }
+            ConfigEditorIntent.TunnelDns -> edit {
+                it.copy(dnsPolicy = DnsPolicy.TUNNEL, confirmProfileDns = false, fieldError = null)
+            }
             ConfigEditorIntent.KeepSystemDns -> edit {
                 it.copy(dnsPolicy = DnsPolicy.UNDERLAY, confirmProfileDns = false, fieldError = null)
             }

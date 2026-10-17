@@ -5,9 +5,10 @@ import org.junit.Test
 
 class DnsPolicyTest {
     @Test
-    fun unknownStorageFallsBackToUnderlay() {
-        assertThat(DnsPolicy.fromStorage(null)).isEqualTo(DnsPolicy.UNDERLAY)
-        assertThat(DnsPolicy.fromStorage("nope")).isEqualTo(DnsPolicy.UNDERLAY)
+    fun unknownStorageFallsBackToTunnel() {
+        assertThat(DnsPolicy.fromStorage(null)).isEqualTo(DnsPolicy.TUNNEL)
+        assertThat(DnsPolicy.fromStorage("nope")).isEqualTo(DnsPolicy.TUNNEL)
+        assertThat(DnsPolicy.fromStorage("UNDERLAY")).isEqualTo(DnsPolicy.UNDERLAY)
         assertThat(DnsPolicy.fromStorage("PROFILE")).isEqualTo(DnsPolicy.PROFILE)
     }
 }

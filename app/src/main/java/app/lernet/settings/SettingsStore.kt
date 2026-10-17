@@ -95,7 +95,7 @@ class SettingsStore(private val context: Context) {
                 xmuxConcurrency = this[XMUX_CONCURRENCY]?.takeIf { it in setOf("1-1", "8-8", "16-16", "32-32") } ?: "16-16",
                 directDnsServer = this[DIRECT_DNS_SERVER]?.takeIf { EngineDefaults.validIpv4(it) } ?: "1.1.1.1",
             ),
-            defaultDnsPolicy = DnsPolicy.fromStorage(this[DEFAULT_DNS_POLICY] ?: DnsPolicy.UNDERLAY.name),
+            defaultDnsPolicy = DnsPolicy.fromStorage(this[DEFAULT_DNS_POLICY] ?: DnsPolicy.DEFAULT.name),
             lockdownHintDismissed = this[LOCKDOWN_HINT_DISMISSED] ?: false,
             notificationsAsked = this[NOTIFICATIONS_ASKED] ?: false,
             notificationHintDismissed = this[NOTIFICATION_HINT_DISMISSED] ?: false,

@@ -93,10 +93,11 @@ fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller:
                                 Text("DNS", fontWeight = FontWeight.SemiBold)
                                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                                     FilterChip(dnsPolicy == "SYSTEM", onClick = { dnsPolicy = "SYSTEM" }, label = { Text("Глобально") })
-                                    FilterChip(dnsPolicy == "UNDERLAY", onClick = { dnsPolicy = "UNDERLAY" }, label = { Text("DNS устройства") })
+                                    FilterChip(dnsPolicy == "TUNNEL", onClick = { dnsPolicy = "TUNNEL" }, label = { Text("Через VPN") })
+                                    FilterChip(dnsPolicy == "UNDERLAY", onClick = { dnsPolicy = "UNDERLAY" }, label = { Text("DNS сети") })
                                     FilterChip(dnsPolicy == "PROFILE", onClick = { dnsPolicy = "PROFILE" }, label = { Text("DNS профиля") })
                                 }
-                                if (dnsPolicy == "SYSTEM") Text("Глобально: ${if (saved.defaultDnsPolicy == "PROFILE") "DNS профиля" else "DNS устройства"}", color = editorWarning, fontSize = 12.sp)
+                                if (dnsPolicy == "SYSTEM") Text("Глобально: ${when (saved.defaultDnsPolicy) { "PROFILE" -> "DNS профиля"; "UNDERLAY" -> "DNS сети (мимо VPN)"; else -> "через VPN" }}", color = editorWarning, fontSize = 12.sp)
                                 preview?.userChanges?.takeIf { it.isNotEmpty() }?.let { changes ->
                                     Text(app.lernet.engine.compile.ConfigNotes.HEADER, color = editorWarning, fontSize = 12.sp)
                                     changes.forEach { Text("• $it", color = editorMuted, fontSize = 12.sp) }

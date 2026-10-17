@@ -645,7 +645,7 @@ object PolicyConfigAssembler {
                     notes += "Локальный DNS профиля заменён DNS через туннель для защищённых веток."
                     return@forEach
                 }
-                if (protected && type !in setOf("udp", "tcp", "tls", "https", "quic", "h3")) {
+                if (protected && type !in setOf("udp", "tcp", "tls", "https", "quic", "h3", "group")) {
                     throw AssemblyProblem(
                         "DNS: этот тип сервера не подтверждает защищённый удалённый путь. " +
                             "Используйте UDP, TCP, TLS или HTTPS сервер для защищённой ветки."
@@ -678,7 +678,11 @@ object PolicyConfigAssembler {
                         put("type", JsonPrimitive("tcp"))
                         notes += "Выход передаёт только TCP: DNS по умолчанию отправляется через него по TCP."
                     }
-                    if (protected && type !in setOf("local", "dhcp", "fakeip")) {
+                    if (type == "group") {
+                        // A group only names its members; they carry their own detour.
+                        remove("detour")
+                        remove("domain_resolver")
+                    } else if (protected && type !in setOf("local", "dhcp", "fakeip")) {
                         put("detour", JsonPrimitive(tag))
                         put("domain_resolver", JsonPrimitive(BOOTSTRAP_DNS_TAG))
                     } else if (detour != null && resolution.folder) {
@@ -740,10 +744,12 @@ object PolicyConfigAssembler {
         }
 
         private fun preparedDns(profile: TransferProfile): JsonObject =
-            DnsBlock.prepare(
-                profile.dnsJson.takeIf { DnsPolicy.fromStorage(profile.dnsPolicy) == DnsPolicy.PROFILE },
-                "proxy", DnsPolicy.PROFILE, defaults.directDnsServer,
-            ).dns
+            DnsPolicy.fromStorage(profile.dnsPolicy).let { policy ->
+                DnsBlock.prepare(
+                    profile.dnsJson.takeIf { policy == DnsPolicy.PROFILE },
+                    "proxy", if (policy == DnsPolicy.TUNNEL) DnsPolicy.TUNNEL else DnsPolicy.PROFILE, defaults.directDnsServer,
+                ).dns
+            }
 
         private fun dnsGroupMembers(source: JsonObject): List<String> {
             if (source["type"]?.jsonPrimitive?.contentOrNull != "group") return emptyList()

@@ -298,7 +298,7 @@
     <string name="cfg_disguise">Маскировка</string>
     <string name="cfg_disguise_why">SNI и Reality — как узел представляется сети. Ключ Reality целиком не показывается.</string>
     <string name="cfg_dns">DNS</string>
-    <string name="cfg_dns_why">Куда уходят запросы имён. Системный underlay сейчас доходит; DNS через туннель на xhttp зависал.</string>
+    <string name="cfg_dns_why">Куда уходят запросы имён сайтов. По умолчанию — через VPN, чтобы сеть их не видела.</string>
     <string name="cfg_routes">Маршруты</string>
     <string name="cfg_routes_why">Куда пойдёт трафик после DNS. Дерево правится на отдельном экране.</string>
     <string name="cfg_routes_open">Открыть маршруты</string>
@@ -316,12 +316,13 @@
     <string name="cfg_dns_address">Адрес</string>
     <string name="cfg_effective">Как уйдёт: %1$s</string>
     <string name="cfg_overridden">переопределено системой</string>
-    <string name="cfg_keep_system">DNS исходной сети</string>
+    <string name="cfg_dns_tunnel">DNS через VPN (по умолчанию)</string>
+    <string name="cfg_keep_system">DNS исходной сети — сеть видит имена сайтов</string>
     <string name="cfg_use_profile">DNS из профиля</string>
-    <string name="cfg_dns_warning_title">DNS через туннель зависал</string>
-    <string name="cfg_dns_warning_body">На xhttp tcp :53 (телефон 68e8) и DoH :443 (телефон 0ce9) дозванивались и не давали dns query ok. Подтверждение запишет DNS профиля в следующий запуск и само не вернёт системный. Если DNS снова молчит, сессия упадёт как сбой DNS.</string>
+    <string name="cfg_dns_warning_title">DNS из профиля</string>
+    <string name="cfg_dns_warning_body">Будут использованы серверы и правила DNS, записанные в профиле, как есть. Если они идут мимо туннеля, сеть видит имена сайтов. Если DNS профиля не отвечает, сайты перестанут открываться — тогда верни «DNS через VPN».</string>
     <string name="cfg_dns_warning_confirm">Всё равно DNS профиля</string>
-    <string name="cfg_reason_dns_dropped">Сборщик выбросил проксированный DNS. На xhttp он не завершался. %1$s</string>
+    <string name="cfg_reason_dns_dropped">В режиме «DNS исходной сети» DNS профиля через туннель не используется. %1$s</string>
     <string name="cfg_reason_detour">Сборщик снял detour на пустой direct: в lx.8 это смертельно. %1$s</string>
     <string name="cfg_reason_xmux">Своего xmux не было, система поставила общий пул. %1$s</string>
     <string name="cfg_reason_log">Подключение поднимает warn и error до info, чтобы в журнале были строки DNS.</string>

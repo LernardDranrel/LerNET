@@ -707,7 +707,7 @@ class DesktopController(
             dnsJson = profile.dnsJson,
             dnsPolicy = runCatching {
                 DnsPolicy.valueOf(if (profile.dnsPolicy == "SYSTEM") saved.defaultDnsPolicy else profile.dnsPolicy)
-            }.getOrDefault(DnsPolicy.UNDERLAY),
+            }.getOrDefault(DnsPolicy.DEFAULT),
             ruleSetDirectory = ruleSetDir.toString(),
             defaults = EngineDefaults(saved.tunMtu, saved.xmuxConcurrency, saved.directDnsServer, strictRoute = saved.strictRoute),
             platform = EnginePlatform.WINDOWS,

@@ -294,6 +294,11 @@ private fun DnsCard(
 @Composable
 private fun PolicyChoice(policy: DnsPolicy, onIntent: (ConfigEditorIntent) -> Unit) {
     RadioLine(
+        selected = policy == DnsPolicy.TUNNEL,
+        label = stringResource(R.string.cfg_dns_tunnel),
+        onClick = { onIntent(ConfigEditorIntent.TunnelDns) },
+    )
+    RadioLine(
         selected = policy == DnsPolicy.UNDERLAY,
         label = stringResource(R.string.cfg_keep_system),
         onClick = { onIntent(ConfigEditorIntent.KeepSystemDns) },

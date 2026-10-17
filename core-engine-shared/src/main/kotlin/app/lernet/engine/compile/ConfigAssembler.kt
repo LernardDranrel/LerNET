@@ -56,7 +56,7 @@ object ConfigAssembler {
         mode: RunMode,
         logLevel: String,
         dnsJson: String? = null,
-        dnsPolicy: DnsPolicy = DnsPolicy.UNDERLAY,
+        dnsPolicy: DnsPolicy = DnsPolicy.DEFAULT,
         ruleSetDirectory: String = "",
         defaults: EngineDefaults = EngineDefaults(),
         platform: EnginePlatform = EnginePlatform.ANDROID,

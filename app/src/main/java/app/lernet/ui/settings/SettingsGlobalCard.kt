@@ -59,7 +59,7 @@ private fun DnsDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) -
         SettingHelp(stringResource(R.string.settings_dns_explained))
         Text(stringResource(R.string.settings_dns_default), style = MaterialTheme.typography.labelLarge)
         Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(DnsPolicy.UNDERLAY to R.string.cfg_keep_system, DnsPolicy.PROFILE to R.string.cfg_use_profile).forEach { (policy, label) ->
+            listOf(DnsPolicy.TUNNEL to R.string.cfg_dns_tunnel, DnsPolicy.UNDERLAY to R.string.cfg_keep_system, DnsPolicy.PROFILE to R.string.cfg_use_profile).forEach { (policy, label) ->
                 val selected = state.settings.defaultDnsPolicy == policy
                 val scheme = MaterialTheme.colorScheme
                 Surface(

@@ -47,7 +47,7 @@ object OutboundProbe {
         ))
         val policy = runCatching {
             DnsPolicy.valueOf(if (profile.dnsPolicy == "SYSTEM") saved.defaultDnsPolicy else profile.dnsPolicy)
-        }.getOrDefault(DnsPolicy.UNDERLAY)
+        }.getOrDefault(DnsPolicy.DEFAULT)
         val assembled = ConfigAssembler.assemble(
             outbound = outbound,
             compiledRoute = compiled,
