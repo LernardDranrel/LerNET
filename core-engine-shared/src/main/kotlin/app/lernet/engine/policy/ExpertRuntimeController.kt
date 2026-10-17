@@ -71,6 +71,8 @@ class ExpertRuntimeController(
     private val exitReasons = mutableMapOf<ExpertExitKey, String>()
     private val folderSelections = mutableMapOf<FolderKey, String>()
     private val recoveringFolders = mutableSetOf<FolderKey>()
+    /** When «самый быстрый» last left a healthy exit for a faster one (at most once per 10 min). */
+    private val fastSwitchAt = mutableMapOf<FolderKey, Long>()
     private val nativeExits = linkedMapOf<ExpertExitKey, ExpertExitState>()
     private var compiledDraft: PolicyProgram? = PolicyProgramCompiler.compile(session.draft, inventory, platform)
     private var compiledPolicy: NetworkPolicy? = session.draft
@@ -634,8 +636,13 @@ class ExpertRuntimeController(
             val members = (activeInventory ?: inventory).folderMembers[folderId].orEmpty()
             val decision = FolderExitSelection.select(
                 policy, members, samples.filterKeys { it.channelPath == channelPath && it.folderId == folderId }.values.toList(), clockMs(),
-                folderSelections[key], key in recoveringFolders,
+                folderSelections[key], key in recoveringFolders, fastSwitchAt[key],
             )
+            if (decision is FolderExitDecision.Selected && key !in recoveringFolders &&
+                folderSelections[key]?.let { it != decision.profileId } == true
+            ) {
+                fastSwitchAt[key] = clockMs()
+            }
             Triple(key, policy, decision)
         }
         val selected = when (val decision = snapshot.third) {
@@ -648,7 +655,7 @@ class ExpertRuntimeController(
                     val refreshed = FolderExitSelection.select(
                         snapshot.second, members,
                         samples.filterKeys { it.channelPath == channelPath && it.folderId == folderId }.values.toList(), clockMs(),
-                        folderSelections[snapshot.first], false,
+                        folderSelections[snapshot.first], false, fastSwitchAt[snapshot.first],
                     )
                     (refreshed as? FolderExitDecision.Selected)?.profileId
                 }

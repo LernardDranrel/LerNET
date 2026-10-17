@@ -46,6 +46,10 @@ import app.lernet.engine.policy.TunnelProbeSchedule
 import app.lernet.engine.policy.LinkDecision
 import app.lernet.engine.policy.LinkFailure
 import app.lernet.engine.policy.LinkJudge
+import app.lernet.engine.policy.BackupHealth
+import app.lernet.engine.policy.BackupReach
+import app.lernet.engine.policy.BackupRotation
+import app.lernet.engine.policy.ReachRoute
 import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -160,6 +164,11 @@ class DesktopController(
     @Volatile private var monitorOpen = true
     /** When the physical network last changed; a fresh network gets a few seconds to settle. */
     @Volatile private var networkChangedAt = 0L
+    private val backupRotation = BackupRotation()
+    /** What background checks learned about folder backups; valid for the current network only. */
+    private val backupHealth = ConcurrentHashMap<String, BackupHealth>()
+    @Volatile private var nextBackupAt = 0L
+    private val backupChecking = AtomicBoolean(false)
     private val monitorThread = thread(name = "lernet-windows-diagnostics", isDaemon = true) {
         var lastStatus = TunnelStatus.STOPPED
         // Checks only with a reason (start, network change, unanswered traffic); no fixed beat.
@@ -202,11 +211,20 @@ class DesktopController(
                             networkChangedAt = now
                             // A new network may revive configs that failed on the old one.
                             synchronized(failedInGroup) { failedInGroup.clear() }
+                            backupHealth.clear()
+                            backupRotation.reset()
                             failedRecheck.reset()
                             schedule.onNetworkChanged(now)
                             synchronized(blockingDetector) { blockingDetector.reset() }
                             mutable.update { it.copy(healthMessage = "Сеть изменилась · проверяем VPN", healthVerified = null) }
                         }
+                    }
+                }
+                if (nextBackupAt == 0L) nextBackupAt = now + BackupRotation.nextDelayMs()
+                if (now >= nextBackupAt) {
+                    nextBackupAt = now + BackupRotation.nextDelayMs()
+                    if (backupChecking.compareAndSet(false, true)) {
+                        probePool.submit { try { checkOneBackup() } finally { backupChecking.set(false) } }
                     }
                 }
                 if (schedule.takeDue(now) != null) {
@@ -328,25 +346,65 @@ class DesktopController(
     fun probe(profileIds: Collection<String>) {
         val saved = state.value.saved
         val profiles = saved.profiles.filter { it.id in profileIds }
-        profiles.forEach { profile ->
+        if (profiles.isEmpty()) return
+        val tickets = profiles.associate { profile ->
             val ticket = probeSequence.incrementAndGet()
             probeTickets[profile.id] = ticket
             mutable.update { it.copy(probes = it.probes + (profile.id to ProbeResult(
-                message = "Проверяем ${EndpointProbe.protocol(profile)}", checking = true,
+                message = "Ждёт очереди", checking = true,
                 tunnelMessage = "Ожидает проверки", serverProtocol = EndpointProbe.protocol(profile),
             ))) }
-            probePool.submit {
-                val tcp = EndpointProbe.check(profile)
-                if (probeTickets[profile.id] != ticket) return@submit
-                mutable.update { it.copy(probes = it.probes + (profile.id to tcp.copy(
-                    checking = true, tunnelMessage = "Проверяем канал через узел…",
+            profile.id to ticket
+        }
+        // One by one with a random pause, not a burst of parallel handshakes to every server.
+        // With the VPN on, TCP servers are reached through it, so this network sees nothing new.
+        probePool.submit {
+            profiles.forEachIndexed { index, profile ->
+                val ticket = tickets.getValue(profile.id)
+                if (probeTickets[profile.id] != ticket) return@forEachIndexed
+                if (index > 0) runCatching { Thread.sleep(BackupRotation.buttonGapMs()) }
+                val running = tunnel.state.value.status == TunnelStatus.RUNNING
+                val active = running && profile.id == state.value.saved.selectedProfileId
+                val access = (AppTraffic.route as? AppTraffic.Route.Through)?.access?.takeIf { running }
+                mutable.update { it.copy(probes = it.probes + (profile.id to ProbeResult(
+                    message = "Проверяем ${EndpointProbe.protocol(profile)}", checking = true,
+                    tunnelMessage = "Ожидает проверки", serverProtocol = EndpointProbe.protocol(profile),
                 ))) }
-                val outbound = checkOutbound(profile, saved)
-                if (probeTickets[profile.id] != ticket) return@submit
-                mutable.update { it.copy(probes = it.probes + (profile.id to tcp.copy(
-                    tunnelLatencyMs = outbound.latencyMs,
-                    tunnelMessage = outbound.message,
-                ))) }
+                if (active) {
+                    // The running config is already connected: report the live tunnel check, open nothing new.
+                    val ui = state.value
+                    if (probeTickets[profile.id] != ticket) return@forEachIndexed
+                    mutable.update { it.copy(probes = it.probes + (profile.id to ProbeResult(
+                        latencyMs = ui.tunnelLatencyMs, message = "Подключён сейчас",
+                        tunnelLatencyMs = ui.tunnelLatencyMs, tunnelMessage = ui.healthMessage.ifBlank { "Работает" },
+                        serverProtocol = EndpointProbe.protocol(profile),
+                    ))) }
+                    return@forEachIndexed
+                }
+                when (BackupReach.route(access != null, EndpointProbe.isTcp(profile), userAsked = true)) {
+                    ReachRoute.TUNNEL -> {
+                        val result = EndpointProbe.checkThroughTunnel(profile, access!!)
+                        if (probeTickets[profile.id] != ticket) return@forEachIndexed
+                        // A full-path check would start a second core that dials the server from this
+                        // network; with the VPN on we do not do that. It happens on switching.
+                        mutable.update { it.copy(probes = it.probes + (profile.id to result.copy(
+                            tunnelMessage = "Полный путь проверим при переключении",
+                        ))) }
+                    }
+                    else -> {
+                        val tcp = EndpointProbe.check(profile)
+                        if (probeTickets[profile.id] != ticket) return@forEachIndexed
+                        mutable.update { it.copy(probes = it.probes + (profile.id to tcp.copy(
+                            checking = true, tunnelMessage = "Проверяем канал через узел…",
+                        ))) }
+                        val outbound = checkOutbound(profile, saved)
+                        if (probeTickets[profile.id] != ticket) return@forEachIndexed
+                        mutable.update { it.copy(probes = it.probes + (profile.id to tcp.copy(
+                            tunnelLatencyMs = outbound.latencyMs,
+                            tunnelMessage = outbound.message,
+                        ))) }
+                    }
+                }
             }
         }
     }
@@ -937,14 +995,35 @@ class DesktopController(
         }
     }
 
+    /**
+     * One folder backup per random 45 s – 5 min, also on mobile data. Through the running tunnel,
+     * so this network does not see connections to backup servers; UDP servers are skipped here.
+     */
+    private fun checkOneBackup() {
+        if (tunnel.state.value.status != TunnelStatus.RUNNING) return
+        val saved = state.value.saved
+        val current = saved.profiles.firstOrNull { it.id == saved.selectedProfileId } ?: return
+        if (saved.groups.none { it.id == current.groupId && it.autoSwap }) return
+        val members = saved.profiles.filter { it.groupId == current.groupId }.map { it.id }
+        val id = backupRotation.next(members, current.id) ?: return
+        val profile = saved.profiles.firstOrNull { it.id == id } ?: return
+        val access = (AppTraffic.route as? AppTraffic.Route.Through)?.access
+        if (BackupReach.route(access != null, EndpointProbe.isTcp(profile), userAsked = false) != ReachRoute.TUNNEL) return
+        val result = EndpointProbe.checkThroughTunnel(profile, access!!, timeoutMs = 8_000)
+        backupHealth[id] = BackupHealth(result.latencyMs != null, result.latencyMs, System.currentTimeMillis(), throughTunnel = true)
+    }
+
     private fun tryFailover(failedProfileId: String): Boolean {
         val saved = state.value.saved
         val failed = saved.profiles.firstOrNull { it.id == failedProfileId } ?: return false
         val group = saved.groups.firstOrNull { it.id == failed.groupId && it.autoSwap } ?: return false
         if (failedRecheck.consumeIfDue(System.currentTimeMillis())) synchronized(failedInGroup) { failedInGroup.clear() }
         synchronized(failedInGroup) { failedInGroup += failedProfileId }
-        val candidates = saved.profiles.filter { it.groupId == group.id && it.id != failedProfileId &&
+        val unordered = saved.profiles.filter { it.groupId == group.id && it.id != failedProfileId &&
             synchronized(failedInGroup) { it.id !in failedInGroup } }
+        // Backups verified by the background checks go first: the switch takes seconds.
+        val order = BackupHealth.order(unordered.map { it.id }, backupHealth, System.currentTimeMillis())
+        val candidates = order.mapNotNull { id -> unordered.firstOrNull { it.id == id } }
         if (candidates.isEmpty()) {
             val wait = failedRecheck.arm(System.currentTimeMillis())
             mutable.update { it.copy(message = "В папке «${group.name}» нет доступной замены · перепроверка через ${RecheckJitter.label(wait)}") }
@@ -952,7 +1031,9 @@ class DesktopController(
         }
         // Keep current ingress while searching. An offline/failed folder probe
         // must never remove capture routes and silently return to Direct.
-        for (candidate in candidates) {
+        for ((index, candidate) in candidates.withIndex()) {
+            // Sequential with a random pause, the same rule as on Android: no burst of handshakes.
+            if (index > 0) runCatching { Thread.sleep(ThreadLocalRandom.current().nextLong(200L, 601L)) }
             val tcp = EndpointProbe.check(candidate)
             val outbound = checkOutbound(candidate, saved)
             val probe = tcp.copy(tunnelLatencyMs = outbound.latencyMs, tunnelMessage = outbound.message)

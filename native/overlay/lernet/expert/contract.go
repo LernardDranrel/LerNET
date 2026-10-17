@@ -96,6 +96,13 @@ func (m Manifest) Validate() error {
 		if f.Selection != "preferred" && f.Selection != "fastest" {
 			return errors.New("invalid_folder_selection")
 		}
+		if f.Strategy != "" && f.Strategy != "fast" && f.Strategy != "stable" {
+			return errors.New("invalid_folder_strategy")
+		}
+		if f.MinGainMs < 0 || f.MinGainMs > 10000 || f.MinGainPercent < 0 || f.MinGainPercent > 100 ||
+			f.SwitchMinIntervalMs < 0 || f.SwitchMinIntervalMs > int64((24*time.Hour)/time.Millisecond) {
+			return errors.New("invalid_folder_limits")
+		}
 		if f.ProbeTimeoutMs < 1000 || f.ProbeTimeoutMs > 45000 || f.FirstFlowTimeoutMs < 1000 || f.FirstFlowTimeoutMs > 45000 || f.HealthTTLms < 1000 || f.HealthTTLms > 300000 || f.CooldownMs < 0 || f.CooldownMs > 300000 || f.MaxPendingFlows < 1 || f.MaxPendingFlows > 1000 {
 			return errors.New("invalid_folder_limits")
 		}
@@ -138,6 +145,12 @@ type FolderOptions struct {
 	ProbeMinIntervalMs         int64    `json:"probe_min_interval_ms,omitempty"`
 	ProbeMaxIntervalMs         int64    `json:"probe_max_interval_ms,omitempty"`
 	FailedChecksBeforeRecovery int      `json:"failed_checks_before_recovery,omitempty"`
+	// Optional; older apps omit them and get the plain selection.
+	Strategy            string `json:"strategy,omitempty"`
+	MinGainMs           int64  `json:"min_gain_ms,omitempty"`
+	MinGainPercent      int64  `json:"min_gain_percent,omitempty"`
+	SwitchMinIntervalMs int64  `json:"switch_min_interval_ms,omitempty"`
+	BackupChecks        bool   `json:"backup_checks,omitempty"`
 }
 
 func Encode(v any) string {

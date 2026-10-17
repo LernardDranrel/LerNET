@@ -990,6 +990,19 @@ object PolicyConfigAssembler {
                             folder.preferredTag?.let { put("preferred_tag", it) }
                             put("auto_swap", folder.policy.autoSwap)
                             put("selection", if (folder.policy.selection == FolderSelection.LOWEST_LATENCY) "fastest" else "preferred")
+                            // Extra keys: an older core ignores them and keeps the plain selection above.
+                            when (folder.policy.selection) {
+                                FolderSelection.LOWEST_LATENCY -> {
+                                    put("strategy", "fast")
+                                    put("min_gain_ms", FastSwitchRule.MIN_GAIN_MS)
+                                    put("min_gain_percent", FastSwitchRule.MIN_GAIN_PERCENT)
+                                    put("switch_min_interval_ms", FastSwitchRule.MIN_INTERVAL_MS)
+                                }
+                                FolderSelection.STABLE -> put("strategy", "stable")
+                                FolderSelection.PREFERRED -> Unit
+                            }
+                            // Backups are checked always (also on mobile data), one at a time, never waking a cold exit.
+                            put("backup_checks", folder.candidateTags.size > 1)
                             put("probe_timeout_ms", probeSchedule.candidateTimeoutMs.coerceAtMost(folder.lifecycle.firstFlowTimeoutMs))
                             put("active_probe_timeout_ms", probeSchedule.activeTimeoutMs)
                             put("probe_min_interval_ms", probeSchedule.minimumIntervalMs)

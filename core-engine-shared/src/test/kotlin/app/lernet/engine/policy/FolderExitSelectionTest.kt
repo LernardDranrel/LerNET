@@ -29,7 +29,15 @@ class FolderExitSelectionTest {
         assertEquals(FolderExitDecision.Selected("de"), FolderExitSelection.select(policy, members, samples, 1))
         val fastest = policy.copy(selection = FolderSelection.LOWEST_LATENCY)
         assertEquals(FolderExitDecision.Selected("nl"), FolderExitSelection.select(fastest, members, samples, 1))
-        assertEquals(FolderExitDecision.Selected("de"), FolderExitSelection.select(fastest, members, samples, 1, "de"))
+        // «Самый быстрый» leaves a healthy exit only for a clear gain (80 ms, 80 % here), at most once per 10 min.
+        assertEquals(FolderExitDecision.Selected("nl"), FolderExitSelection.select(fastest, members, samples, 1, "de"))
+        assertEquals(FolderExitDecision.Selected("de"), FolderExitSelection.select(fastest, members, samples, 1, "de", lastSwitchAtMs = 0))
+        val close = listOf(ExitHealthSample("de", 0, 100), ExitHealthSample("nl", 0, 70))
+        assertEquals(FolderExitDecision.Selected("de"), FolderExitSelection.select(fastest, members, close, 1, "de"))
+        // Other strategies never leave a healthy exit for speed.
+        assertEquals(FolderExitDecision.Selected("de"), FolderExitSelection.select(policy, members, samples, 1, "de"))
+        assertEquals(FolderExitDecision.Selected("de"),
+            FolderExitSelection.select(policy.copy(selection = FolderSelection.STABLE), members, samples, 1, "de"))
         val failed = samples.map { if (it.profileId == "de") it.copy(httpsLatencyMs = null, failedUntilMs = 100) else it }
         assertEquals(FolderExitDecision.Selected("nl"), FolderExitSelection.select(policy, members, failed, 1, "de", true))
     }

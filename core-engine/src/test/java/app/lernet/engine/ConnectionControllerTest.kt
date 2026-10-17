@@ -486,6 +486,41 @@ class ConnectionControllerTest {
     }
 
     @Test
+    fun failoverTriesTheBackupVerifiedInBackgroundFirst() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine()
+        val first = sampleProfile()
+        fun backup(n: Int) = first.copy(id = "p$n", name = "резерв $n", selectedOutboundId = "out-$n",
+            outbounds = first.outbounds.map { it.copy(id = "out-$n", singBoxJson = it.singBoxJson.replace("example.com", "b$n.example.com")) })
+        val checked = mutableListOf<String>()
+        val controller = controller(this, engine, hardStopTimeoutMs = 2_500,
+            backupProbe = { endpoint, _, userAsked ->
+                assertThat(userAsked).isFalse()
+                checked += endpoint.host
+                app.lernet.engine.net.BackupProbeResult(ok = endpoint.host.startsWith("b3"), latencyMs = 50, throughTunnel = true)
+            })
+        var selected: String? = null
+        controller.setFailoverHandlers(
+            resolve = { id -> when (id) {
+                "out-2" -> backup(2) to catchAllNodes().map { it.copy(profileId = "p2") }
+                "out-3" -> backup(3) to catchAllNodes().map { it.copy(profileId = "p3") }
+                else -> null
+            } },
+            onSelected = { selected = it },
+        )
+        controller.updateSettings(ReconnectSettings(maxAttempts = 5), failoverEnabled = true,
+            group = ManualFailoverGroup("g", "Резерв", listOf("out-1", "out-2", "out-3")))
+        controller.connect(first, catchAllNodes(), RunMode.FULL_VPN)
+        runCurrent()
+        testScheduler.advanceTimeBy(2_100)
+        runCurrent()
+        // One at a time, in rotation, never the active config.
+        assertThat(checked).containsExactly("b2.example.com", "b3.example.com").inOrder()
+        controller.onEngineSignal(ConnectionCause.TunnelHealthFailed("HTTP 504"))
+        runCurrent()
+        assertThat(selected).isEqualTo("p3")
+    }
+
+    @Test
     fun noNetworkHoldsTheConfigAndSaysSo() = runTest(dispatcher) {
         val engine = RecordingBoxEngine()
         var online = true
@@ -1170,6 +1205,7 @@ class ConnectionControllerTest {
         tunnelHealthProbe: (suspend () -> Result<Long>)? = null,
         underlayAvailable: () -> Boolean = { true },
         persist: suspend (SimpleSessionConfig?) -> Unit = {},
+        backupProbe: app.lernet.engine.net.BackupProbe? = null,
     ): ConnectionController {
         val controller = ConnectionController(
             engine = engine,
@@ -1185,6 +1221,8 @@ class ConnectionControllerTest {
             pathDispatcher = dispatcher,
             underlayAvailable = underlayAvailable,
             persistSessionIntent = persist,
+            backupProbe = backupProbe,
+            backupDelayMs = { 1_000L },
         )
         controller.updateSettings(reconnect, failoverEnabled = false, group = null)
         return controller

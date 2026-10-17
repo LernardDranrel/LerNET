@@ -332,6 +332,12 @@ class PolicyConfigAssemblerTest {
         assertEquals(2, folder.candidateTags.size)
         val manifest = (root(config.exitManifestJson).getValue("folders") as JsonArray).single().jsonObject
         assertEquals("fastest", manifest.getValue("selection").jsonPrimitive.content)
+        // The core learns the «самый быстрый» thresholds and that backups are checked always.
+        assertEquals("fast", manifest.getValue("strategy").jsonPrimitive.content)
+        assertEquals("40", manifest.getValue("min_gain_ms").jsonPrimitive.content)
+        assertEquals("25", manifest.getValue("min_gain_percent").jsonPrimitive.content)
+        assertEquals("600000", manifest.getValue("switch_min_interval_ms").jsonPrimitive.content)
+        assertEquals("true", manifest.getValue("backup_checks").jsonPrimitive.content)
         assertEquals("true", manifest.getValue("auto_swap").jsonPrimitive.content)
         assertTrue(rules(config).any { it["outbound"]?.jsonPrimitive?.content == folder.tag })
     }

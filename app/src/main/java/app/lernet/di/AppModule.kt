@@ -90,6 +90,7 @@ object AppModule {
         persistSessionIntent = { config -> kotlinx.coroutines.withContext(Dispatchers.IO) {
             sessionStore.write(config)
         } },
+        backupProbe = app.lernet.engine.net.TunnelFirstBackupProbe(dialer),
     ).also { controller ->
         scope.launch {
             app.lernet.vpn.DefaultNetworkMonitor.changes.collect {
