@@ -1,5 +1,10 @@
 package app.lernet.ui.network
 
+import app.lernet.config.net.AppTraffic
+import java.util.concurrent.TimeUnit
+import okhttp3.OkHttpClient
+import okhttp3.Request
+
 import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
@@ -35,13 +40,14 @@ data class NetworkObservationUiState(
 class NetworkObservationViewModel @JvmOverloads constructor(
     application: Application,
     private val collectSnapshot: () -> NetworkSnapshot = { AndroidNetworkCollector(ConnectivityNetworkReader(application)).collect() },
-    private val openIpConnection: () -> HttpURLConnection = { URL("https://api.ipify.org").openConnection() as HttpURLConnection },
+    private val openIpConnection: () -> HttpURLConnection = { URL(IP_URL).openConnection() as HttpURLConnection },
 ) : AndroidViewModel(application) {
     private val mutable = MutableStateFlow(NetworkObservationUiState())
     val state = mutable.asStateFlow()
     private var refreshJob: Job? = null
     private val ipLock = Any()
-    private var ipConnection: HttpURLConnection? = null
+    /** Cancels the running IP request: disconnect or OkHttp cancel. */
+    private var ipCancel: (() -> Unit)? = null
     private var exportJob: Job? = null
     private var ipJob: Job? = null
     @Volatile private var ipGeneration = 0L
@@ -75,12 +81,15 @@ class NetworkObservationViewModel @JvmOverloads constructor(
         ipJob = viewModelScope.launch {
             try {
                 val ip = withContext(Dispatchers.IO) {
+                    // VPN on: only through LerNET's internal listener to the VPN server, never directly.
+                    if (AppTraffic.routed) return@withContext readRoutedIp(generation)
                     val connection = openIpConnection()
+                    val cancel = { connection.disconnect() }
                     try {
                         currentCoroutineContext().ensureActive()
                         synchronized(ipLock) {
                             if (generation != ipGeneration) throw kotlinx.coroutines.CancellationException("Снимок обновлён")
-                            ipConnection = connection
+                            ipCancel = cancel
                         }
                         connection.connectTimeout = 30_000
                         connection.readTimeout = 30_000
@@ -91,7 +100,7 @@ class NetworkObservationViewModel @JvmOverloads constructor(
                         connection.inputStream.use(::readExternalIp)
                     } finally {
                         connection.disconnect()
-                        synchronized(ipLock) { if (ipConnection === connection) ipConnection = null }
+                        synchronized(ipLock) { if (ipCancel === cancel) ipCancel = null }
                     }
                 }
                 val country = withContext(Dispatchers.IO) { runCatching { geoIp.country(ip) }.getOrNull() }
@@ -120,14 +129,43 @@ class NetworkObservationViewModel @JvmOverloads constructor(
     private fun invalidateIpCheck() {
         val connection = synchronized(ipLock) {
             ipGeneration++
-            ipConnection.also { ipConnection = null }
+            ipCancel.also { ipCancel = null }
         }
         ipJob?.cancel()
-        connection?.disconnect()
+        connection?.invoke()
         mutable.value = mutable.value.copy(checkingIp = false, externalIp = null, externalIpAt = null, countryCode = null, ipError = null)
     }
 
     override fun onCleared() { invalidateIpCheck(); super.onCleared() }
+
+    private suspend fun readRoutedIp(generation: Long): String {
+        val request = Request.Builder().url(IP_URL).header("Cache-Control", "no-cache").build()
+        val call = AppTraffic.client(ipClient).newCall(request)
+        val cancel = { call.cancel() }
+        try {
+            currentCoroutineContext().ensureActive()
+            synchronized(ipLock) {
+                if (generation != ipGeneration) throw kotlinx.coroutines.CancellationException("Снимок обновлён")
+                ipCancel = cancel
+            }
+            return call.execute().use { response ->
+                require(response.code == 200) { "HTTP ${response.code}" }
+                val body = response.body ?: error("Пустой ответ")
+                body.byteStream().use(::readExternalIp)
+            }
+        } finally {
+            call.cancel()
+            synchronized(ipLock) { if (ipCancel === cancel) ipCancel = null }
+        }
+    }
+
+    private companion object {
+        const val IP_URL = "https://api.ipify.org"
+        val ipClient: OkHttpClient by lazy {
+            OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
+                .followRedirects(false).followSslRedirects(false).build()
+        }
+    }
 }
 
 /** Bounded response parsing; never resolves a host name or uses Android APIs. */

@@ -23,7 +23,8 @@ class OkHttpTextFetcher(
     override fun fetch(url: String): RemoteTextFetcher.Result {
         val request = Request.Builder().url(url).get().build()
         return try {
-            client.newCall(request).execute().use { response ->
+            // While the connection is on, subscriptions are fetched only through the VPN.
+            AppTraffic.client(client).newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     RemoteTextFetcher.Result.Err("HTTP ${response.code}")
                 } else {

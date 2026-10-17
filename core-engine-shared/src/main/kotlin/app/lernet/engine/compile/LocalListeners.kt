@@ -12,12 +12,15 @@ import kotlinx.serialization.json.jsonPrimitive
 /** Reads back the login/password of LerNET's own loopback listeners from a generated config. */
 object LocalListeners {
     const val USER_PROXY_TAG = "mixed-in"
+    const val APP_PROXY_TAG = "app-in"
 
     private val json = Json { ignoreUnknownKeys = true }
 
     @Volatile private var cache: Pair<String, Map<String, LocalProxyAccess>>? = null
 
     fun userProxy(config: String?): LocalProxyAccess? = read(config)[USER_PROXY_TAG]
+
+    fun appProxy(config: String?): LocalProxyAccess? = read(config)[APP_PROXY_TAG]
 
     internal fun read(config: String?): Map<String, LocalProxyAccess> {
         if (config.isNullOrBlank()) return emptyMap()

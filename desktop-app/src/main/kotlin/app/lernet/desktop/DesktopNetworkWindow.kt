@@ -109,8 +109,8 @@ internal fun DesktopNetworkWindow(onClose: () -> Unit, useLerNetProxy: () -> Loc
                         probing = true
                         ipJob = scope.launch {
                             probeResult = "Запрашиваем внешний адрес у api.ipify.org…"
-                            val proxy = useLerNetProxy()
                             try {
+                                val proxy = useLerNetProxy()
                                 val result = runInterruptible(Dispatchers.IO) { ObservationExternalIp.read(proxy, onConnection = { ipConnection.attach(it, request) }, onCall = { ipConnection.attach(it, request) }) }
                                 if (ipConnection.isCurrent(request)) probeResult = result
                             }
@@ -157,7 +157,7 @@ internal object ObservationExternalIp {
         val country = runCatching { countryLookup(ip) }.getOrNull()
         val time = SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(Date())
         return "Внешний ${if (':' in ip) "IPv6" else "IPv4"}: $ip${country?.let { " · страна выхода $it (локальная база)" }.orEmpty()}\n" +
-            "api.ipify.org · $time · ${if (access != null) "через работающий прокси LerNET" else "по текущим маршрутам Windows"}. " +
+            "api.ipify.org · $time · ${if (access != null) "через VPN LerNET" else "напрямую, по текущим маршрутам Windows"}. " +
             "Это адрес выхода для этого запроса. Провайдер и домашний IP за VPN отсюда не определяются."
     }
 

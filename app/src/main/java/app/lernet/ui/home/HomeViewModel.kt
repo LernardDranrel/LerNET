@@ -444,7 +444,7 @@ class HomeViewModel @Inject constructor(
                             }
                             val snapshot = controller.snapshot.value
                             val tunnel = if (snapshot.state == ConnectionState.CONNECTED && snapshot.activeProfileId == id) {
-                                AndroidTunnelProbe.measure()
+                                AndroidTunnelProbe.measure(LocalListeners.appProxy(snapshot.compiledJson))
                             } else {
                                 null
                             }

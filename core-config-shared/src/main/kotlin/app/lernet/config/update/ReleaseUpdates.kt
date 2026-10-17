@@ -1,6 +1,7 @@
 package app.lernet.config.update
 
 import kotlinx.serialization.json.*
+import app.lernet.config.net.AppTraffic
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.InputStream
@@ -58,7 +59,7 @@ object ReleaseUpdates {
     fun latest(): ClientRelease {
         val request = Request.Builder().url(API).header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2026-03-10").header("User-Agent", "LerNET-update-check").build()
-        return http.newCall(request).execute().use { response ->
+        return AppTraffic.client(http).newCall(request).execute().use { response ->
             check(response.isSuccessful) { when (response.code) {
                 403, 429 -> "GitHub ограничил частоту проверок. Попробуйте позже."
                 else -> "GitHub ответил HTTP ${response.code}. Попробуйте позже."

@@ -397,8 +397,13 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
     if (networkWindowOpen) DesktopNetworkWindow(
         readDiagnosticLog = { controller.tunnel.state.value.logs },
         onClose = { networkWindowOpen = false },
+        // Same route as LerNET's other requests: through VPN when it is on, refused while it recovers.
         useLerNetProxy = {
-            controller.state.value.localProxy?.takeIf { controller.tunnel.state.value.status == TunnelStatus.RUNNING }
+            when (val route = app.lernet.config.net.AppTraffic.route) {
+                is app.lernet.config.net.AppTraffic.Route.Through -> route.access
+                app.lernet.config.net.AppTraffic.Route.Closed -> throw app.lernet.config.net.AppTraffic.ClosedException()
+                app.lernet.config.net.AppTraffic.Route.Direct -> null
+            }
         },
         readClientContext = {
             val saved = controller.state.value.saved

@@ -1,5 +1,7 @@
 package app.lernet.engine.net
 
+import app.lernet.config.net.AppTraffic
+
 import app.lernet.engine.redact.LerNetLog
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -116,6 +118,8 @@ internal object DnsTxt {
 
     fun query(name: String, protect: (DatagramSocket) -> Boolean): String? {
         if (System.currentTimeMillis() < retryAfterMs) return null
+        // A plain UDP query cannot use the VPN; while it is on, skip it (the local base still answers).
+        if (AppTraffic.routed) return null
         val socket = DatagramSocket()
         try {
             if (!protect(socket)) return null

@@ -230,8 +230,8 @@ internal fun DesktopNetworkObservation(
         }
     }
     }
-    if (confirmProbe) AlertDialog(onDismissRequest = { confirmProbe = false }, title = { Text("Проверить внешний IP?") },
-        text = { Text("Будет выполнен отдельный HTTPS-запрос к api.ipify.org через текущие настройки сети. Этот сервис увидит адрес выхода. Список программ, адаптеров и отчёт ему не отправляются. Проверка не обходит VPN.") },
+    if (confirmProbe) AlertDialog(onDismissRequest = { confirmProbe = false }, title = { Text(SecurityTexts.IP_CHECK_TITLE) },
+        text = { Text(SecurityTexts.IP_CHECK_BODY) },
         confirmButton = { Button({ confirmProbe = false; onProbe() }) { Text("Проверить") } },
         dismissButton = { TextButton({ confirmProbe = false }) { Text("Отмена") } })
     if (confirmTrace) AlertDialog(onDismissRequest = { confirmTrace = false }, title = { Text("Разобрать сбой") },

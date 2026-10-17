@@ -1,5 +1,7 @@
 package app.lernet.desktop
 
+import app.lernet.config.net.AppTraffic
+
 import app.lernet.config.update.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -40,7 +42,7 @@ internal object DesktopUpdates {
         try {
             val client = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(45, TimeUnit.SECONDS).callTimeout(10, TimeUnit.MINUTES).build()
-            client.newCall(Request.Builder().url(asset.url).build()).execute().use { response ->
+            AppTraffic.client(client).newCall(Request.Builder().url(asset.url).build()).execute().use { response ->
                 check(response.isSuccessful) { "Не удалось скачать установщик: HTTP ${response.code}" }
                 response.body!!.byteStream().use { input -> Files.newOutputStream(target).use { output ->
                     copyVerified(input, output, asset.size, digest, progress)

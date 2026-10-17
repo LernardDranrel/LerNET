@@ -69,6 +69,45 @@ class SecurityConfigTest {
         }
     }
 
+    @Test
+    fun noLocalListenerWithoutPasswordInAnyModeOrPlatform() {
+        val app = LocalProxyAccess.random(ConfigAssembler.APP_PROXY_PORT)
+        for (platform in EnginePlatform.entries) for (mode in RunMode.entries) {
+            val config = ConfigAssembler.assemble(outbound(), catchAllProxy(), mode, "warn", platform = platform, appProxy = app)
+            assertThat(config.errors).isEmpty()
+            inbounds(config).filter { it["type"]!!.jsonPrimitive.content != "tun" }.forEach { inbound ->
+                assertThat(inbound["listen"]!!.jsonPrimitive.content).isEqualTo("127.0.0.1")
+                val users = inbound["users"]?.jsonArray
+                assertThat(users).isNotNull()
+                assertThat(users!!).isNotEmpty()
+                users.forEach { user ->
+                    assertThat(user.jsonObject["password"]!!.jsonPrimitive.content).isNotEmpty()
+                }
+            }
+        }
+    }
+
+    @Test
+    fun appOwnTrafficGoesToVpnServerBeforeAnyUserRule() {
+        val app = LocalProxyAccess.random(ConfigAssembler.APP_PROXY_PORT)
+        for (platform in EnginePlatform.entries) for (mode in RunMode.entries) {
+            val config = ConfigAssembler.assemble(outbound(), catchAllProxy(), mode, "warn", platform = platform, appProxy = app)
+            val first = rules(config).first()
+            assertThat(first["inbound"]!!.jsonArray.single().jsonPrimitive.content).isEqualTo(LocalListeners.APP_PROXY_TAG)
+            assertThat(first["outbound"]!!.jsonPrimitive.content).isEqualTo("proxy")
+            assertThat(first.keys).containsExactly("inbound", "outbound")
+            assertThat(config.appProxy).isEqualTo(app)
+            assertThat(LocalListeners.appProxy(config.json)).isEqualTo(app)
+        }
+    }
+
+    @Test
+    fun withoutAppProxyThereIsNoInternalListenerAndNoOldOpenProbe() {
+        val config = assemble(RunMode.FULL_VPN, EnginePlatform.ANDROID)
+        assertThat(inbounds(config).map { it["tag"]!!.jsonPrimitive.content }).containsNoneOf("app-in", "probe-in")
+        assertThat(config.json).doesNotContain("probe-in")
+    }
+
     private fun tun(platform: EnginePlatform, defaults: EngineDefaults): JsonObject =
         inbounds(assemble(RunMode.FULL_VPN, platform, defaults)).first { it["type"]!!.jsonPrimitive.content == "tun" }
 

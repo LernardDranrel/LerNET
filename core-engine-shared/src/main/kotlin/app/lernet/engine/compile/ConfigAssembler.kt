@@ -29,6 +29,8 @@ data class AssembledConfig(
     val notes: List<String> = emptyList(),
     /** Proxy mode: the only login/password the 127.0.0.1:2080 listener accepts. */
     val userProxy: LocalProxyAccess? = null,
+    /** LerNET's own requests: the only login/password the internal app-in listener accepts. */
+    val appProxy: LocalProxyAccess? = null,
 ) {
     val isValid: Boolean get() = errors.isEmpty()
 }
@@ -39,8 +41,8 @@ object ConfigAssembler {
     const val TUN_ADDRESS = "172.19.0.1/30"
     const val WINDOWS_TUN_INTERFACE = "LerNET"
     const val TUN_STACK = "gvisor"
-    const val ANDROID_PROBE_PORT = 2081
-    const val ANDROID_PROBE_HOST = "cp.cloudflare.com"
+    /** Internal listener for LerNET's own requests (updates, subscriptions, checks). Never without a password. */
+    const val APP_PROXY_PORT = 2081
     const val ANDROID_PROBE_URL = "https://cp.cloudflare.com/generate_204"
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -57,6 +59,11 @@ object ConfigAssembler {
         platform: EnginePlatform = EnginePlatform.ANDROID,
         /** Proxy mode only. Null asks for a fresh random login and password. */
         userProxy: LocalProxyAccess? = null,
+        /**
+         * LerNET's own requests while the connection is on. They always go to the VPN server,
+         * whatever the user's rules say. Null: no internal listener at all.
+         */
+        appProxy: LocalProxyAccess? = null,
     ): AssembledConfig {
         if (!compiledRoute.isValid) {
             return AssembledConfig(
@@ -94,7 +101,7 @@ object ConfigAssembler {
         val inbound = inboundFor(mode, defaults, platform, proxyAccess)
         val preparedDns = DnsBlock.prepare(dnsJson, outbound.tag, dnsPolicy, defaults.directDnsServer)
         val dns = preparedDns.dns
-        val rules = platformRules(mode, platform, outbound.tag) +
+        val rules = appRules(appProxy, outbound.tag) + platformRules(mode, platform, outbound.tag) +
             RouteCompiler.toSingBoxRules(activeRoute, outbound.tag, pipeTags) +
             finalReject(activeRoute)
         val finalTag = when (activeRoute.finalAction) {
@@ -111,7 +118,7 @@ object ConfigAssembler {
             put("dns", dns)
             put("inbounds", buildJsonArray {
                 add(inbound)
-                if (platform == EnginePlatform.ANDROID) add(androidProbeInbound())
+                if (appProxy != null) add(localListener(LocalListeners.APP_PROXY_TAG, appProxy))
             })
             put("outbounds", outboundArray(tagged, clones.map { it.outbound }))
             put("route", routeBlock(rules, finalTag, dns, ruleSets.entries))
@@ -133,6 +140,7 @@ object ConfigAssembler {
             errors = graphProblems,
             notes = notes,
             userProxy = proxyAccess,
+            appProxy = appProxy,
         )
     }
 
@@ -172,19 +180,6 @@ object ConfigAssembler {
 
     private fun platformRules(mode: RunMode, platform: EnginePlatform, proxyTag: String): List<JsonObject> =
         buildList {
-            if (platform == EnginePlatform.ANDROID) {
-                // Permit only this health endpoint to bypass user rules via the loopback probe listener.
-                add(buildJsonObject {
-                    put("inbound", buildJsonArray { add(JsonPrimitive("probe-in")) })
-                    put("domain", buildJsonArray { add(JsonPrimitive(ANDROID_PROBE_HOST)) })
-                    put("port", buildJsonArray { add(JsonPrimitive(443)) })
-                    put("outbound", proxyTag)
-                })
-                add(buildJsonObject {
-                    put("inbound", buildJsonArray { add(JsonPrimitive("probe-in")) })
-                    put("action", "reject")
-                })
-            }
             // Canonical: sniff without inbound so TCP rematches after timeout.
             // Hijack port 53 then protocol=dns (sing-box#3878). Never mixed.
             add(
@@ -215,12 +210,12 @@ object ConfigAssembler {
             }
         }
 
-    private fun androidProbeInbound(): JsonObject = buildJsonObject {
-        put("type", "mixed")
-        put("tag", "probe-in")
-        put("listen", "127.0.0.1")
-        put("listen_port", ANDROID_PROBE_PORT)
-    }
+    /** First rule: everything LerNET itself sends goes to the VPN server, before sniffing or user rules. */
+    private fun appRules(appProxy: LocalProxyAccess?, proxyTag: String): List<JsonObject> =
+        if (appProxy == null) emptyList() else listOf(buildJsonObject {
+            put("inbound", buildJsonArray { add(JsonPrimitive(LocalListeners.APP_PROXY_TAG)) })
+            put("outbound", proxyTag)
+        })
 
     private fun finalReject(compiledRoute: CompiledRoute): List<JsonObject> =
         if (compiledRoute.finalAction == RouteAction.BLOCK) {

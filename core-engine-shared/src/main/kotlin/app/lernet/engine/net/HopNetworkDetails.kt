@@ -1,7 +1,10 @@
 package app.lernet.engine.net
 
-import java.net.HttpURLConnection
-import java.net.URL
+import app.lernet.config.net.AppTraffic
+import java.util.concurrent.TimeUnit
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okio.Buffer
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -78,23 +81,32 @@ class RipeStatHopDetails(
     }
 }
 
+private val ripeClient: OkHttpClient by lazy {
+    OkHttpClient.Builder()
+        .connectTimeout(2, TimeUnit.SECONDS)
+        .readTimeout(2, TimeUnit.SECONDS)
+        .callTimeout(5, TimeUnit.SECONDS)
+        .followRedirects(false)
+        .build()
+}
+
+/** Public RIPEstat lookup; while the connection is on it goes only through the VPN. */
 private fun ripeGet(endpoint: String, resource: String): String? {
     if (!resource.matches(Regex("[A-Za-z0-9:.]+"))) return null
-    var connection: HttpURLConnection? = null
     return try {
-        val open = URL("https://stat.ripe.net/data/$endpoint/data.json?resource=$resource")
-            .openConnection() as HttpURLConnection
-        connection = open
-        open.connectTimeout = 2_000
-        open.readTimeout = 2_000
-        open.setRequestProperty("Accept", "application/json")
-        if (open.responseCode != HttpURLConnection.HTTP_OK) return null
-        open.inputStream.bufferedReader().use { reader ->
-            reader.readText().takeIf { it.length <= 65_536 }
+        val request = Request.Builder()
+            .url("https://stat.ripe.net/data/$endpoint/data.json?resource=$resource")
+            .header("Accept", "application/json")
+            .build()
+        AppTraffic.client(ripeClient).newCall(request).execute().use { response ->
+            if (response.code != 200) return null
+            val source = response.body?.source() ?: return null
+            val buffer = Buffer()
+            if (source.read(buffer, 65_537L) > 65_536L) return null
+            while (buffer.size <= 65_536L && source.read(buffer, 65_537L - buffer.size) != -1L) Unit
+            buffer.takeIf { it.size <= 65_536L }?.readUtf8()
         }
     } catch (error: java.io.IOException) {
         null
-    } finally {
-        connection?.disconnect()
     }
 }

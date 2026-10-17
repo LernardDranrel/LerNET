@@ -1,5 +1,6 @@
 package app.lernet.desktop
 
+import app.lernet.config.net.AppTraffic
 import app.lernet.config.net.LocalProxyAccess
 
 import app.lernet.desktop.protection.SimpleGuardStatus
@@ -228,9 +229,26 @@ class DesktopController(
                 mutable.update { it.copy(healthMessage = "", healthFailures = 0, healthVerified = null, tunnelLatencyMs = null) }
             }
             lastStatus = status
+            updateAppTraffic()
             try { Thread.sleep(1_200) } catch (_: InterruptedException) { break }
         }
     }
+    /** Login/password of the internal listener for LerNET's own requests in the running launch. */
+    @Volatile private var activeAppProxy: LocalProxyAccess? = null
+
+    /**
+     * LerNET's own requests: through the running connection, refused while it is wanted but not
+     * running (starting, recovering, waiting for a retry), direct only when it is off.
+     */
+    private fun updateAppTraffic() {
+        val access = activeAppProxy
+        AppTraffic.set(when {
+            access != null && tunnel.state.value.status == TunnelStatus.RUNNING -> AppTraffic.Route.Through(access)
+            desiredConnection -> AppTraffic.Route.Closed
+            else -> AppTraffic.Route.Direct
+        })
+    }
+
     private val importer = ImportCoordinator(OkHttpTextFetcher())
     private val connectBusy = AtomicBoolean(false)
     private val switchBusy = AtomicBoolean(false)
@@ -623,7 +641,7 @@ class DesktopController(
 
     private fun previewSaved(source: StoredState, profileId: String?, draftProfile: StoredProfile? = null,
                              draftRules: List<StoredRule>? = null, draftOwnerId: String? = null,
-                             userProxy: LocalProxyAccess? = null): AssembledConfig {
+                             userProxy: LocalProxyAccess? = null, appProxy: LocalProxyAccess? = null): AssembledConfig {
         val saved = if (draftRules != null && draftOwnerId != null) source.copy(
             rules = source.rules.filterNot { it.profileId == draftOwnerId } + draftRules
         ) else source
@@ -676,6 +694,7 @@ class DesktopController(
             defaults = EngineDefaults(saved.tunMtu, saved.xmuxConcurrency, saved.directDnsServer, strictRoute = saved.strictRoute),
             platform = EnginePlatform.WINDOWS,
             userProxy = userProxy,
+            appProxy = appProxy,
         )
         return if (assembled.isValid) assembled.copy(json = coreApi.inject(assembled.json)) else assembled
     }
@@ -726,6 +745,7 @@ class DesktopController(
             desiredConnection = true
             connectGeneration.incrementAndGet()
         }
+        updateAppTraffic()
         val savedAtStart = state.value.saved
         val profileAtStart = savedAtStart.profiles.firstOrNull { it.id == savedAtStart.selectedProfileId }
         mutable.update { it.copy(busy = true, message = "Подготовка Windows-ядра", connectionError = null) }
@@ -734,7 +754,8 @@ class DesktopController(
             try {
                 // A fresh random login/password for every connection unless the user saved their own.
                 val assembled = previewSaved(savedAtStart, profileAtStart?.id,
-                    userProxy = LocalProxyAccess.forUserProxy(savedAtStart.proxyUsername, savedAtStart.proxyPassword))
+                    userProxy = LocalProxyAccess.forUserProxy(savedAtStart.proxyUsername, savedAtStart.proxyPassword),
+                    appProxy = LocalProxyAccess.random(freeLoopbackPort()))
                 if (!assembled.isValid) {
                     routeErrorOwner = profileAtStart?.groupId?.let { "grp_$it" } ?: profileAtStart?.id
                 }
@@ -763,6 +784,8 @@ class DesktopController(
                             releaseGuard()
                         }
                         mutable.update { it.copy(localProxy = assembled.userProxy.takeIf { runMode == RunMode.PROXY }) }
+                        activeAppProxy = assembled.appProxy
+                        updateAppTraffic()
                         tunnel.start(launch)
                     }
                 }
@@ -855,6 +878,8 @@ class DesktopController(
             tunnel.stop()
             // Stop means normal connectivity right away, with nothing left blocked.
             releaseGuard()
+            activeAppProxy = null
+            updateAppTraffic()
         }
         mutable.update { it.copy(message = "Отключено") }
     }
@@ -969,3 +994,7 @@ class DesktopController(
         probePool.shutdownNow()
     }
 }
+
+/** A free loopback port for the internal listener; sing-box binds it right after. */
+internal fun freeLoopbackPort(): Int =
+    java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress()).use { it.localPort }

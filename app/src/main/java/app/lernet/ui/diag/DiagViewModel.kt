@@ -1,5 +1,7 @@
 package app.lernet.ui.diag
 
+import app.lernet.config.net.AppTraffic
+
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -184,9 +186,12 @@ class DiagViewModel @Inject constructor(
                     port = parsed.second,
                     timeoutMs = 3_000,
                     nowMs = { System.currentTimeMillis() },
+                    // VPN on: through LerNET's internal listener, so the check itself does not bypass VPN.
                     connect = { host, port, timeout ->
-                        Socket().use { socket ->
-                            socket.connect(InetSocketAddress(host, port), timeout)
+                        AppTraffic.tcpConnect(host, port, timeout) { directHost, directPort, directTimeout ->
+                            Socket().use { socket ->
+                                socket.connect(InetSocketAddress(directHost, directPort), directTimeout)
+                            }
                         }
                     },
                 )

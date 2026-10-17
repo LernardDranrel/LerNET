@@ -1,33 +1,40 @@
 package app.lernet.ui.home
 
+import app.lernet.config.net.LocalProxyAccess
+import app.lernet.config.net.LocalProxyHttp
 import app.lernet.engine.compile.ConfigAssembler
-import java.net.HttpURLConnection
-import java.net.InetSocketAddress
-import java.net.Proxy
-import java.net.URL
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 
-/** Measure one HTTPS request through the running profile without calling the unstable libbox URLTest JNI. */
+/**
+ * Measure one HTTPS request through the running profile without calling the unstable libbox URLTest JNI.
+ * It goes through LerNET's internal password-protected listener of the running connection.
+ */
 internal object AndroidTunnelProbe {
-    private const val TIMEOUT_MS = 5_000
+    private const val TIMEOUT_MS = 5_000L
 
-    suspend fun measure(): Result<Long> = withContext(Dispatchers.IO) {
+    suspend fun measure(access: LocalProxyAccess?): Result<Long> = withContext(Dispatchers.IO) {
         runCatching {
-            val proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", ConfigAssembler.ANDROID_PROBE_PORT))
-            val connection = URL(ConfigAssembler.ANDROID_PROBE_URL).openConnection(proxy) as HttpURLConnection
+            checkNotNull(access) { "Нет данных внутреннего прокси" }
+            val client = LocalProxyHttp.via(OkHttpClient.Builder(), access)
+                .connectTimeout(TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .readTimeout(TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .callTimeout(TIMEOUT_MS * 2, TimeUnit.MILLISECONDS)
+                .followRedirects(false).followSslRedirects(false)
+                .retryOnConnectionFailure(false)
+                .build()
             try {
-                connection.connectTimeout = TIMEOUT_MS
-                connection.readTimeout = TIMEOUT_MS
-                connection.instanceFollowRedirects = false
-                connection.useCaches = false
                 val startedAt = System.nanoTime()
-                check(connection.responseCode == HttpURLConnection.HTTP_NO_CONTENT) {
-                    "HTTPS probe returned ${connection.responseCode}"
+                client.newCall(Request.Builder().url(ConfigAssembler.ANDROID_PROBE_URL).build()).execute().use { response ->
+                    check(response.code == 204) { "HTTPS probe returned ${response.code}" }
                 }
                 ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(1L)
             } finally {
-                connection.disconnect()
+                client.connectionPool.evictAll()
+                client.dispatcher.executorService.shutdown()
             }
         }
     }

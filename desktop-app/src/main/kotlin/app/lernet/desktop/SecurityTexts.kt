@@ -28,4 +28,9 @@ internal object SecurityTexts {
     const val PROXY_PASSWORD = "Пароль"
     const val COPY = "Копировать"
     const val SAVE = "Сохранить"
+
+    const val IP_CHECK_TITLE = "Проверить внешний IP?"
+    const val IP_CHECK_BODY =
+        "LerNET спросит у сервиса api.ipify.org, с какого адреса пришёл запрос. Если VPN включён, запрос идёт через VPN, " +
+            "и сервис увидит адрес VPN. Если VPN выключен — ваш обычный адрес. Список программ, адаптеров и отчёт не передаются."
 }

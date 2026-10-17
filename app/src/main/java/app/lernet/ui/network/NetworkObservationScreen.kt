@@ -1,5 +1,9 @@
 package app.lernet.ui.network
 
+import app.lernet.R
+
+import androidx.compose.ui.res.stringResource
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -241,8 +245,8 @@ internal fun NetworkObservationScreen(
             }
         }
     }
-    if (confirmIp) AlertDialog(onDismissRequest = { confirmIp = false }, title = { Text("Проверить внешний IP?") },
-        text = { Text("LerNET отправит HTTPS-запрос к api.ipify.org. Сервис увидит IP этого запроса; локальный снимок и настройки не передаются. Используется текущий путь Android — без обхода VPN. Это проверка одного адреса, а не гарантия защиты всего трафика.") },
+    if (confirmIp) AlertDialog(onDismissRequest = { confirmIp = false }, title = { Text(stringResource(R.string.network_ip_dialog_title)) },
+        text = { Text(stringResource(R.string.network_ip_dialog_body)) },
         confirmButton = { TextButton(onClick = { confirmIp = false; onCheckIp() }) { Text("Проверить") } },
         dismissButton = { TextButton(onClick = { confirmIp = false }) { Text("Отмена") } })
 }

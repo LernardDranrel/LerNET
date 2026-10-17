@@ -1,5 +1,8 @@
 package app.lernet.engine
 
+import app.lernet.config.net.AppTraffic
+import app.lernet.engine.policy.AppTrafficRoute
+
 import app.lernet.config.model.DnsPolicy
 import app.lernet.config.model.Profile
 import app.lernet.config.repo.RuleNodeRecord
@@ -276,6 +279,8 @@ class ConnectionController(
                 ruleSetDirectory = ruleSetDirectory,
                 defaults = defaults,
                 userProxy = userProxy,
+                // New random login/password for LerNET's own requests on every connection.
+                appProxy = LocalProxyAccess.random(ConfigAssembler.APP_PROXY_PORT),
             )
         } catch (error: Throwable) {
             CrashTrail.recordFailure("ConfigAssembler.assemble", error)
@@ -527,6 +532,8 @@ class ConnectionController(
             pipeSilentCount = shownPipeSilent,
             pipeTunnelCount = shownPipeTunnel,
         )
+        // LerNET's own requests follow the connection: through VPN, refused, or direct when off.
+        AppTraffic.set(AppTrafficRoute.of(next.snapshot.state, next.snapshot.compiledJson))
         commands.forEach { execute(it) }
     }
 

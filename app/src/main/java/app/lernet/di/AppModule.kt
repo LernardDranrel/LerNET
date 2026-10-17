@@ -81,7 +81,10 @@ object AppModule {
         engine,
         scope,
         outboundDialer = dialer,
-        tunnelHealthProbe = AndroidTunnelProbe::measure,
+        // Runs only while connected, when LerNET's own requests go through the internal listener.
+        tunnelHealthProbe = {
+            AndroidTunnelProbe.measure((app.lernet.config.net.AppTraffic.route as? app.lernet.config.net.AppTraffic.Route.Through)?.access)
+        },
         ruleSetDirectory = GeoRuleSetStore.install(context),
         underlayAvailable = { app.lernet.vpn.DefaultNetworkMonitor.underlyingNetwork() != null },
         persistSessionIntent = { config -> kotlinx.coroutines.withContext(Dispatchers.IO) {
