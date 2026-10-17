@@ -87,8 +87,10 @@ object VlessParser {
         query["flow"]?.takeIf { it.isNotBlank() }?.let { put("flow", it) }
         val encryption = query["encryption"].orEmpty()
         if (encryption.isNotBlank() && encryption != "none") {
-            put("packet_encoding", encryption)
+            // VLESS encryption (ML-KEM) belongs to `encryption`; `packet_encoding` is the UDP framing (xudp/packetaddr).
+            put("encryption", encryption)
         }
+        query["packetencoding"]?.takeIf { it.isNotBlank() }?.let { put("packet_encoding", it) }
         putTls(this, host, query)
         putTransport(this, query)
     }
@@ -110,11 +112,11 @@ object VlessParser {
                     JsonArray(alpn.split(",").map { JsonPrimitive(it.trim()) }.filter { it.content.isNotBlank() }),
                 )
             }
-            query["fp"]?.takeIf { it.isNotBlank() }?.let { fp ->
-                putJsonObject("utls") {
-                    put("enabled", true)
-                    put("fingerprint", fp)
-                }
+            // Without `fp` the link would leave the Go TLS fingerprint (and Reality would not start at all):
+            // use a browser fingerprint like Xray does.
+            putJsonObject("utls") {
+                put("enabled", true)
+                put("fingerprint", query["fp"]?.trim()?.lowercase()?.takeIf { it.isNotBlank() } ?: DEFAULT_FINGERPRINT)
             }
             if (security == "reality") {
                 putJsonObject("reality") {
@@ -165,4 +167,7 @@ object VlessParser {
             put("host", JsonArray(listOf(JsonPrimitive(hostHeader))))
         }
     }
+
+    /** Fingerprint used when a link carries no `fp`. */
+    const val DEFAULT_FINGERPRINT = "chrome"
 }
