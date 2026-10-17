@@ -204,6 +204,12 @@ private fun HomeBody(
                 onDismiss = { onIntent(HomeIntent.DismissLockdownHint) },
             )
         }
+        if (state.showNotificationHint) {
+            NotificationHintCard(
+                onOpenSettings = { openNotificationSettings(context) },
+                onDismiss = { onIntent(HomeIntent.DismissNotificationHint) },
+            )
+        }
         if (snapshot.state == ConnectionState.CONNECTED && isTunnelSilence(snapshot.channel)) {
             PipeSilentBanner(snapshot)
         }
@@ -597,6 +603,27 @@ private fun LockdownHintCard(onOpenSettings: () -> Unit, onDismiss: () -> Unit) 
             }
         }
     }
+}
+
+@Composable
+private fun NotificationHintCard(onOpenSettings: () -> Unit, onDismiss: () -> Unit) {
+    PanelCard {
+        Text(stringResource(R.string.notification_hint_body), style = MaterialTheme.typography.bodyMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap)) {
+            TextButton(onClick = onOpenSettings, modifier = Modifier.lernetButton()) {
+                Text(stringResource(R.string.notification_hint_open))
+            }
+            TextButton(onClick = onDismiss, modifier = Modifier.lernetButton()) {
+                Text(stringResource(R.string.dismiss))
+            }
+        }
+    }
+}
+
+private fun openNotificationSettings(context: android.content.Context) {
+    val intent = android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+        .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+    runCatching { context.startActivity(intent) }
 }
 
 private fun openVpnSettings(context: android.content.Context) {

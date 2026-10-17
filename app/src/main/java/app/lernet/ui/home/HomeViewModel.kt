@@ -71,6 +71,8 @@ data class HomeUiState(
     val offerLastLogs: Boolean = false,
     val probes: Map<String, ProfileProbe> = emptyMap(),
     val showLockdownHint: Boolean = false,
+    /** Notifications are off: the user would not see that VPN stopped or asks for attention. */
+    val showNotificationHint: Boolean = false,
     /** Proxy mode: address, login and password the user needs in other apps. */
     val proxyAccess: LocalProxyAccess? = null,
 ) {
@@ -135,11 +137,16 @@ sealed class HomeIntent {
 
     data object DismissLockdownHint : HomeIntent()
 
+    data object DismissNotificationHint : HomeIntent()
+
     data object SimulatePipeSilent : HomeIntent()
 }
 
 sealed class HomeEvent {
     data object RequestVpnPermission : HomeEvent()
+
+    /** Android 13+: offer the notification permission once, before the first connection. */
+    data object RequestNotificationPermission : HomeEvent()
 
     data class ProfileDeleted(val name: String) : HomeEvent()
 }
@@ -154,6 +161,11 @@ private data class HomeOverlay(
     val probes: Map<String, ProfileProbe> = emptyMap(),
     /** Null until the running VPN service has been asked. */
     val lockdown: AndroidVpnLockdown? = null,
+    /** Null until checked; false when Android does not show LerNET notifications. */
+    val notificationsEnabled: Boolean? = null,
+    /** Connection waiting for the answer to the notification question. */
+    val connectAfterNotificationAsk: Boolean = false,
+    val profileAwaitingNotifications: String? = null,
 )
 
 private data class DeletedSnapshot(
@@ -244,7 +256,7 @@ class HomeViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .collectLatest { (connectionState, profileId) ->
                     if (connectionState == ConnectionState.CONNECTED) {
-                        overlay.update { it.copy(lockdown = AndroidVpnLockdown.read()) }
+                        overlay.update { it.copy(lockdown = AndroidVpnLockdown.read(), notificationsEnabled = NotificationHint.enabled(appContext)) }
                     }
                     if (connectionState == ConnectionState.CONNECTED && profileId != null) {
                         probeProfiles(listOf(profileId))
@@ -295,6 +307,7 @@ class HomeViewModel @Inject constructor(
             offerLastLogs = extra.offerLastLogs,
             probes = extra.probes,
             showLockdownHint = LockdownHint.visible(snapshot, settings.lockdownHintDismissed, extra.lockdown),
+            showNotificationHint = NotificationHint.visible(snapshot, settings.notificationHintDismissed, extra.notificationsEnabled),
             proxyAccess = LocalListeners.userProxy(snapshot.compiledJson),
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
@@ -424,6 +437,7 @@ class HomeViewModel @Inject constructor(
                 }
                 HomeIntent.SimulatePipeSilent -> controller.simulatePipeSilent()
                 HomeIntent.DismissLockdownHint -> settingsStore.dismissLockdownHint()
+                HomeIntent.DismissNotificationHint -> settingsStore.dismissNotificationHint()
             }
         }
     }
@@ -493,6 +507,19 @@ class HomeViewModel @Inject constructor(
                 next = app.lernet.config.model.GroupLayout.moveProfile(next, profileId, groupId, group.profileIds.size)
             }
             repository.replaceAllMemberships(next)
+        }
+    }
+
+    /** The connection goes ahead whatever the answer; a refusal only shows a soft hint. */
+    fun onNotificationPermissionResult(granted: Boolean) {
+        viewModelScope.launch {
+            val connect = overlay.value.connectAfterNotificationAsk
+            val profileId = overlay.value.profileAwaitingNotifications
+            overlay.update {
+                it.copy(connectAfterNotificationAsk = false, profileAwaitingNotifications = null,
+                    notificationsEnabled = granted && NotificationHint.enabled(appContext))
+            }
+            if (connect) requestConnection(profileId)
         }
     }
 
@@ -594,6 +621,13 @@ class HomeViewModel @Inject constructor(
 
     private suspend fun requestConnection(profileId: String? = null) {
         val request = readConnectionRequest(profileId) ?: return
+        if (NotificationHint.shouldAsk(appContext, request.settings.notificationsAsked)) {
+            // Ask first and connect after the answer, so two system dialogs never overlap.
+            settingsStore.markNotificationsAsked()
+            overlay.update { it.copy(connectAfterNotificationAsk = true, profileAwaitingNotifications = profileId) }
+            events.emit(HomeEvent.RequestNotificationPermission)
+            return
+        }
         CrashTrail.mark("ui connect mode=${request.mode} profile=${request.profile.id}")
         LerNetLog.i(TAG, "ui connect mode=${request.mode} profile=${request.profile.id}")
         if (request.mode == RunMode.FULL_VPN) {

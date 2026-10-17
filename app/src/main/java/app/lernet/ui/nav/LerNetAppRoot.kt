@@ -293,6 +293,9 @@ private fun ObserveVpnPermission(homeViewModel: HomeViewModel) {
     ) { result ->
         homeViewModel.onVpnPermissionResult(result.resultCode == Activity.RESULT_OK)
     }
+    val notificationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted -> homeViewModel.onNotificationPermissionResult(granted) }
     LaunchedEffect(homeViewModel) {
         homeViewModel.events.collect { event ->
             when (event) {
@@ -304,6 +307,13 @@ private fun ObserveVpnPermission(homeViewModel: HomeViewModel) {
                         homeViewModel.onVpnPermissionResult(true)
                     } else {
                         vpnLauncher.launch(prepare)
+                    }
+                }
+                HomeEvent.RequestNotificationPermission -> {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                        notificationLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        homeViewModel.onNotificationPermissionResult(true)
                     }
                 }
                 is HomeEvent.ProfileDeleted -> Unit
@@ -334,7 +344,7 @@ private fun ObserveDeleteUndo(homeViewModel: HomeViewModel, snackbar: SnackbarHo
                         homeViewModel.onIntent(HomeIntent.UndoDelete)
                     }
                 }
-                HomeEvent.RequestVpnPermission -> Unit
+                HomeEvent.RequestVpnPermission, HomeEvent.RequestNotificationPermission -> Unit
             }
         }
     }

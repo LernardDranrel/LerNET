@@ -55,6 +55,10 @@ class SettingsStore(private val context: Context) {
 
     suspend fun dismissLockdownHint() = edit { it[LOCKDOWN_HINT_DISMISSED] = true }
 
+    suspend fun markNotificationsAsked() = edit { it[NOTIFICATIONS_ASKED] = true }
+
+    suspend fun dismissNotificationHint() = edit { it[NOTIFICATION_HINT_DISMISSED] = true }
+
     suspend fun setProxyCredentials(username: String, password: String) = edit {
         if (username.isBlank() || password.isEmpty()) {
             it.remove(PROXY_USERNAME)
@@ -93,6 +97,8 @@ class SettingsStore(private val context: Context) {
             ),
             defaultDnsPolicy = DnsPolicy.fromStorage(this[DEFAULT_DNS_POLICY] ?: DnsPolicy.UNDERLAY.name),
             lockdownHintDismissed = this[LOCKDOWN_HINT_DISMISSED] ?: false,
+            notificationsAsked = this[NOTIFICATIONS_ASKED] ?: false,
+            notificationHintDismissed = this[NOTIFICATION_HINT_DISMISSED] ?: false,
             proxyUsername = this[PROXY_USERNAME].orEmpty(),
             proxyPassword = this[PROXY_PASSWORD].orEmpty(),
         )
@@ -116,6 +122,8 @@ class SettingsStore(private val context: Context) {
         val DIRECT_DNS_SERVER = stringPreferencesKey("direct_dns_server")
         val LOCKDOWN_HINT_DISMISSED = booleanPreferencesKey("lockdown_hint_dismissed")
         val PROXY_USERNAME = stringPreferencesKey("proxy_username")
+        val NOTIFICATIONS_ASKED = booleanPreferencesKey("notifications_asked")
+        val NOTIFICATION_HINT_DISMISSED = booleanPreferencesKey("notification_hint_dismissed")
         val PROXY_PASSWORD = stringPreferencesKey("proxy_password")
     }
 }

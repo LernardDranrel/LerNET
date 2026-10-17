@@ -40,6 +40,8 @@
     <string name="copy_proxy">Адрес прокси</string>
     <string name="proxy_addr">127.0.0.1:2080</string>
     <string name="proxy_login">Логин</string>
+    <string name="notification_hint_body">Уведомления LerNET выключены. Вы не узнаете, если VPN отключится или потребует внимания.</string>
+    <string name="notification_hint_open">Включить</string>
     <string name="always_on_offer_channel">Предложение подключиться</string>
     <string name="always_on_offer_title">VPN не подключён</string>
     <string name="always_on_offer_body">Android запустил LerNET как постоянный VPN, но подключение не включено. Нажмите, чтобы подключиться к последнему профилю.</string>
