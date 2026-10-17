@@ -11,6 +11,7 @@ import app.lernet.engine.compile.DnsBlock
 import app.lernet.engine.compile.DnsDependency
 import app.lernet.engine.compile.EngineDefaults
 import app.lernet.engine.compile.EnginePlatform
+import app.lernet.engine.compile.TlsHandshake
 import app.lernet.engine.compile.XhttpMode
 import app.lernet.routing.ConditionJson
 import app.lernet.routing.GeoRuleSets
@@ -463,7 +464,7 @@ object PolicyConfigAssembler {
                         if ("connect_timeout" !in raw) put("connect_timeout", JsonPrimitive("30s"))
                     }
                 }
-                val normalized = XhttpMode.normalize(JsonObject(rewritten), defaults.xmuxConcurrency)
+                val normalized = XhttpMode.normalize(TlsHandshake.apply(JsonObject(rewritten), defaults), defaults.xmuxConcurrency)
                 normalized.note?.let(notes::add)
                 outbounds[tags.getValue(sourceTag)] = normalized.outbound
                 walking.remove(sourceTag)

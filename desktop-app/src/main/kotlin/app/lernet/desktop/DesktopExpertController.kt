@@ -107,7 +107,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
             val sets = prepareRuleSets()
             PolicyConfigAssembler.assemble(
                 snapshot, program, EnginePlatform.WINDOWS,
-                defaults = EngineDefaults(preferences.tunMtu, preferences.xmuxConcurrency, preferences.directDnsServer),
+                defaults = preferences.engineDefaults(strict = EngineDefaults().strictRoute),
                 ruleSetDirectory = sets.toString(), probeUrl = preferences.healthUrl,
                 underlayInterface = WindowsPhysicalNetwork.select().name
             )

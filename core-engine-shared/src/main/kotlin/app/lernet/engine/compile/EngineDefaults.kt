@@ -7,6 +7,10 @@ data class EngineDefaults(
     val directDnsServer: String = DnsBlock.DIRECT_SERVER,
     /** Windows VPN mode: forbid DNS and IPv6 on other adapters. Android ignores it. */
     val strictRoute: Boolean = true,
+    /** Opt-in: split the first TLS message into several TLS records (core `record_fragment`). */
+    val tlsRecordFragment: Boolean = false,
+    /** Reality key exchange: "" (as the fingerprint), "hybrid" or "classical". */
+    val realityKeyShare: String = "",
 ) {
     companion object {
         fun validIpv4(value: String): Boolean {

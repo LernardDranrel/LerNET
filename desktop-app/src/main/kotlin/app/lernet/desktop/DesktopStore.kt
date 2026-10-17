@@ -104,6 +104,17 @@ data class StoredState(
     /** Own login/password for the local proxy; empty means a new random pair for every connection. */
     val proxyUsername: String = "",
     val proxyPassword: String = "",
+    /** Opt-in: split the first TLS message into TLS records (core `record_fragment`). */
+    val tlsRecordFragment: Boolean = false,
+    /** Reality key exchange: "" (as the fingerprint), "hybrid" or "classical". */
+    val realityKeyShare: String = "",
+)
+
+/** One place that turns stored preferences into assembler defaults (VPN, Expert and probes alike). */
+fun StoredState.engineDefaults(strict: Boolean = strictRoute) = app.lernet.engine.compile.EngineDefaults(
+    tunMtu, xmuxConcurrency, directDnsServer, strictRoute = strict,
+    tlsRecordFragment = tlsRecordFragment,
+    realityKeyShare = app.lernet.engine.compile.RealityKeyShare.fromStorage(realityKeyShare).storage,
 )
 
 class DesktopStore(private val directory: Path = defaultDirectory()) {

@@ -1680,6 +1680,27 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
             }
         }
         Panel {
+            SettingHeading("TLS", "Рукопожатие TLS",
+                "Для сетей, где фильтр режет или теряет первое сообщение защищённого соединения. Действует для узлов VLESS, VMess, Trojan с TLS или Reality. Значения из самого профиля важнее. Вступит в силу при следующем подключении.")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Дробить первое сообщение TLS", Modifier.weight(1f))
+                Switch(saved.tlsRecordFragment, onCheckedChange = {
+                    controller.setTlsHandshake(it, app.lernet.engine.compile.RealityKeyShare.fromStorage(saved.realityKeyShare))
+                })
+            }
+            Text("Разбивает приветствие на несколько записей TLS (record_fragment). Помогает, если соединение рвётся или молчит сразу после начала рукопожатия. Немного замедляет подключение. По умолчанию выключено.",
+                color = muted, fontSize = 12.sp, lineHeight = 18.sp)
+            Text("Обмен ключами Reality", fontWeight = FontWeight.SemiBold)
+            Box(Modifier.fillMaxWidth()) {
+                SegmentedChoice(listOf("" to "Как в отпечатке", "hybrid" to "Гибридный", "classical" to "Короткий"),
+                    app.lernet.engine.compile.RealityKeyShare.fromStorage(saved.realityKeyShare).storage) {
+                    controller.setTlsHandshake(saved.tlsRecordFragment, app.lernet.engine.compile.RealityKeyShare.fromStorage(it))
+                }
+            }
+            Text("«Короткий» убирает большой постквантовый ключ из приветствия — оно меньше и реже теряется. Работает только с серверами Xray старше 26.9.8; с новыми серверами связь не установится.",
+                color = muted, fontSize = 12.sp, lineHeight = 18.sp)
+        }
+        Panel {
             SettingHeading("HTTPS", "Проверка работоспособности",
                 "Через этот адрес проверяется интернет через выбранный профиль: перед подключением и во время работы VPN.")
             OutlinedTextField(healthUrl, { healthUrl = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Адрес проверки") },

@@ -564,4 +564,13 @@
     <string name="group_grip">Перетащить</string>
     <string name="route_windows_only">Только Windows · неактивно на Android</string>
     <string name="route_windows_only_explanation">Эта ветка зависит от условия Windows-процессов и неактивна на Android вместе с дочерними правилами. Исходные условия и состояние включения сохранены для переноса. Для этого устройства можно создать отдельную ветку с Android-приложениями или изменить условия этой ветки.</string>
+    <string name="settings_tls_title">Рукопожатие TLS</string>
+    <string name="settings_tls_help">Для сетей, где фильтр режет или теряет первое сообщение защищённого соединения. Действует для узлов VLESS, VMess, Trojan с TLS или Reality. Значения, записанные в самом профиле, важнее. Вступит в силу при следующем подключении.</string>
+    <string name="settings_tls_fragment">Дробить первое сообщение TLS</string>
+    <string name="settings_tls_fragment_help">Разбивает приветствие на несколько записей TLS (record_fragment). Помогает, если соединение рвётся или молчит сразу после начала рукопожатия. Немного замедляет подключение. По умолчанию выключено.</string>
+    <string name="settings_reality_key_share">Обмен ключами Reality</string>
+    <string name="settings_key_share_auto">Как в отпечатке</string>
+    <string name="settings_key_share_hybrid">Гибридный</string>
+    <string name="settings_key_share_classical">Короткий</string>
+    <string name="settings_key_share_help">«Короткий» убирает большой постквантовый ключ из приветствия — оно меньше и реже теряется. Работает только с серверами Xray старше 26.9.8; с новыми серверами связь не установится.</string>
 </resources>

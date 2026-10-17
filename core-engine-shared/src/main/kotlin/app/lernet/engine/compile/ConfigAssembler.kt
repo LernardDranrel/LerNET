@@ -94,7 +94,10 @@ object ConfigAssembler {
         if (ruleSetError != null) {
             return AssembledConfig("", outbound.tag, listOf(ruleSetError))
         }
-        val taggedRaw = JsonObject(outboundObj.toMutableMap().apply { put("tag", JsonPrimitive(outbound.tag)) })
+        val taggedRaw = TlsHandshake.apply(
+            JsonObject(outboundObj.toMutableMap().apply { put("tag", JsonPrimitive(outbound.tag)) }),
+            defaults,
+        )
         val xhttp = XhttpMode.normalize(taggedRaw, defaults.xmuxConcurrency)
         val tagged = xhttp.outbound
         val pipeNames = activeRoute.rules.map { it.pipeName.trim() }.filter { it.isNotEmpty() }.distinct()

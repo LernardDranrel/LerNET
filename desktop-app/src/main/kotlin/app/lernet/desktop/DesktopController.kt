@@ -570,6 +570,8 @@ class DesktopController(
     }
     fun setCrashGuard(enabled: Boolean) = change { it.copy(crashGuard = enabled) }
     fun setDefaultDnsPolicy(policy: DnsPolicy) = change { it.copy(defaultDnsPolicy = policy.name) }
+    fun setTlsHandshake(recordFragment: Boolean, keyShare: app.lernet.engine.compile.RealityKeyShare) =
+        change { it.copy(tlsRecordFragment = recordFragment, realityKeyShare = keyShare.storage) }
     fun setJournalMaxMb(value: Int) = change { it.copy(journalMaxMb = value.coerceIn(1, 500)) }
     fun setDefaults(mtu: Int, xmux: String, dnsServer: String, logLevel: String) = change {
         it.copy(tunMtu = mtu.coerceIn(1280, 9000), xmuxConcurrency = xmux.trim(),
@@ -709,7 +711,7 @@ class DesktopController(
                 DnsPolicy.valueOf(if (profile.dnsPolicy == "SYSTEM") saved.defaultDnsPolicy else profile.dnsPolicy)
             }.getOrDefault(DnsPolicy.DEFAULT),
             ruleSetDirectory = ruleSetDir.toString(),
-            defaults = EngineDefaults(saved.tunMtu, saved.xmuxConcurrency, saved.directDnsServer, strictRoute = saved.strictRoute),
+            defaults = saved.engineDefaults(),
             platform = EnginePlatform.WINDOWS,
             userProxy = userProxy,
             appProxy = appProxy,
