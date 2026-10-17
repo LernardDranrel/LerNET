@@ -7,9 +7,9 @@
     <string name="home_hop_scroll_hint">Проведите по схеме, чтобы увидеть остальные узлы →</string>
     <string name="settings_defaults_scope">Используются, если профиль не задаёт своё значение. Изменения MTU, XMUX и адреса DNS вступят в силу при следующем подключении.</string>
     <string name="settings_dns_section">DNS · адреса сайтов</string>
-    <string name="settings_dns_explained">DNS переводит имя сайта в IP-адрес. «DNS исходной сети» отправляет запросы напрямую выбранному DNS-серверу; «DNS из профиля» использует серверы и правила профиля.</string>
+    <string name="settings_dns_explained">Куда отправлять запросы имён сайтов.</string>
     <string name="settings_dns_multiple_help">В этом поле поддерживается один IPv4-адрес. Несколько DNS можно задать в JSON профиля вместе с правилами выбора и включить «DNS из профиля». Список адресов через запятую здесь не применяется.</string>
-    <string name="settings_xmux_explained">XMUX позволяет нескольким потокам использовать одно XHTTP-соединение. Два числа — нижняя и верхняя границы лимита одновременных потоков. При 16–16 лимит всегда равен 16.</string>
+    <string name="settings_xmux_explained">Сколько потоков делят одно XHTTP-соединение (нижняя и верхняя граница).</string>
     <string name="settings_xmux_lower">Нижняя граница</string>
     <string name="settings_xmux_upper">Верхняя граница</string>
     <string name="settings_xmux_choose">Выбрать диапазон</string>

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="rule_add_process">Добавить процесс</string>
-    <string name="expert_tunnel_title">Постоянный туннель</string>
+    <string name="expert_tunnel_title">Своя схема</string>
     <string name="expert_start_confirm_title">Включить постоянный туннель?</string>
     <string name="expert_start_confirm_body">Соединения будут следовать сохранённой схеме. Основной путь выбирается в корне схемы.</string>
     <string name="expert_start_environment_limit">Источник: доступные Android сведения о VPN. Анализ не определяет приложение другого VPN и не проверяет все системные фильтры.</string>
@@ -79,11 +79,11 @@
     <string name="expert_direct_switch_body">VPN будет отключён. Трафик пойдёт напрямую; заблокированные в вашей сети сайты могут перестать открываться.</string>
     <string name="expert_keep_vpn_start">Сохранить VPN и включить</string>
     <string name="expert_default_path_summary">Основной путь: %1$s</string>
-    <string name="expert_lamp_off">Лампа погашена: туннель выключен</string>
+    <string name="expert_lamp_off">Выключено</string>
     <string name="expert_lever_apply">ПРИМЕНЕНИЕ</string>
-    <string name="expert_lamp_pending">Жёлтая лампа: операция ещё не завершена</string>
-    <string name="expert_lamp_healthy">Зелёная лампа: туннель работает, текущих сбоев каналов нет</string>
-    <string name="expert_lamp_error">Красная лампа: сбой туннеля или одного из наших каналов</string>
+    <string name="expert_lamp_pending">Проверяем связь…</string>
+    <string name="expert_lamp_healthy">Работает</string>
+    <string name="expert_lamp_error">Ошибка</string>
     <string name="expert_family_available">маршрут есть</string>
     <string name="expert_family_limited">есть отдельные маршруты</string>
     <string name="expert_family_unavailable">пути нет</string>
