@@ -489,7 +489,7 @@ internal fun ExpertLifecycleEditor(
             ExpertLifecycleValues.milliseconds(raw, 86_400_000)?.let { onChange(value.copy(idleTimeoutMs = it)) }
         }, Modifier.fillMaxWidth(), label = { Text("Засыпать после тишины, секунд") }, singleLine = true,
         enabled = value.coldStart, isError = value.coldStart && idleMs == null,
-        supportingText = { Text("1–86400 секунд. Например, 900 секунд — 15 минут. Живые соединения не закрываются ради сна.") }
+        supportingText = { Text("1–86400 секунд. Например, 1800 секунд — 30 минут (по умолчанию). Живые соединения не закрываются ради сна.") }
     )
     OutlinedTextField(
         firstFlow, { raw ->

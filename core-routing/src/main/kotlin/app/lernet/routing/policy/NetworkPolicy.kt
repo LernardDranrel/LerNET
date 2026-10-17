@@ -192,7 +192,8 @@ data class ProfileExitPolicy(
 @Serializable
 data class ExitLifecyclePolicy(
     val coldStart: Boolean = false,
-    val idleTimeoutMs: Long = 15 * 60_000,
+    /** A cold exit sleeps after 30 minutes without user traffic (owner decision). */
+    val idleTimeoutMs: Long = 30 * 60_000,
     val firstFlowTimeoutMs: Long = 30_000,
     val startupTimeoutMs: Long = 45_000,
     val maxPendingFlows: Int = 100,

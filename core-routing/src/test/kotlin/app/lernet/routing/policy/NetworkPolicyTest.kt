@@ -219,4 +219,10 @@ class NetworkPolicyTest {
         assertThrows(IllegalArgumentException::class.java) { map.copy(profiles = emptyMap()).apply(policy) }
         assertThrows(IllegalArgumentException::class.java) { map.copy(nodes = mapOf("a" to "same", "b" to "same")).apply(policy) }
     }
+
+    @Test
+    fun coldExitSleepsAfterThirtyMinutesByDefault() {
+        assertEquals(30 * 60_000L, ExitLifecyclePolicy().idleTimeoutMs)
+        assertEquals(30 * 60_000L, ProfileExitPolicy("p").lifecycle.idleTimeoutMs)
+    }
 }
