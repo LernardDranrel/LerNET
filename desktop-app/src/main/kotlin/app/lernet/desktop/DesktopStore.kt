@@ -95,7 +95,7 @@ data class StoredState(
     val directDnsServer: String = "1.1.1.1",
     val logLevel: String = "info",
     val healthUrl: String = "https://www.gstatic.com/generate_204",
-    val defaultDnsPolicy: String = "UNDERLAY",
+    val defaultDnsPolicy: String = "TUNNEL",
     val journalMaxMb: Int = 100,
     /** VPN mode: Windows keeps traffic closed outside LerNET while the core restarts. */
     val crashGuard: Boolean = true,
@@ -104,6 +104,17 @@ data class StoredState(
     /** Own login/password for the local proxy; empty means a new random pair for every connection. */
     val proxyUsername: String = "",
     val proxyPassword: String = "",
+    /** Opt-in: split the first TLS message into TLS records (core `record_fragment`). */
+    val tlsRecordFragment: Boolean = false,
+    /** Reality key exchange: "" (as the fingerprint), "hybrid" or "classical". */
+    val realityKeyShare: String = "",
+)
+
+/** One place that turns stored preferences into assembler defaults (VPN, Expert and probes alike). */
+fun StoredState.engineDefaults(strict: Boolean = strictRoute) = app.lernet.engine.compile.EngineDefaults(
+    tunMtu, xmuxConcurrency, directDnsServer, strictRoute = strict,
+    tlsRecordFragment = tlsRecordFragment,
+    realityKeyShare = app.lernet.engine.compile.RealityKeyShare.fromStorage(realityKeyShare).storage,
 )
 
 class DesktopStore(private val directory: Path = defaultDirectory()) {

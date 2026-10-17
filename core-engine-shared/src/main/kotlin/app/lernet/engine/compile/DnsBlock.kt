@@ -31,6 +31,12 @@ object DnsBlock {
     const val DIRECT_SERVER = "1.1.1.1"
     const val UNDERLAY_CRUMB_PREFIX = "underlay dns final"
     const val PROFILE_KEPT_PREFIX = "dns profile kept"
+    const val TUNNEL_TAG = "dns-tunnel"
+    const val TUNNEL_TCP_TAG = "dns-tunnel-tcp"
+    const val TUNNEL_DOH_TAG = "dns-tunnel-doh"
+    const val TUNNEL_CRUMB_PREFIX = "tunnel dns final"
+    /** First xhttp/Reality stream can take up to ~15 s to open; the 10 s core default gave up before it. */
+    const val TUNNEL_TIMEOUT = "20s"
     private const val PROFILE_REMOTE_TAG = "remote"
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -45,7 +51,7 @@ object DnsBlock {
     fun prepare(
         dnsJson: String?,
         proxyTag: String,
-        policy: DnsPolicy = DnsPolicy.UNDERLAY,
+        policy: DnsPolicy = DnsPolicy.DEFAULT,
         directServer: String = DIRECT_SERVER,
     ): PreparedDns {
         val base = if (dnsJson.isNullOrBlank()) defaultTyped(directServer) else normalize(dnsJson, directServer)
@@ -53,13 +59,14 @@ object DnsBlock {
         return when (policy) {
             DnsPolicy.UNDERLAY -> stampUnderlayFinal(sealed, proxyTag, directServer)
             DnsPolicy.PROFILE -> keepProfileDns(sealed)
+            DnsPolicy.TUNNEL -> stampTunnelFinal(sealed, proxyTag, directServer)
         }
     }
 
     fun enforceCompiledRemote(
         compiledJson: String,
         proxyTag: String,
-        policy: DnsPolicy = DnsPolicy.UNDERLAY,
+        policy: DnsPolicy = DnsPolicy.DEFAULT,
     ): StampedConfig {
         val root = parseObject(compiledJson)
         val dns = root?.get("dns") as? JsonObject
@@ -197,6 +204,57 @@ object DnsBlock {
         return PreparedDns(dns, notes)
     }
 
+    /**
+     * Site names go through the tunnel: TCP DNS and DoH to [resolver] with detour=[proxyTag], behind one
+     * `group` (stable mode) so a server that blocks one of them still answers by the other. No fallback to the
+     * network resolver — that would leak. The network resolver stays only for the VPN server's own name.
+     */
+    private fun stampTunnelFinal(prepared: PreparedDns, proxyTag: String, resolver: String): PreparedDns {
+        val notes = prepared.notes.toMutableList()
+        val dropped = mutableListOf<String>()
+        val kept = DnsDependency.dnsServers(prepared.dns).filter { server ->
+            val tag = DnsDependency.tagOf(server)
+            if (tag in TUNNEL_TAGS) return@filter false
+            if (isUnderlayServer(server)) true else {
+                dropped += tag ?: server["type"]?.jsonPrimitive?.contentOrNull ?: "?"
+                false
+            }
+        }.toMutableList()
+        if (kept.none { DnsDependency.tagOf(it) == DIRECT_TAG }) kept += typedDirectUdp(DIRECT_TAG, resolver)
+        if (kept.none { DnsDependency.tagOf(it) == LOCAL_TAG }) kept += typedLocal(LOCAL_TAG)
+        if (dropped.isNotEmpty()) notes += "dns replaced profile resolver tag=${dropped.joinToString(",")} with tunnel resolver"
+        kept += tunnelServer("tcp", TUNNEL_TCP_TAG, resolver, proxyTag)
+        kept += tunnelServer("https", TUNNEL_DOH_TAG, resolver, proxyTag)
+        kept += buildJsonObject {
+            put("type", "group")
+            put("tag", TUNNEL_TAG)
+            put("servers", buildJsonArray { add(JsonPrimitive(TUNNEL_TCP_TAG)); add(JsonPrimitive(TUNNEL_DOH_TAG)) })
+            put("mode", "stable")
+        }
+        val keptTags = kept.mapNotNull { DnsDependency.tagOf(it) }.filter { it.isNotBlank() }.toSet()
+        notes += "$TUNNEL_CRUMB_PREFIX tag=$TUNNEL_TAG server=$resolver detour=$proxyTag (tcp+doh)"
+        val dns = JsonObject(
+            prepared.dns.toMutableMap().apply {
+                put("servers", JsonArray(kept))
+                put("final", JsonPrimitive(TUNNEL_TAG))
+                put("timeout", JsonPrimitive(TUNNEL_TIMEOUT))
+                val rules = this["rules"] as? JsonArray
+                if (rules != null) put("rules", retargetDnsRules(rules, keptTags, TUNNEL_TAG))
+            },
+        )
+        return PreparedDns(dns, notes)
+    }
+
+    private val TUNNEL_TAGS = setOf(TUNNEL_TAG, TUNNEL_TCP_TAG, TUNNEL_DOH_TAG)
+
+    private fun tunnelServer(type: String, tag: String, resolver: String, proxyTag: String): JsonObject =
+        buildJsonObject {
+            put("type", type)
+            put("tag", tag)
+            put("server", resolver)
+            put("detour", proxyTag)
+        }
+
     private fun isUnderlayServer(server: JsonObject): Boolean {
         val type = server["type"]?.jsonPrimitive?.contentOrNull.orEmpty()
         val tag = DnsDependency.tagOf(server)
@@ -214,7 +272,7 @@ object DnsBlock {
         return "$UNDERLAY_CRUMB_PREFIX tag=$tag type=$type server=$address detour=$detour"
     }
 
-    private fun retargetDnsRules(rules: JsonArray, keptTags: Set<String>): JsonArray =
+    private fun retargetDnsRules(rules: JsonArray, keptTags: Set<String>, fallback: String = DIRECT_TAG): JsonArray =
         JsonArray(
             rules.map { element ->
                 val rule = element as? JsonObject ?: return@map element
@@ -222,7 +280,7 @@ object DnsBlock {
                 if (server.isNullOrBlank() || server in keptTags) {
                     rule
                 } else {
-                    JsonObject(rule.toMutableMap().apply { put("server", JsonPrimitive(DIRECT_TAG)) })
+                    JsonObject(rule.toMutableMap().apply { put("server", JsonPrimitive(fallback)) })
                 }
             },
         )

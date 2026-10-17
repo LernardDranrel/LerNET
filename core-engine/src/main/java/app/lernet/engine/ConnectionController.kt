@@ -17,6 +17,7 @@ import app.lernet.engine.live.LiveConn
 import app.lernet.engine.live.LiveConnFormat
 import app.lernet.engine.live.LiveFeed
 import app.lernet.engine.live.LiveVia
+import app.lernet.engine.live.LiveConnStatus
 import app.lernet.engine.log.CrashTrail
 import app.lernet.engine.log.HardStopReason
 import app.lernet.engine.net.DialOnlyHopTracer
@@ -58,7 +59,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import app.lernet.engine.policy.BlockingDetector
 import app.lernet.engine.policy.RecheckJitter
+import app.lernet.engine.policy.FlowSample
+import app.lernet.engine.policy.TunnelProbeSchedule
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -72,9 +76,10 @@ class ConnectionController(
     private val probeTimeoutMs: Int = PROBE_TIMEOUT_MS,
     private val l7UrlTestEnabled: Boolean = DEFAULT_L7_URL_TEST_ENABLED,
     private val tunnelHealthProbe: (suspend () -> Result<Long>)? = null,
-    private val tunnelHealthIntervalMs: () -> Long = { Random.nextLong(5_000L, 10_001L) },
-    /** Pause between direct latency dials to the connected config's server (random 45 s – 5 min). */
-    private val latencyRefreshMs: () -> Long = { RecheckJitter.nextMs() },
+    /** When to check the tunnel: only at start, after a network change, or on unanswered traffic. */
+    private val tunnelProbeSchedule: () -> TunnelProbeSchedule = { TunnelProbeSchedule() },
+    /** Pause between folder candidates while looking for a live one: sequential, never a burst. */
+    private val candidateGapMs: () -> Long = { Random.nextLong(200L, 601L) },
     val liveFeed: LiveFeed = LiveFeed(),
     private val ruleSetDirectory: String = "",
     /** Hop walk only — never Main. Tests inject the test dispatcher. */
@@ -100,8 +105,11 @@ class ConnectionController(
     private val rateSampler = RateSampler()
     private var connectTimeoutJob: Job? = null
     private var probeJob: Job? = null
-    private var latencyJob: Job? = null
     private var tunnelHealthJob: Job? = null
+    @Volatile private var probeSchedule: TunnelProbeSchedule? = null
+    /** Monotonic clock of the health ticker; virtual in tests. */
+    @Volatile private var healthClockMs = 0L
+    private val blockingDetector = BlockingDetector()
     private var groupProbeJob: Job? = null
     private var failoverSwitchJob: Job? = null
     private var stopJob: Job? = null
@@ -201,6 +209,7 @@ class ConnectionController(
             is EngineEvent.LogLine -> {
                 LerNetLog.i(TAG, event.line)
                 SniffRematch.fromLibboxLine(event.line)?.let { LerNetLog.i(TAG, it) }
+                noteBlocking(blockingDetector.onLogLine(healthClockMs, event.line))
                 when {
                     event.line.contains("dns query ok") -> markDnsOk(event.line)
                     event.line.contains("dns query fail") -> dnsHealth.onDnsFail()
@@ -213,6 +222,15 @@ class ConnectionController(
                 proxiedReplies.observe(event.reset, event.rows)
                 liveFeed.apply(event.reset, event.rows)
                 noteTunnelSilence(event.rows)
+                noteBlocking(
+                    blockingDetector.onFlows(
+                        healthClockMs,
+                        event.rows.map {
+                            FlowSample(it.id, it.via == LiveVia.PROXY, it.uplink, it.downlink, it.status == LiveConnStatus.OPEN)
+                        },
+                        complete = event.reset,
+                    ),
+                )
             }
         }
     }
@@ -242,6 +260,10 @@ class ConnectionController(
                     "conns=${event.connectionsOut} dnsOk=$dnsOkInWindow " +
                     "libboxUp=${event.uplinkBps} libboxDown=${event.downlinkBps}",
             )
+        }
+        probeSchedule?.let { schedule ->
+            val replies = if (connectionFeedSeen) proxiedReplies.total else event.downlinkTotal
+            synchronized(schedule) { schedule.onTraffic(healthClockMs, event.uplinkTotal, replies) }
         }
         dispatch(
             PolicyEvent.EngineStatus(
@@ -509,7 +531,6 @@ class ConnectionController(
         if (current == ConnectionState.CONNECTED) {
             armTrafficWatch()
             armDnsHealth()
-            armLatencyRefresh()
             armTunnelHealth()
         } else if (current in setOf(ConnectionState.CONNECTING, ConnectionState.RECONNECTING) && retryJob?.isActive != true) {
             startOutboundProbe()
@@ -612,7 +633,6 @@ class ConnectionController(
                 dnsHealthJob?.cancel()
                 connectTimeoutJob?.cancel()
                 probeJob?.cancel()
-                latencyJob?.cancel()
                 tunnelHealthJob?.cancel()
                 groupProbeJob?.cancel()
                 failoverSwitchJob?.cancel()
@@ -628,7 +648,6 @@ class ConnectionController(
                 dropInFlightPath()
                 retryJob?.cancel()
                 healthJob?.cancel()
-                latencyJob?.cancel()
                 tunnelHealthJob?.cancel()
                 dnsHealthJob?.cancel()
                 connectTimeoutJob?.cancel()
@@ -673,7 +692,8 @@ class ConnectionController(
                     val resolve = resolveFailoverProfile
                     var winner: String? = null
                     if (resolve != null) {
-                        for (outboundId in command.outboundIds) {
+                        for ((index, outboundId) in command.outboundIds.withIndex()) {
+                            if (index > 0) delay(candidateGapMs())
                             val profile = try {
                                 resolve(outboundId)?.first
                             } catch (error: Exception) {
@@ -784,7 +804,6 @@ class ConnectionController(
                 cancelConnectTimeout()
                 armTrafficWatch()
                 armDnsHealth()
-                armLatencyRefresh()
                 armTunnelHealth()
                 return@launch
             }
@@ -802,7 +821,6 @@ class ConnectionController(
                 cancelConnectTimeout()
                 armTrafficWatch()
                 armDnsHealth()
-                armLatencyRefresh()
                 armTunnelHealth()
             } else {
                 val detail = l7.exceptionOrNull()?.message ?: "L7 probe failed"
@@ -816,47 +834,26 @@ class ConnectionController(
         }
     }
 
-    private fun armLatencyRefresh() {
-        latencyJob?.cancel()
-        val target = pendingEndpoint ?: return
-        val profileId = _snapshot.value.activeProfileId
-        latencyJob = scope.launch {
-            while (true) {
-                // Direct dial to the config's server for the latency figure: a fresh random
-                // pause each time (45 s – 5 min), not a fixed 30 s beat.
-                delay(latencyRefreshMs())
-                if (_snapshot.value.state != ConnectionState.CONNECTED ||
-                    _snapshot.value.activeProfileId != profileId
-                ) {
-                    break
-                }
-                val startedAt = System.nanoTime()
-                val result = runCatching { outboundDialer.dial(target, ACTIVE_PROBE_TIMEOUT_MS) }
-                    .getOrElse { Result.failure(it) }
-                if (_snapshot.value.state == ConnectionState.CONNECTED &&
-                    _snapshot.value.activeProfileId == profileId
-                ) {
-                    _snapshot.value = _snapshot.value.copy(
-                        serverTcpMs = if (result.isSuccess) {
-                            ((System.nanoTime() - startedAt) / 1_000_000L).coerceAtLeast(1L)
-                        } else {
-                            null
-                        }
-                    )
-                }
-            }
-        }
-    }
-
+    /**
+     * Tunnel check inside the tunnel, only when there is a reason ([TunnelProbeSchedule]): at
+     * start, after a network change, or when our traffic stays unanswered. No fixed beat and no
+     * retry burst; the probe reuses an open keep-alive connection (see the app's probe).
+     */
     private fun armTunnelHealth() {
         tunnelHealthJob?.cancel()
-        val probe = tunnelHealthProbe ?: return
+        val probe = tunnelHealthProbe ?: run {
+            probeSchedule = null
+            return
+        }
         val profileId = _snapshot.value.activeProfileId
         val outboundId = _snapshot.value.activeOutboundId
+        val schedule = tunnelProbeSchedule()
+        schedule.onStart(healthClockMs)
+        probeSchedule = schedule
         tunnelHealthJob = scope.launch {
-            var failures = 0
             while (true) {
-                delay(if (failures == 0) tunnelHealthIntervalMs() else 2_000L)
+                delay(HEALTH_TICK_MS)
+                healthClockMs += HEALTH_TICK_MS
                 val before = _snapshot.value
                 if (before.state != ConnectionState.CONNECTED ||
                     before.activeProfileId != profileId ||
@@ -864,6 +861,7 @@ class ConnectionController(
                 ) {
                     return@launch
                 }
+                val reason = synchronized(schedule) { schedule.takeDue(healthClockMs) } ?: continue
 
                 val result = try {
                     probe()
@@ -879,22 +877,37 @@ class ConnectionController(
                 ) {
                     return@launch
                 }
-
-                if (result.isSuccess) {
-                    if (failures > 0) LerNetLog.i(TAG, "tunnel health recovered after $failures miss")
-                    failures = 0
-                    dispatch(PolicyEvent.TunnelVerified)
-                } else {
-                    failures++
-                    val detail = result.exceptionOrNull()?.message?.take(160) ?: "HTTPS probe failed"
-                    LerNetLog.w(TAG, "tunnel health failed ($failures/2): $detail")
-                    if (failures >= 2) {
+                val verdict = synchronized(schedule) { schedule.onResult(healthClockMs, result.isSuccess) }
+                when (verdict) {
+                    TunnelProbeSchedule.Verdict.HEALTHY -> {
+                        LerNetLog.i(TAG, "tunnel check ok reason=$reason")
+                        dispatch(PolicyEvent.TunnelVerified)
+                    }
+                    TunnelProbeSchedule.Verdict.CONFIRM -> {
+                        val detail = result.exceptionOrNull()?.message?.take(160) ?: "HTTPS probe failed"
+                        LerNetLog.w(TAG, "tunnel check failed (1/2) reason=$reason: $detail")
+                    }
+                    TunnelProbeSchedule.Verdict.FAILED -> {
+                        val detail = result.exceptionOrNull()?.message?.take(160) ?: "HTTPS probe failed"
+                        LerNetLog.w(TAG, "tunnel check failed (2/2) reason=$reason: $detail")
                         dispatch(PolicyEvent.EngineFailed(ConnectionCause.TunnelHealthFailed(detail)))
                         return@launch
                     }
                 }
             }
         }
+    }
+
+    private suspend fun noteBlocking(sign: app.lernet.engine.policy.BlockingSign?) {
+        sign ?: return
+        val state = _snapshot.value.state
+        if (state != ConnectionState.CONNECTED && state != ConnectionState.CONNECTING &&
+            state != ConnectionState.RECONNECTING
+        ) {
+            return
+        }
+        LerNetLog.w(TAG, "blocking suspected: $sign")
+        dispatch(PolicyEvent.EngineFailed(ConnectionCause.BlockingSuspected(sign)))
     }
 
     private suspend fun markDnsOk(detail: String) {
@@ -972,8 +985,9 @@ class ConnectionController(
     }
 
     private fun resetConnectMarkersLocked() {
-        latencyJob?.cancel()
         tunnelHealthJob?.cancel()
+        probeSchedule = null
+        blockingDetector.reset()
         loggedTunBytes = false
         dnsOkInWindow = false
         dnsOkSession = false
@@ -1191,6 +1205,7 @@ class ConnectionController(
         const val L7_PROBE_URL = "https://cp.cloudflare.com/generate_204"
         const val DEFAULT_L7_URL_TEST_ENABLED = false
         private const val STATUS_LOG_EVERY = 5
+        private const val HEALTH_TICK_MS = 1_000L
         private const val TAG = "LerNet.Engine"
     }
 }

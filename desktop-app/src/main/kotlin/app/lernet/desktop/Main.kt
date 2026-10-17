@@ -884,7 +884,8 @@ private fun Profiles(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, 
                     ProfileDetail("DNS", when (selected.dnsPolicy) {
                         "SYSTEM" -> "Глобальная настройка"
                         "PROFILE" -> "Из профиля"
-                        else -> "DNS устройства"
+                        "TUNNEL" -> "Через VPN"
+                        else -> "DNS сети (мимо VPN)"
                     })
                 }
                 Spacer(Modifier.height(14.dp))
@@ -1622,7 +1623,7 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
             SettingHeading("DNS", "Кто определяет адреса сайтов",
                 "DNS переводит имя сайта в IP-адрес. Выберите источник настройки рядом с адресом сервера.")
             Box(Modifier.fillMaxWidth()) {
-                SegmentedChoice(listOf("UNDERLAY" to "LerNET · вручную", "PROFILE" to "Из профиля"), dnsPolicy) { dnsPolicy = it }
+                SegmentedChoice(listOf("TUNNEL" to "Через VPN", "UNDERLAY" to "Напрямую", "PROFILE" to "Из профиля"), dnsPolicy) { dnsPolicy = it }
             }
             OutlinedTextField(directDns, { directDns = it }, modifier = Modifier.fillMaxWidth(),
                 label = { Text(if (dnsPolicy == "PROFILE") "Резервный DNS · IPv4" else "DNS-сервер · IPv4") },
@@ -1630,7 +1631,8 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
                 supportingText = { Text(if (!dnsValid) "Введите один IPv4-адрес, например 1.1.1.1." else "Один IPv4-адрес. Список через запятую здесь не поддерживается.") })
             Text(if (dnsPolicy == "PROFILE")
                 "Если в профиле есть DNS, используются его серверы и правила. Импортированный JSON может содержать несколько серверов; их выбор задаёт конфигурация. Если DNS в профиле отсутствует, используется адрес выше. Он также нужен для прямых DNS-зависимостей."
-            else "Для DNS используется адрес, заданный здесь, через прямое подключение. Несколько DNS можно задать в JSON профиля и выбрать «Из профиля». Это отдельная настройка LerNET, а не автоматический выбор DNS Windows.",
+            else if (dnsPolicy == "TUNNEL") "По умолчанию. Адрес выше спрашивается внутри туннеля (TCP и DNS-over-HTTPS), поэтому сеть не видит, какие сайты ты открываешь. Напрямую идёт только запрос адреса самого VPN-сервера. Если на каком-то сервере DNS через VPN не отвечает (бывает, когда хостинг сервера режет DNS), выбери для этого профиля «DNS сети»."
+            else "Для DNS используется адрес, заданный здесь, через прямое подключение мимо VPN: сеть и провайдер видят имена сайтов. Несколько DNS можно задать в JSON профиля и выбрать «Из профиля».",
                 color = muted, fontSize = 12.sp, lineHeight = 18.sp)
             HorizontalDivider(Modifier.padding(vertical = 5.dp), color = desktopColors.outlineVariant)
             SettingHeading("MTU", "Размер пакета VPN",
@@ -1687,11 +1689,32 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
             }
         }
         Panel {
+            SettingHeading("TLS", "Рукопожатие TLS",
+                "Для сетей, где фильтр режет или теряет первое сообщение защищённого соединения. Действует для узлов VLESS, VMess, Trojan с TLS или Reality. Значения из самого профиля важнее. Вступит в силу при следующем подключении.")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Дробить первое сообщение TLS", Modifier.weight(1f))
+                Switch(saved.tlsRecordFragment, onCheckedChange = {
+                    controller.setTlsHandshake(it, app.lernet.engine.compile.RealityKeyShare.fromStorage(saved.realityKeyShare))
+                })
+            }
+            Text("Разбивает приветствие на несколько записей TLS (record_fragment). Помогает, если соединение рвётся или молчит сразу после начала рукопожатия. Немного замедляет подключение. По умолчанию выключено.",
+                color = muted, fontSize = 12.sp, lineHeight = 18.sp)
+            Text("Обмен ключами Reality", fontWeight = FontWeight.SemiBold)
+            Box(Modifier.fillMaxWidth()) {
+                SegmentedChoice(listOf("" to "Как в отпечатке", "hybrid" to "Гибридный", "classical" to "Короткий"),
+                    app.lernet.engine.compile.RealityKeyShare.fromStorage(saved.realityKeyShare).storage) {
+                    controller.setTlsHandshake(saved.tlsRecordFragment, app.lernet.engine.compile.RealityKeyShare.fromStorage(it))
+                }
+            }
+            Text("«Короткий» убирает большой постквантовый ключ из приветствия — оно меньше и реже теряется. Работает только с серверами Xray старше 26.9.8; с новыми серверами связь не установится.",
+                color = muted, fontSize = 12.sp, lineHeight = 18.sp)
+        }
+        Panel {
             SettingHeading("HTTPS", "Проверка работоспособности",
                 "Через этот адрес проверяется интернет через выбранный профиль: перед подключением и во время работы VPN.")
             OutlinedTextField(healthUrl, { healthUrl = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Адрес проверки") },
                 singleLine = true, isError = !healthUrl.startsWith("https://"))
-            Text("Во время подключения приложение проверяет путь через Windows через случайные 5–10 секунд после предыдущей проверки и после смены сети. После первой неудачи повторяет проверку через 2 секунды. Две неудачи подряд запускают переподключение или смену сервера внутри папки, если она включена. Используйте небольшой HTTPS-ресурс, доступный через VPN.",
+            Text("Приложение проверяет путь через VPN только по поводу: после подключения, после смены сети и когда трафик уходит, а ответов нет. Проверка идёт в уже открытом соединении, без особого заголовка. После неудачи повторяет её через случайные 3–8 секунд. Две неудачи подряд запускают переподключение или смену сервера внутри папки, если она включена. Используйте небольшой HTTPS-ресурс, доступный через VPN.",
                 color = muted, fontSize = 12.sp, lineHeight = 18.sp)
             Button(onClick = { controller.setHealthUrl(healthUrl) }, enabled = healthUrl.startsWith("https://") && healthUrl != saved.healthUrl) { Text("Сохранить адрес") }
         }

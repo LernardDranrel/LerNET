@@ -16,7 +16,7 @@ data class ProfileEntity(
     val subscriptionUrl: String?,
     val lastRefreshEpochMs: Long?,
     val dnsJson: String? = null,
-    val dnsPolicy: String = DnsPolicy.UNDERLAY.name,
+    val dnsPolicy: String = DnsPolicy.DEFAULT.name,
     val canvasLayout: String? = null,
     val sortIndex: Int = 0,
     val modeOverride: String? = null,

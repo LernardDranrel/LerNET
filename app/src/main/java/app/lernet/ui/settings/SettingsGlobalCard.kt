@@ -24,6 +24,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
@@ -46,6 +48,7 @@ internal fun GlobalDefaultsCard(state: SettingsUiState, onIntent: (SettingsInten
     DnsDefaultsCard(state, onIntent)
     XmuxDefaultsCard(state, onIntent)
     MtuDefaultsCard(state, onIntent)
+    TlsHandshakeCard(state, onIntent)
     ProxyPasswordCard(state, onIntent)
     JournalDefaultsCard(state, onIntent)
 }
@@ -59,7 +62,7 @@ internal fun DnsDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) 
         SettingHelp(stringResource(R.string.settings_dns_explained))
         Text(stringResource(R.string.settings_dns_default), style = MaterialTheme.typography.labelLarge)
         Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(DnsPolicy.UNDERLAY to R.string.cfg_keep_system, DnsPolicy.PROFILE to R.string.cfg_use_profile).forEach { (policy, label) ->
+            listOf(DnsPolicy.TUNNEL to R.string.cfg_dns_tunnel, DnsPolicy.UNDERLAY to R.string.cfg_keep_system, DnsPolicy.PROFILE to R.string.cfg_use_profile).forEach { (policy, label) ->
                 val selected = state.settings.defaultDnsPolicy == policy
                 val scheme = MaterialTheme.colorScheme
                 Surface(
@@ -243,4 +246,39 @@ internal fun JournalDefaultsCard(state: SettingsUiState, onIntent: (SettingsInte
 @Composable
 private fun SettingHelp(text: String) {
     Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+/** Opt-in handshake tweaks for networks that drop or filter the first TLS message. */
+@Composable
+internal fun TlsHandshakeCard(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
+    val defaults = state.settings.engineDefaults
+    val keyShare = app.lernet.engine.compile.RealityKeyShare.fromStorage(defaults.realityKeyShare)
+    PanelCard {
+        Text(stringResource(R.string.settings_tls_title), style = MaterialTheme.typography.titleMedium)
+        SettingHelp(stringResource(R.string.settings_tls_help))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.settings_tls_fragment), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            androidx.compose.material3.Switch(
+                checked = defaults.tlsRecordFragment,
+                onCheckedChange = { onIntent(SettingsIntent.SetTlsRecordFragment(it)) },
+                modifier = Modifier.testTag("settings_tls_fragment"),
+            )
+        }
+        SettingHelp(stringResource(R.string.settings_tls_fragment_help))
+        Text(stringResource(R.string.settings_reality_key_share), style = MaterialTheme.typography.labelLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(
+                app.lernet.engine.compile.RealityKeyShare.AUTO to R.string.settings_key_share_auto,
+                app.lernet.engine.compile.RealityKeyShare.HYBRID to R.string.settings_key_share_hybrid,
+                app.lernet.engine.compile.RealityKeyShare.CLASSICAL to R.string.settings_key_share_classical,
+            ).forEach { (value, label) ->
+                androidx.compose.material3.FilterChip(
+                    selected = keyShare == value,
+                    onClick = { onIntent(SettingsIntent.SetRealityKeyShare(value)) },
+                    label = { Text(stringResource(label)) },
+                )
+            }
+        }
+        SettingHelp(stringResource(R.string.settings_key_share_help))
+    }
 }

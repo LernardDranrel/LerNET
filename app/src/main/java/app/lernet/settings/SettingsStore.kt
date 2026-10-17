@@ -45,6 +45,8 @@ class SettingsStore(private val context: Context) {
         it[TUN_MTU] = defaults.tunMtu.coerceIn(1280, 9000)
         it[XMUX_CONCURRENCY] = defaults.xmuxConcurrency
         it[DIRECT_DNS_SERVER] = defaults.directDnsServer
+        it[TLS_RECORD_FRAGMENT] = defaults.tlsRecordFragment
+        it[REALITY_KEY_SHARE] = app.lernet.engine.compile.RealityKeyShare.fromStorage(defaults.realityKeyShare).storage
     }
 
     suspend fun setDefaultDnsPolicy(policy: DnsPolicy) = edit { it[DEFAULT_DNS_POLICY] = policy.name }
@@ -94,8 +96,10 @@ class SettingsStore(private val context: Context) {
                 tunMtu = (this[TUN_MTU] ?: 1500).coerceIn(1280, 9000),
                 xmuxConcurrency = this[XMUX_CONCURRENCY]?.takeIf { it in setOf("1-1", "8-8", "16-16", "32-32") } ?: "16-16",
                 directDnsServer = this[DIRECT_DNS_SERVER]?.takeIf { EngineDefaults.validIpv4(it) } ?: "1.1.1.1",
+                tlsRecordFragment = this[TLS_RECORD_FRAGMENT] ?: false,
+                realityKeyShare = app.lernet.engine.compile.RealityKeyShare.fromStorage(this[REALITY_KEY_SHARE]).storage,
             ),
-            defaultDnsPolicy = DnsPolicy.fromStorage(this[DEFAULT_DNS_POLICY] ?: DnsPolicy.UNDERLAY.name),
+            defaultDnsPolicy = DnsPolicy.fromStorage(this[DEFAULT_DNS_POLICY] ?: DnsPolicy.DEFAULT.name),
             lockdownHintDismissed = this[LOCKDOWN_HINT_DISMISSED] ?: false,
             notificationsAsked = this[NOTIFICATIONS_ASKED] ?: false,
             notificationHintDismissed = this[NOTIFICATION_HINT_DISMISSED] ?: false,
@@ -120,6 +124,8 @@ class SettingsStore(private val context: Context) {
         val XMUX_CONCURRENCY = stringPreferencesKey("xmux_concurrency")
         val DEFAULT_DNS_POLICY = stringPreferencesKey("default_dns_policy")
         val DIRECT_DNS_SERVER = stringPreferencesKey("direct_dns_server")
+        val TLS_RECORD_FRAGMENT = booleanPreferencesKey("tls_record_fragment")
+        val REALITY_KEY_SHARE = stringPreferencesKey("reality_key_share")
         val LOCKDOWN_HINT_DISMISSED = booleanPreferencesKey("lockdown_hint_dismissed")
         val PROXY_USERNAME = stringPreferencesKey("proxy_username")
         val NOTIFICATIONS_ASKED = booleanPreferencesKey("notifications_asked")

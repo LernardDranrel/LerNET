@@ -225,7 +225,7 @@ class ConfigRepository(
     }
 
     /** Validates first, then imports a copy in one Room transaction. Existing data is untouched. */
-    suspend fun importTransfer(raw: String, defaultDnsPolicy: DnsPolicy = DnsPolicy.UNDERLAY): TransferBundle {
+    suspend fun importTransfer(raw: String, defaultDnsPolicy: DnsPolicy = DnsPolicy.DEFAULT): TransferBundle {
         val bundle = TransferCodec.decode(raw)
         val operation: suspend () -> Unit = {
             val previousOrder = profileDao.listProfiles().map { it.id }
@@ -281,7 +281,7 @@ class ConfigRepository(
         return bundle
     }
 
-    suspend fun importDrafts(drafts: List<ImportedProfileDraft>, defaultDnsPolicy: DnsPolicy = DnsPolicy.UNDERLAY): List<String> {
+    suspend fun importDrafts(drafts: List<ImportedProfileDraft>, defaultDnsPolicy: DnsPolicy = DnsPolicy.DEFAULT): List<String> {
         val ids = mutableListOf<String>()
         drafts.forEach { draft ->
             ids += insertDraft(draft, defaultDnsPolicy)
@@ -289,7 +289,7 @@ class ConfigRepository(
         return ids
     }
 
-    suspend fun insertDraft(draft: ImportedProfileDraft, defaultDnsPolicy: DnsPolicy = DnsPolicy.UNDERLAY): String {
+    suspend fun insertDraft(draft: ImportedProfileDraft, defaultDnsPolicy: DnsPolicy = DnsPolicy.DEFAULT): String {
         val id = newId()
         val now = nowMs()
         profileDao.upsertProfile(

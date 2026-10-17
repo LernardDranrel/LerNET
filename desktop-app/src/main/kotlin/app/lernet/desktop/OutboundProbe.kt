@@ -47,7 +47,7 @@ object OutboundProbe {
         ))
         val policy = runCatching {
             DnsPolicy.valueOf(if (profile.dnsPolicy == "SYSTEM") saved.defaultDnsPolicy else profile.dnsPolicy)
-        }.getOrDefault(DnsPolicy.UNDERLAY)
+        }.getOrDefault(DnsPolicy.DEFAULT)
         val assembled = ConfigAssembler.assemble(
             outbound = outbound,
             compiledRoute = compiled,
@@ -55,7 +55,7 @@ object OutboundProbe {
             logLevel = "debug",
             dnsJson = profile.dnsJson,
             dnsPolicy = policy,
-            defaults = EngineDefaults(saved.tunMtu, saved.xmuxConcurrency, saved.directDnsServer),
+            defaults = saved.engineDefaults(strict = EngineDefaults().strictRoute),
             platform = EnginePlatform.WINDOWS,
         )
         if (!assembled.isValid) return OutboundProbeResult(message = assembled.errors.joinToString("; ").take(180))

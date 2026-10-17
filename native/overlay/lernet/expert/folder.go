@@ -3,6 +3,7 @@ package expert
 import (
 	"context"
 	"errors"
+	"math/rand"
 	"net"
 	"sort"
 	"sync"
@@ -102,6 +103,13 @@ func (f *folderGate) choose(ctx context.Context) (*exitGate, error) {
 	return f.registry.gate(w.tag)
 }
 
+const candidateSlots = 2
+
+// candidateGap is a variable so tests can make it zero.
+var candidateGap = func() time.Duration {
+	return time.Duration(150+rand.Intn(251)) * time.Millisecond
+}
+
 func (f *folderGate) selectCandidate(ctx context.Context) (string, error) {
 	f.mu.Lock()
 	previous := f.selected
@@ -126,58 +134,74 @@ func (f *folderGate) selectCandidate(ctx context.Context) (string, error) {
 		latency *int64
 	}
 	results := make(chan candidateResult, len(tags))
-	slots := make(chan struct{}, 4)
-	for _, tag := range tags {
-		tag := tag
-		go func() {
+	// Anti-DPI: no burst of parallel handshakes to every server of the folder. At most two
+	// candidates are in flight, started in order (preferred first) with a random 150–400 ms gap.
+	slots := make(chan struct{}, candidateSlots)
+	probe := func(tag string) {
+		defer func() { <-slots }()
+		f.mu.Lock()
+		sample := f.health[tag]
+		epoch := f.networkEpoch
+		f.mu.Unlock()
+		if time.Now().Before(sample.failedUntil) {
+			results <- candidateResult{tag: tag}
+			return
+		}
+		gate, err := f.registry.gate(tag)
+		if err != nil {
+			results <- candidateResult{tag: tag}
+			return
+		}
+		if err = gate.wake(ctx); err != nil {
+			f.failedEpoch(tag, epoch)
+			results <- candidateResult{tag: tag}
+			return
+		}
+		result := probeGate(ctx, gate, f.options.ProbeURL, f.options.ProbeTimeoutMs)
+		if probeNeedsRecovery(result) && ctx.Err() == nil {
+			if gate.recoverAt(ctx, result.transportGeneration) == nil {
+				result = probeGate(ctx, gate, f.options.ProbeURL, f.options.ProbeTimeoutMs)
+			}
+		}
+		if result.HTTPSLatencyMs == nil {
+			if result.Reason != "exit_transport_changed" {
+				f.failedEpoch(tag, epoch)
+			}
+			results <- candidateResult{tag: tag}
+			return
+		}
+		f.mu.Lock()
+		valid := f.recordCandidateLocked(gate, result, epoch)
+		f.mu.Unlock()
+		if !valid {
+			results <- candidateResult{tag: tag}
+			return
+		}
+		results <- candidateResult{tag: tag, latency: result.HTTPSLatencyMs}
+	}
+	go func() {
+		for i, tag := range tags {
+			if i > 0 {
+				gap := time.NewTimer(candidateGap())
+				select {
+				case <-gap.C:
+				case <-ctx.Done():
+					gap.Stop()
+				}
+			}
 			select {
 			case slots <- struct{}{}:
 			case <-ctx.Done():
-				results <- candidateResult{tag: tag}
-				return
 			}
-			defer func() { <-slots }()
-			f.mu.Lock()
-			sample := f.health[tag]
-			epoch := f.networkEpoch
-			f.mu.Unlock()
-			if time.Now().Before(sample.failedUntil) {
-				results <- candidateResult{tag: tag}
-				return
-			}
-			gate, err := f.registry.gate(tag)
-			if err != nil {
-				results <- candidateResult{tag: tag}
-				return
-			}
-			if err = gate.wake(ctx); err != nil {
-				f.failedEpoch(tag, epoch)
-				results <- candidateResult{tag: tag}
-				return
-			}
-			result := probeGate(ctx, gate, f.options.ProbeURL, f.options.ProbeTimeoutMs)
-			if probeNeedsRecovery(result) && ctx.Err() == nil {
-				if gate.recoverAt(ctx, result.transportGeneration) == nil {
-					result = probeGate(ctx, gate, f.options.ProbeURL, f.options.ProbeTimeoutMs)
+			if ctx.Err() != nil {
+				for _, rest := range tags[i:] {
+					results <- candidateResult{tag: rest}
 				}
-			}
-			if result.HTTPSLatencyMs == nil {
-				if result.Reason != "exit_transport_changed" {
-					f.failedEpoch(tag, epoch)
-				}
-				results <- candidateResult{tag: tag}
 				return
 			}
-			f.mu.Lock()
-			valid := f.recordCandidateLocked(gate, result, epoch)
-			f.mu.Unlock()
-			if !valid {
-				results <- candidateResult{tag: tag}
-				return
-			}
-			results <- candidateResult{tag: tag, latency: result.HTTPSLatencyMs}
-		}()
-	}
+			go probe(tag)
+		}
+	}()
 	best := ""
 	bestLatency := int64(0)
 	var settle <-chan time.Time

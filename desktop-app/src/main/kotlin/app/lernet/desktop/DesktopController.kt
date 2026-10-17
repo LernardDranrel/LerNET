@@ -38,6 +38,11 @@ import java.nio.file.StandardCopyOption
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import app.lernet.engine.policy.RecheckJitter
+import app.lernet.engine.policy.BlockingDetector
+import app.lernet.engine.policy.BlockingSign
+import app.lernet.engine.policy.FlowSample
+import app.lernet.engine.policy.ProxiedTraffic
+import app.lernet.engine.policy.TunnelProbeSchedule
 import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -113,7 +118,15 @@ class DesktopController(
         ),
     )
     val state: StateFlow<DesktopUiState> = mutable
+    /** Passive block detector: ordinary traffic and core log lines only, no test downloads. */
+    private val blockingDetector = BlockingDetector()
+    private val pendingBlockingSign = java.util.concurrent.atomic.AtomicReference<BlockingSign?>(null)
+
     val tunnel = WindowsBoxProcess(store.workDirectory()).also { process ->
+        process.lineListener = { line ->
+            synchronized(blockingDetector) { blockingDetector.onLogLine(System.currentTimeMillis(), line) }
+                ?.let { pendingBlockingSign.set(it) }
+        }
         process.lifecycle = object : TunnelLifecycle {
             override fun coreRunning() {
                 if (!simpleGuard.isEngaged()) return
@@ -144,7 +157,9 @@ class DesktopController(
     @Volatile private var monitorOpen = true
     private val monitorThread = thread(name = "lernet-windows-diagnostics", isDaemon = true) {
         var lastStatus = TunnelStatus.STOPPED
-        var nextHealthAt = 0L
+        // Checks only with a reason (start, network change, unanswered traffic); no fixed beat.
+        var schedule = TunnelProbeSchedule()
+        val traffic = ProxiedTraffic()
         var failedChecks = 0
         var lastNetwork = runCatching { WindowsTunnelHealth.networkSignature() }.getOrDefault("")
         var lastNetworkScanAt = 0L
@@ -155,13 +170,26 @@ class DesktopController(
                 mutableDiagnostics.value = runCatching { coreApi.poll() }
                     .getOrElse { previous -> CoreDiagnostics(error = previous.message ?: "Нет данных от ядра") }
                 recordConnections(mutableDiagnostics.value.connections)
+                val activeTag = state.value.saved.let { saved ->
+                    saved.profiles.firstOrNull { it.id == saved.selectedProfileId }?.selectedOutbound?.tag
+                }
+                val flows = mutableDiagnostics.value.connections.map { row ->
+                    FlowSample(row.id, activeTag != null && activeTag in row.chains, row.upload, row.download, row.active)
+                }
                 if (lastStatus != TunnelStatus.RUNNING) {
                     recoveryAttempt.set(0)
-                    nextHealthAt = 0L
+                    schedule = TunnelProbeSchedule().also { it.onStart(System.currentTimeMillis()) }
+                    traffic.clear()
+                    synchronized(blockingDetector) { blockingDetector.reset() }
                     failedChecks = 0
                     mutable.update { it.copy(message = "", healthMessage = "Проверяем соединение", healthFailures = 0, healthVerified = null, tunnelLatencyMs = null) }
                 }
                 val now = System.currentTimeMillis()
+                traffic.observe(flows)
+                schedule.onTraffic(now, traffic.uplink, traffic.replies)
+                val sign = synchronized(blockingDetector) { blockingDetector.onFlows(now, flows) }
+                    ?: pendingBlockingSign.getAndSet(null)
+                if (sign != null) onBlockingSuspected(sign)
                 if (now - lastNetworkScanAt >= 3_000) {
                     lastNetworkScanAt = now
                     runCatching { WindowsTunnelHealth.networkSignature() }.onSuccess { signature ->
@@ -171,12 +199,14 @@ class DesktopController(
                             // A new network may revive configs that failed on the old one.
                             synchronized(failedInGroup) { failedInGroup.clear() }
                             failedRecheck.reset()
+                            schedule.onNetworkChanged(now)
+                            synchronized(blockingDetector) { blockingDetector.reset() }
                             mutable.update { it.copy(healthMessage = "Сеть изменилась · проверяем VPN", healthVerified = null) }
                         }
                     }
                 }
-                if (now >= nextHealthAt || networkChangedAt != 0L && now - networkChangedAt >= 3_000) {
-                    networkChangedAt = 0L
+                if (networkChangedAt != 0L) networkChangedAt = 0L
+                if (schedule.takeDue(now) != null) {
                     val saved = state.value.saved
                     val profile = saved.profiles.firstOrNull { it.id == saved.selectedProfileId }
                     val tag = profile?.selectedOutbound?.tag
@@ -184,6 +214,7 @@ class DesktopController(
                         val ticket = connectGeneration.get()
                         val health = WindowsTunnelHealth.check(saved.healthUrl, effectiveMode(profile), proxyAccess = state.value.localProxy)
                         if (ticket == connectGeneration.get() && tunnel.state.value.status == TunnelStatus.RUNNING) {
+                            val verdict = schedule.onResult(System.currentTimeMillis(), health.latencyMs != null && !health.routeConflict)
                             if (health.routeConflict) {
                                 failedChecks = 0
                                 mutable.update { it.copy(healthMessage = health.error, healthFailures = 2,
@@ -195,7 +226,7 @@ class DesktopController(
                             } else {
                                 val nodeAlive = runCatching { coreApi.delay(tag, saved.healthUrl, 4_000) }.isSuccess
                                 if (ticket == connectGeneration.get() && tunnel.state.value.status == TunnelStatus.RUNNING) {
-                                    failedChecks++
+                                    failedChecks = if (verdict == TunnelProbeSchedule.Verdict.FAILED) 2 else 1
                                     val reason = if (nodeAlive) "Узел отвечает, но путь Windows через VPN не работает"
                                         else "Трафик через VPN не проходит"
                                     mutable.update { it.copy(healthMessage = "$reason · ${health.error}",
@@ -216,11 +247,14 @@ class DesktopController(
                                     }
                                 }
                             }
+                        } else {
+                            // The connection changed under the check: its result means nothing.
+                            schedule.onResult(System.currentTimeMillis(), ok = true)
                         }
+                    } else {
+                        // Nothing to check without a config: drop this reason.
+                        schedule.onResult(System.currentTimeMillis(), ok = true)
                     }
-                    // Wait from completion, so a slow request never overlaps the next check.
-                    nextHealthAt = System.currentTimeMillis() + if (failedChecks > 0) 2_000L
-                        else ThreadLocalRandom.current().nextLong(5_000L, 10_001L)
                 }
             } else if (mutableDiagnostics.value != CoreDiagnostics()) {
                 mutableDiagnostics.value = CoreDiagnostics()
@@ -570,6 +604,8 @@ class DesktopController(
     }
     fun setCrashGuard(enabled: Boolean) = change { it.copy(crashGuard = enabled) }
     fun setDefaultDnsPolicy(policy: DnsPolicy) = change { it.copy(defaultDnsPolicy = policy.name) }
+    fun setTlsHandshake(recordFragment: Boolean, keyShare: app.lernet.engine.compile.RealityKeyShare) =
+        change { it.copy(tlsRecordFragment = recordFragment, realityKeyShare = keyShare.storage) }
     fun setJournalMaxMb(value: Int) = change { it.copy(journalMaxMb = value.coerceIn(1, 500)) }
     fun setDefaults(mtu: Int, xmux: String, dnsServer: String, logLevel: String) = change {
         it.copy(tunMtu = mtu.coerceIn(1280, 9000), xmuxConcurrency = xmux.trim(),
@@ -707,9 +743,9 @@ class DesktopController(
             dnsJson = profile.dnsJson,
             dnsPolicy = runCatching {
                 DnsPolicy.valueOf(if (profile.dnsPolicy == "SYSTEM") saved.defaultDnsPolicy else profile.dnsPolicy)
-            }.getOrDefault(DnsPolicy.UNDERLAY),
+            }.getOrDefault(DnsPolicy.DEFAULT),
             ruleSetDirectory = ruleSetDir.toString(),
-            defaults = EngineDefaults(saved.tunMtu, saved.xmuxConcurrency, saved.directDnsServer, strictRoute = saved.strictRoute),
+            defaults = saved.engineDefaults(),
             platform = EnginePlatform.WINDOWS,
             userProxy = userProxy,
             appProxy = appProxy,
@@ -863,6 +899,19 @@ class DesktopController(
     private fun reportConnectionError(message: String, routeOwnerId: String? = null) {
         tunnel.logDiagnostic("Подключение не запущено: $message")
         mutable.update { it.copy(message = message, connectionError = ConnectionError(message, routeOwnerId)) }
+    }
+
+    private fun onBlockingSuspected(sign: BlockingSign) {
+        val text = BlockingDetector.message(sign)
+        mutable.update { it.copy(healthMessage = text, healthVerified = false) }
+        if (!desiredConnection) return
+        val failedId = state.value.saved.selectedProfileId ?: return
+        failoverRunner.launch {
+            if (!tryFailover(failedId) && desiredConnection) {
+                // No other config to switch to: keep the tunnel, say honestly what we saw.
+                mutable.update { it.copy(healthMessage = "$text Другого конфига в папке нет.") }
+            }
+        }
     }
 
     private fun tryFailover(failedProfileId: String): Boolean {

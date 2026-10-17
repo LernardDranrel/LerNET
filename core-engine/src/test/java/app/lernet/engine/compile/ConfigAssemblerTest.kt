@@ -1,5 +1,6 @@
 package app.lernet.engine.compile
 
+import app.lernet.config.model.DnsPolicy
 import app.lernet.config.model.NormalizedOutbound
 import app.lernet.engine.RunMode
 import app.lernet.routing.CompiledRoute
@@ -159,6 +160,7 @@ class ConfigAssemblerTest {
             RunMode.FULL_VPN,
             "warn",
             dnsJson = root["dns"]!!.toString(),
+            dnsPolicy = DnsPolicy.UNDERLAY,
         )
         assertThat(assembled.isValid).isTrue()
         val compiled = json.parseToJsonElement(assembled.json).jsonObject
@@ -185,7 +187,7 @@ class ConfigAssemblerTest {
 
     @Test
     fun defaultDnsServersUse114TypedForm() {
-        val assembled = ConfigAssembler.assemble(sampleOutbound(), catchAllProxy(), RunMode.FULL_VPN, "warn")
+        val assembled = ConfigAssembler.assemble(sampleOutbound(), catchAllProxy(), RunMode.FULL_VPN, "warn", dnsPolicy = DnsPolicy.UNDERLAY)
         val servers = json.parseToJsonElement(assembled.json).jsonObject["dns"]!!.jsonObject["servers"]!!.jsonArray
         val types = servers.map { it.jsonObject["type"]!!.jsonPrimitive.content }
         assertThat(types).containsExactly("udp", "local").inOrder()
@@ -231,6 +233,7 @@ class ConfigAssemblerTest {
             RunMode.FULL_VPN,
             "info",
             dnsJson = dns,
+            dnsPolicy = DnsPolicy.UNDERLAY,
         )
         assertThat(assembled.isValid).isTrue()
         assertThat(assembled.notes.joinToString()).contains("dropped detour=direct")
@@ -257,6 +260,7 @@ class ConfigAssemblerTest {
             RunMode.FULL_VPN,
             "warn",
             dnsJson = modern,
+            dnsPolicy = DnsPolicy.UNDERLAY,
         )
         assertUnderlayDns(assembled.json, assembled.notes)
         assertThat(assembled.json).doesNotContain("\"type\":\"tls\"")
@@ -274,11 +278,11 @@ class ConfigAssemblerTest {
             ],"final":"dns-remote","strategy":"ipv4_only"},
             "route":{"final":"proxy"}}
         """.trimIndent()
-        val stamped = DnsBlock.enforceCompiledRemote(compiled, "proxy")
+        val stamped = DnsBlock.enforceCompiledRemote(compiled, "proxy", DnsPolicy.UNDERLAY)
         assertUnderlayDns(stamped.json, stamped.notes)
         assertThat(stamped.json).doesNotContain("\"detour\":\"proxy\"")
         assertThat(stamped.json).doesNotContain("/dns-query")
-        val again = DnsBlock.enforceCompiledRemote(stamped.json, "proxy")
+        val again = DnsBlock.enforceCompiledRemote(stamped.json, "proxy", DnsPolicy.UNDERLAY)
         assertUnderlayDns(again.json, again.notes)
         assertThat(
             json.parseToJsonElement(again.json).jsonObject["route"]!!.jsonObject["final"]
@@ -316,7 +320,8 @@ class ConfigAssemblerTest {
                 RunMode.FULL_VPN,
                 "info",
                 dnsJson = dns,
-            )
+            dnsPolicy = DnsPolicy.UNDERLAY,
+        )
             assertThat(assembled.isValid).isTrue()
             assertUnderlayDns(assembled.json, assembled.notes)
             assertThat(assembled.notes.filter { it.startsWith("dns added") }.joinToString()).doesNotContain("detour=")
@@ -337,6 +342,7 @@ class ConfigAssemblerTest {
             RunMode.PROXY,
             "warn",
             dnsJson = legacy,
+            dnsPolicy = DnsPolicy.UNDERLAY,
         )
         val servers = json.parseToJsonElement(assembled.json).jsonObject["dns"]!!.jsonObject["servers"]!!.jsonArray
         assertThat(servers[0].jsonObject["type"]?.jsonPrimitive?.content).isEqualTo("local")
@@ -362,6 +368,7 @@ class ConfigAssemblerTest {
             RunMode.FULL_VPN,
             "info",
             dnsJson = dns,
+            dnsPolicy = DnsPolicy.UNDERLAY,
         )
         val servers = json.parseToJsonElement(assembled.json).jsonObject["dns"]!!.jsonObject["servers"]!!.jsonArray
         assertThat(servers.map { it.jsonObject["tag"]?.jsonPrimitive?.content }).doesNotContain("remote")
@@ -381,6 +388,7 @@ class ConfigAssemblerTest {
             RunMode.FULL_VPN,
             "warn",
             dnsJson = dnsJson,
+            dnsPolicy = DnsPolicy.UNDERLAY,
         )
         assertThat(assembled.isValid).isTrue()
         val root = json.parseToJsonElement(assembled.json).jsonObject
@@ -406,7 +414,7 @@ class ConfigAssemblerTest {
 
     @Test
     fun typicalVlessXhttpDnsHasNoDanglingTags() {
-        val assembled = ConfigAssembler.assemble(xhttpOutbound(), catchAllProxy(), RunMode.FULL_VPN, "warn")
+        val assembled = ConfigAssembler.assemble(xhttpOutbound(), catchAllProxy(), RunMode.FULL_VPN, "warn", dnsPolicy = DnsPolicy.UNDERLAY)
         val root = json.parseToJsonElement(assembled.json).jsonObject
         assertThat(DnsDependency.dangling(root)).isEmpty()
         val dns = root["dns"]!!.jsonObject

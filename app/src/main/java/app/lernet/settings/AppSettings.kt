@@ -15,7 +15,7 @@ data class AppSettings(
     val dismissedBannerKey: String? = null,
     val journalMaxMb: Int = 100,
     val engineDefaults: EngineDefaults = EngineDefaults(),
-    val defaultDnsPolicy: DnsPolicy = DnsPolicy.UNDERLAY,
+    val defaultDnsPolicy: DnsPolicy = DnsPolicy.DEFAULT,
     val lockdownHintDismissed: Boolean = false,
     /** Own persistent login/password for the local proxy; empty means random for every connection. */
     /** Android 13+: the notification permission was offered once, at the first connection. */

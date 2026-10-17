@@ -3,6 +3,7 @@ package app.lernet.desktop
 import app.lernet.config.net.LocalProxyAccess
 import app.lernet.config.net.LocalProxyHttp
 import java.util.concurrent.TimeUnit
+import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -151,59 +152,68 @@ internal object WindowsRouteInspector {
     }
 }
 
-/** An HTTP request from the Windows process tests the path used by applications. */
+/**
+ * An HTTP request from the Windows process tests the path used by applications.
+ *
+ * No custom User-Agent (the old `LerNET-health/1` marked every check). The client lives for the
+ * whole session with a long keep-alive, so a repeated check reuses the open connection instead
+ * of a new handshake through the tunnel. A failed check drops the pool: the confirming check
+ * must not reuse a dead socket.
+ */
 internal object WindowsTunnelHealth {
+    private const val KEEP_ALIVE_MIN = 10L
+    private var cachedKey: Any? = null
+    private var cachedClient: OkHttpClient? = null
+
+    @Synchronized
+    private fun clientFor(access: LocalProxyAccess?, timeoutMs: Int): OkHttpClient {
+        val key = listOf(access, timeoutMs)
+        cachedClient?.takeIf { cachedKey == key }?.let { return it }
+        drop()
+        val base = OkHttpClient.Builder()
+            .connectionPool(ConnectionPool(1, KEEP_ALIVE_MIN, TimeUnit.MINUTES))
+            .connectTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            .readTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            .callTimeout(timeoutMs.toLong() * 2, TimeUnit.MILLISECONDS)
+            .followRedirects(false).followSslRedirects(false)
+            .retryOnConnectionFailure(false)
+        val builder = if (access != null) LocalProxyHttp.via(base, access) else base.proxy(Proxy.NO_PROXY)
+        return builder.build().also {
+            cachedKey = key
+            cachedClient = it
+        }
+    }
+
+    @Synchronized
+    fun drop() {
+        cachedClient?.let {
+            it.connectionPool.evictAll()
+            it.dispatcher.executorService.shutdown()
+        }
+        cachedClient = null
+        cachedKey = null
+    }
+
     fun check(url: String, mode: RunMode, timeoutMs: Int = 5_000,
               routeCheck: (String) -> String? = WindowsRouteInspector::check,
               proxyAccess: LocalProxyAccess? = null): TunnelHealthResult {
         if (mode == RunMode.FULL_VPN) {
             routeCheck(url)?.let { return TunnelHealthResult(error = it, routeConflict = true) }
         }
-        if (mode == RunMode.PROXY) {
+        if (mode == RunMode.PROXY && proxyAccess == null) {
             // The local proxy requires a login and password; never fall back to a direct request.
-            return proxyAccess?.let { checkThroughProxy(url, it, timeoutMs) }
-                ?: TunnelHealthResult(error = "Нет данных для входа в локальный прокси")
+            return TunnelHealthResult(error = "Нет данных для входа в локальный прокси")
         }
-        val proxy = Proxy.NO_PROXY
-        val start = System.nanoTime()
-        var connection: HttpURLConnection? = null
-        return try {
-            val request = (URL(url).openConnection(proxy) as HttpURLConnection).also { connection = it }
-            request.connectTimeout = timeoutMs
-            request.readTimeout = timeoutMs
-            request.instanceFollowRedirects = false
-            request.setRequestProperty("User-Agent", "LerNET-health/1")
-            val code = request.responseCode
-            if (code in 200..399) TunnelHealthResult((System.nanoTime() - start) / 1_000_000)
-            else TunnelHealthResult(error = "HTTP $code")
-        } catch (error: Exception) {
-            TunnelHealthResult(error = error.message?.take(100) ?: error.javaClass.simpleName)
-        } finally {
-            connection?.disconnect()
-        }
-    }
-
-    private fun checkThroughProxy(url: String, access: LocalProxyAccess, timeoutMs: Int): TunnelHealthResult {
-        val client = LocalProxyHttp.via(OkHttpClient.Builder(), access)
-            .connectTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
-            .readTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
-            .callTimeout(timeoutMs.toLong() * 2, TimeUnit.MILLISECONDS)
-            .followRedirects(false).followSslRedirects(false)
-            .retryOnConnectionFailure(false)
-            .build()
+        val client = clientFor(if (mode == RunMode.PROXY) proxyAccess else null, timeoutMs)
         val start = System.nanoTime()
         return try {
-            val request = Request.Builder().url(url).header("User-Agent", "LerNET-health/1").build()
-            client.newCall(request).execute().use { response ->
+            client.newCall(Request.Builder().url(url).build()).execute().use { response ->
                 if (response.code in 200..399) TunnelHealthResult((System.nanoTime() - start) / 1_000_000)
                 else TunnelHealthResult(error = "HTTP ${response.code}")
             }
         } catch (error: Exception) {
             TunnelHealthResult(error = error.message?.take(100) ?: error.javaClass.simpleName)
-        } finally {
-            client.connectionPool.evictAll()
-            client.dispatcher.executorService.shutdown()
-        }
+        }.also { if (it.latencyMs == null) drop() }
     }
 
     fun networkSignature(): String = NetworkInterface.getNetworkInterfaces().toList()

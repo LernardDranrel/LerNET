@@ -299,7 +299,7 @@
     <string name="cfg_disguise">Маскировка</string>
     <string name="cfg_disguise_why">SNI и Reality — как узел представляется сети. Ключ Reality целиком не показывается.</string>
     <string name="cfg_dns">DNS</string>
-    <string name="cfg_dns_why">Куда отправлять запросы имён сайтов</string>
+    <string name="cfg_dns_why">Куда уходят запросы имён сайтов. По умолчанию — через VPN, чтобы сеть их не видела.</string>
     <string name="cfg_routes">Маршруты</string>
     <string name="cfg_routes_why">Куда пойдёт трафик после DNS. Дерево правится на отдельном экране.</string>
     <string name="cfg_routes_open">Открыть маршруты</string>
@@ -318,12 +318,13 @@
     <string name="cfg_dns_address">Адрес</string>
     <string name="cfg_effective">Как уйдёт: %1$s</string>
     <string name="cfg_overridden">переопределено системой</string>
-    <string name="cfg_keep_system">DNS вашей сети (Wi-Fi/оператора)</string>
+    <string name="cfg_dns_tunnel">DNS через VPN (по умолчанию)</string>
+    <string name="cfg_keep_system">DNS вашей сети (Wi-Fi/оператора) — сеть видит имена сайтов</string>
     <string name="cfg_use_profile">DNS из профиля</string>
-    <string name="cfg_dns_warning_title">DNS через VPN может не отвечать</string>
-    <string name="cfg_dns_warning_body">На некоторых серверах DNS через VPN не отвечает. Если сайты перестанут открываться, верните «DNS сети».</string>
+    <string name="cfg_dns_warning_title">DNS из профиля</string>
+    <string name="cfg_dns_warning_body">Будут использованы серверы DNS из профиля как есть. Если они идут мимо туннеля, сеть видит имена сайтов. Если сайты перестанут открываться, верните «DNS через VPN».</string>
     <string name="cfg_dns_warning_confirm">Всё равно DNS профиля</string>
-    <string name="cfg_reason_dns_dropped">Настройка DNS заменена на рабочую. %1$s</string>
+    <string name="cfg_reason_dns_dropped">В режиме «DNS вашей сети» DNS профиля через туннель не используется. %1$s</string>
     <string name="cfg_reason_detour">Лишний промежуточный выход убран — он ломал подключение. %1$s</string>
     <string name="cfg_reason_xmux">Своего xmux не было, система поставила общий пул. %1$s</string>
     <string name="cfg_reason_log">Подключение поднимает warn и error до info, чтобы в журнале были строки DNS.</string>
@@ -565,4 +566,13 @@
     <string name="group_grip">Перетащить</string>
     <string name="route_windows_only">Только Windows · неактивно на Android</string>
     <string name="route_windows_only_explanation">Эта ветка зависит от условия Windows-процессов и неактивна на Android вместе с дочерними правилами. Исходные условия и состояние включения сохранены для переноса. Для этого устройства можно создать отдельную ветку с Android-приложениями или изменить условия этой ветки.</string>
+    <string name="settings_tls_title">Рукопожатие TLS</string>
+    <string name="settings_tls_help">Для сетей, где фильтр режет или теряет первое сообщение защищённого соединения. Действует для узлов VLESS, VMess, Trojan с TLS или Reality. Значения, записанные в самом профиле, важнее. Вступит в силу при следующем подключении.</string>
+    <string name="settings_tls_fragment">Дробить первое сообщение TLS</string>
+    <string name="settings_tls_fragment_help">Разбивает приветствие на несколько записей TLS (record_fragment). Помогает, если соединение рвётся или молчит сразу после начала рукопожатия. Немного замедляет подключение. По умолчанию выключено.</string>
+    <string name="settings_reality_key_share">Обмен ключами Reality</string>
+    <string name="settings_key_share_auto">Как в отпечатке</string>
+    <string name="settings_key_share_hybrid">Гибридный</string>
+    <string name="settings_key_share_classical">Короткий</string>
+    <string name="settings_key_share_help">«Короткий» убирает большой постквантовый ключ из приветствия — оно меньше и реже теряется. Работает только с серверами Xray старше 26.9.8; с новыми серверами связь не установится.</string>
 </resources>

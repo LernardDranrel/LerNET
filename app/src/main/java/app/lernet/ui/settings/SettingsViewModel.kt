@@ -42,6 +42,8 @@ sealed class SettingsIntent {
     data class SetLogLevel(val level: String) : SettingsIntent()
 
     data class SetTunMtu(val value: Int) : SettingsIntent()
+    data class SetTlsRecordFragment(val enabled: Boolean) : SettingsIntent()
+    data class SetRealityKeyShare(val value: app.lernet.engine.compile.RealityKeyShare) : SettingsIntent()
 
     data class SetXmuxConcurrency(val value: String) : SettingsIntent()
 
@@ -96,6 +98,10 @@ class SettingsViewModel @Inject constructor(
                 is SettingsIntent.SetXmuxConcurrency -> if (intent.value in setOf("1-1", "8-8", "16-16", "32-32")) {
                     settingsStore.setEngineDefaults(current.engineDefaults.copy(xmuxConcurrency = intent.value))
                 }
+                is SettingsIntent.SetTlsRecordFragment ->
+                    settingsStore.setEngineDefaults(current.engineDefaults.copy(tlsRecordFragment = intent.enabled))
+                is SettingsIntent.SetRealityKeyShare ->
+                    settingsStore.setEngineDefaults(current.engineDefaults.copy(realityKeyShare = intent.value.storage))
                 is SettingsIntent.SetDefaultDnsPolicy -> settingsStore.setDefaultDnsPolicy(intent.value)
                 is SettingsIntent.SetDirectDnsServer -> if (EngineDefaults.validIpv4(intent.value)) {
                     settingsStore.setEngineDefaults(current.engineDefaults.copy(directDnsServer = intent.value))

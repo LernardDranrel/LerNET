@@ -236,8 +236,8 @@ fun interface ExpertPolicyPersistence {
 }
 
 data class ExpertProbeSchedule(
-    val minimumIntervalMs: Long = 3_000,
-    val maximumIntervalMs: Long = 7_000,
+    val minimumIntervalMs: Long = 20_000,
+    val maximumIntervalMs: Long = 60_000,
     val activeTimeoutMs: Long = 4_000,
     val candidateTimeoutMs: Long = 30_000,
     val failedChecksBeforeRecovery: Int = 2,
