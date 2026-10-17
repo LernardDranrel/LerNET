@@ -158,6 +158,7 @@ class ConnectionHeroTest {
                             state = ConnectionState.RECONNECTING, activeProfileId = profile.id, tried = report,
                         ),
                         activeProfile = profile, profiles = listOf(profile), engineAvailable = true,
+                        skippedRules = listOf("Блокнот на работе"),
                     ),
                     onIntent = {}, onOpenDrawer = {}, onOpenSettings = {}, onOpenDiag = {},
                     onOpenRoutes = {}, onRefreshHop = {},
@@ -165,6 +166,9 @@ class ConnectionHeroTest {
             }
         }
         rule.onNodeWithText("Нет связи · VPN держим").assertExists()
+        rule.onNodeWithText("Конфиг из другой папки").assertExists()
+        rule.onNodeWithText("Выключить VPN").assertExists()
+        rule.onNodeWithText("Пропущенные условия").assertExists()
         rule.onNodeWithText("Все конфиги папки «Европа» недоступны").assertExists()
         rule.onNodeWithText("Helsinki").assertExists()
         val screenshot = File("build/reports/ui/mobile-home-all-configs-down.png")

@@ -108,7 +108,7 @@ internal fun LazyListScope.externalProfileDefinitions(
             Text("Сохранённый адаптер: ${profile.interfaceBinding?.name}", color = ExpertColors.text)
             Text(
                 "В профиле есть расширенные настройки. Упрощённая форма их не перезаписывает. " +
-                    "Для изменения используйте JSON редактор профиля в обычном режиме VPN.",
+                    "Для изменения используй JSON редактор профиля в обычном режиме VPN.",
                 color = ExpertColors.muted, fontSize = 13.sp
             )
             TextButton(onClick = { importedInterfaceDetails(profile) }) { Text("Сохранённая привязка и пути") }
@@ -157,9 +157,9 @@ internal fun ExpertExternalExitEditor(
     val selectedInterface = state.interfaces.firstOrNull { sameBinding(it.binding, binding) }
     val retainedBinding = original != null && sameBinding(initial?.binding, binding)
     val errors = ExternalExitProfiles.validate(request) + buildList {
-        if (auth && !corporate && username.isEmpty()) add("Для авторизации укажите имя пользователя.")
+        if (auth && !corporate && username.isEmpty()) add("Для авторизации укажи имя пользователя.")
         if (corporate && selectedInterface?.eligible != true && !retainedBinding) {
-            add("Обновите список и выберите доступный подтверждённый интерфейс Windows.")
+            add("Обнови список и выбери доступный подтверждённый интерфейс Windows.")
         }
     }
     LaunchedEffect(pendingToken, state.externalSaveAck, state.externalSaveErrorRequestId) {
@@ -196,14 +196,14 @@ internal fun ExpertExternalExitEditor(
         } else {
             ExpertTag(externalKindName(kind))
             Text(
-                "Идентификатор профиля и связи сохраняются. Для другого типа транспорта создайте новый профиль.",
+                "Идентификатор профиля и связи сохраняются. Для другого типа транспорта создай новый профиль.",
                 color = ExpertColors.muted, fontSize = 12.sp
             )
         }
         if (corporate) {
             ExpertMessage(
                 "Привязываемся к интерфейсу Windows",
-                "Для корпоративного VPN сначала подключите его обычным клиентом. LerNET направит соединения через выбранный адаптер; " +
+                "Для корпоративного VPN сначала подключи его обычным клиентом. LerNET направит соединения через выбранный адаптер; " +
                     "сам SSTP или другой системный VPN эта форма не запускает. В списке есть и физические адаптеры: " +
                     "выбор Wi-Fi или Ethernet сам по себе не включает VPN или шифрование."
             )
@@ -228,7 +228,7 @@ internal fun ExpertExternalExitEditor(
             if (editable) {
                 ExpertSelect<VerifiedInterfaceBinding?>(
                     "Подтверждённый адаптер",
-                    listOf(null to "Выберите адаптер") + options, binding
+                    listOf(null to "Выбери адаптер") + options, binding
                 ) { binding = it }
             } else {
                 Text("Подтверждённый адаптер: ${binding?.name ?: "не выбран"}", color = ExpertColors.muted)
@@ -252,7 +252,7 @@ internal fun ExpertExternalExitEditor(
                 supportingText = {
                     Text(
                         "IPv4 или IPv6. Пустое поле задаёт 1.1.1.1 через этот выход. " +
-                            "Для внутренних имён укажите DNS компании."
+                            "Для внутренних имён укажи DNS компании."
                     )
                 }
             )
@@ -301,11 +301,11 @@ internal fun ExpertExternalExitEditor(
             }
             ExpertMessage(
                 "Прокси — отдельный путь",
-                "Протокол прокси сам по себе не гарантирует шифрование. Выбирайте доверенный сервер. " +
+                "Протокол прокси сам по себе не гарантирует шифрование. Выбирай доверенный сервер. " +
                     "Этот профиль можно использовать в нескольких ветках, папке или общем канале."
             )
         }
-        if (errors.isNotEmpty()) ExpertMessage("Проверьте поля", errors.joinToString("\n"), error = true)
+        if (errors.isNotEmpty()) ExpertMessage("Проверь поля", errors.joinToString("\n"), error = true)
     }
 }
 
@@ -327,7 +327,7 @@ internal fun ExpertExternalExitDetails(
             Text("DNS: ${request.dnsServer ?: "сохранённая настройка профиля"}", color = ExpertColors.muted)
             ExpertMessage(
                 "Привязка сохраняется между устройствами",
-                "На другом Windows-устройстве выберите его подтверждённый адаптер. На Android эта привязка не создаёт системный VPN " +
+                "На другом Windows-устройстве выбери его подтверждённый адаптер. На Android эта привязка не создаёт системный VPN " +
                     "и остаётся недоступной; ветка не получает обычный прямой выход автоматически."
             )
         } else {
@@ -388,7 +388,7 @@ internal fun ExpertImportedInterfaceDetails(
         ExpertMessage(
             "Расширенные параметры сохраняются",
             "Здесь показаны только привязка и связи со схемой. Остальные поля профиля остаются как в импорте. " +
-                "Откройте профиль в обычном режиме VPN и используйте его JSON редактор для изменения; " +
+                "Открой профиль в обычном режиме VPN и используй его JSON редактор для изменения; " +
                 "упрощённая форма не может безопасно представить все его настройки."
         )
         ExternalReferenceLinks(profile.id, state, openScope)

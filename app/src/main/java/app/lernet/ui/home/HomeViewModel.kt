@@ -76,6 +76,8 @@ data class HomeUiState(
     val showNotificationHint: Boolean = false,
     /** Proxy mode: address, login and password the user needs in other apps. */
     val proxyAccess: LocalProxyAccess? = null,
+    /** Rules of the active profile that are skipped on Android, with the condition that cannot work here. */
+    val skippedRules: List<String> = emptyList(),
 ) {
     val effectiveMode: RunMode get() = RunMode.resolve(activeProfile?.modeOverride, settings.mode)
 }
@@ -155,6 +157,8 @@ sealed class HomeEvent {
 }
 
 private data class HomeOverlay(
+    /** Titles of rules whose conditions do not work on Android (mockup 10: «Пропущенные условия»). */
+    val skippedRules: List<String> = emptyList(),
     val pendingSwitchId: String? = null,
     val pendingMode: RunMode? = null,
     /** Mode chosen while connected; apply only after VPN consent. */
@@ -267,6 +271,21 @@ class HomeViewModel @Inject constructor(
                 }
         }
         viewModelScope.launch {
+            // Re-read when the active profile changes or a session starts/stops (rules are edited between sessions).
+            combine(settingsStore.settings.map { it.activeProfileId }, controller.snapshot.map { it.state }) { id, st -> id to st }
+                .distinctUntilChanged()
+                .collectLatest { (activeId, _) ->
+                    val skipped = runCatching {
+                        val id = activeId ?: repository.profiles.first().firstOrNull()?.id ?: return@runCatching emptyList()
+                        val (ownerId, _) = repository.routingOwnerForProfile(id)
+                        val nodes = repository.listRuleNodes(ownerId)
+                        val inactive = app.lernet.ui.routes.androidInactiveRuleIds(nodes)
+                        nodes.filter { it.id in inactive && it.parentId !in inactive }.map { it.title.ifBlank { "без названия" } }
+                    }.getOrDefault(emptyList())
+                    overlay.update { it.copy(skippedRules = skipped) }
+                }
+        }
+        viewModelScope.launch {
             val legacy = settingsStore.settings.first()
             if (legacy.failoverEnabled && legacy.failoverGroupId != null) {
                 repository.setGroupAutoFailover(legacy.failoverGroupId, true)
@@ -312,6 +331,7 @@ class HomeViewModel @Inject constructor(
             showLockdownHint = LockdownHint.visible(snapshot, settings.lockdownHintDismissed, extra.lockdown),
             showNotificationHint = NotificationHint.visible(snapshot, settings.notificationHintDismissed, extra.notificationsEnabled),
             proxyAccess = LocalListeners.userProxy(snapshot.compiledJson),
+            skippedRules = extra.skippedRules,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 

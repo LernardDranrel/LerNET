@@ -77,7 +77,7 @@ internal fun ExpertDnsSettings(state: ExpertUiState, onIntent: (ExpertIntent) ->
                 "Адрес самого VPN-сервера разрешается через исходную сеть. " +
                 "Приложения со своим DoH могут выбирать DNS самостоятельно.",
         )
-        Text("Изменение попадёт в черновик. Для работающего туннеля сохраните и примените схему.")
-        if (changedElsewhere) Text("DNS уже изменён в другом окне. Закройте форму и откройте её снова.", color = ExpertColors.red)
+        Text("Изменение попадёт в черновик. Для работающего туннеля сохрани и примени схему.")
+        if (changedElsewhere) Text("DNS уже изменён в другом окне. Закрой форму и открой её снова.", color = ExpertColors.red)
     }
 }

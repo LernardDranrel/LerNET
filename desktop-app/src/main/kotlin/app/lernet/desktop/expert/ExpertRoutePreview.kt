@@ -117,9 +117,9 @@ internal fun ExpertRoutePreview(
     }
     ExpertScrollableColumn(modifier) {
         ExpertPanel("Симулятор пути") {
-            Text("Выберите соединение из истории, чтобы увидеть его путь или проверить его по текущей схеме. Проверка не отправляет трафик.",
+            Text("Выбери соединение из истории, чтобы увидеть его путь или проверить его по текущей схеме. Проверка не отправляет трафик.",
                 color = ExpertColors.muted, fontSize = 13.sp)
-            ExpertSelect<String?>("Соединение из истории", listOf(null to "Выберите запись") + state.connections.map {
+            ExpertSelect<String?>("Соединение из истории", listOf(null to "Выбери запись") + state.connections.map {
                 it.id to "${it.application} · ${it.destination} · ${it.protocol}"
             }, history?.id) { id -> state.connections.firstOrNull { it.id == id }?.let(::load) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -153,7 +153,7 @@ internal fun ExpertRoutePreview(
             }
             if (history == null && !editable) Text(
                 if (state.connections.isEmpty()) "История пока пуста. После включения туннеля здесь появятся соединения. Можно также создать свой пример."
-                else "Выберите соединение выше. Его исходные данные останутся неизменными.", color = ExpertColors.muted)
+                else "Выбери соединение выше. Его исходные данные останутся неизменными.", color = ExpertColors.muted)
             if (history != null || editable) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(version == PreviewVersion.APPLIED || version == PreviewVersion.SAVED, {
                     version = if (state.applied != null) PreviewVersion.APPLIED else PreviewVersion.SAVED
@@ -201,8 +201,8 @@ internal fun ExpertRoutePreview(
                         singleLine = true, isError = invalidSourcePort, enabled = editable)
                 }
             }
-            if (invalidPort || invalidSourcePort || invalidAddress) ExpertMessage("Проверьте параметры примера",
-                "Откройте параметры: порты должны быть от 0 до 65535, адреса — числовыми IPv4 или IPv6.", error = true)
+            if (invalidPort || invalidSourcePort || invalidAddress) ExpertMessage("Проверь параметры примера",
+                "Открой параметры: порты должны быть от 0 до 65535, адреса — числовыми IPv4 или IPv6.", error = true)
             if (history != null || editable) Button(onClick = {
                 if (version == PreviewVersion.RECORDED) version = if (state.applied != null) PreviewVersion.APPLIED else PreviewVersion.SAVED
                 showRecorded = false; calculated = true
@@ -222,7 +222,7 @@ internal fun ExpertRoutePreview(
                     PolicyPreviewConfidence.INCOMPLETE -> {
                         ExpertMessage("Недостаточно данных", "Неизвестная ранняя ветка может изменить результат. Подтверждённый путь не выбран.", warning = true)
                         result.missingFacts.forEach { Text("Нужно уточнить: $it", color = ExpertColors.muted) }
-                        ExpertSelect<Int?>("Возможные ветки", listOf(null to "Выберите ветку для просмотра") + result.candidates.map {
+                        ExpertSelect<Int?>("Возможные ветки", listOf(null to "Выбери ветку для просмотра") + result.candidates.map {
                             it.ruleIndex to "Шаг ${it.ruleIndex + 1} · ${ExpertPolicyEditing.targetName(it.rule.target.target, state)}"
                         }, candidateIndex) { candidateIndex = it }
                         selectedCandidate?.let { candidate ->

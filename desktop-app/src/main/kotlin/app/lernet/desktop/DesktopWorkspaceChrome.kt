@@ -90,9 +90,9 @@ internal fun DesktopModeTabs(
 }
 
 @Composable
-internal fun DesktopWorkspaceSidebar(onOpenNetwork: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+internal fun DesktopWorkspaceSidebar(onOpenNetwork: () -> Unit, width: androidx.compose.ui.unit.Dp = 196.dp, content: @Composable ColumnScope.() -> Unit) {
     Column(
-        Modifier.width(196.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surface).padding(horizontal = 14.dp, vertical = 24.dp),
+        Modifier.width(width).fillMaxHeight().background(MaterialTheme.colorScheme.surface).padding(horizontal = 14.dp, vertical = 24.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -107,9 +107,9 @@ internal fun DesktopWorkspaceSidebar(onOpenNetwork: () -> Unit, content: @Compos
                 Text("для Windows", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
             }
         }
-        Spacer(Modifier.height(35.dp))
-        content()
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(24.dp))
+        Column(Modifier.weight(1f)) { content() }
+        Spacer(Modifier.height(12.dp))
         OutlinedButton(onClick = onOpenNetwork, modifier = Modifier.fillMaxWidth()) { Text("Анализ сети ↗", fontSize = 12.sp) }
         Spacer(Modifier.height(12.dp))
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

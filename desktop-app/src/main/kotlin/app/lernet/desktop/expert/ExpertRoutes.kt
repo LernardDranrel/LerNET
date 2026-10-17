@@ -277,9 +277,9 @@ internal fun ExpertRoutes(
                     OutlinedButton(onClick = { editing = rootOtherwise }) { Text("Настроить ИНАЧЕ") }
                     OutlinedButton(onClick = { newNode() }) { Text("+ Дочернее правило") }
                 } else if (selected == null) {
-                    Text("Выберите блок на схеме или строку в списке", color = ExpertColors.text, fontSize = 16.sp)
+                    Text("Выбери блок на схеме или строку в списке", color = ExpertColors.text, fontSize = 16.sp)
                     Text(
-                        "Перетаскивайте блоки на схеме. Свойства, порядок и целевой выход доступны здесь.",
+                        "Перетаскивай блоки на схеме. Свойства, порядок и целевой выход доступны здесь.",
                         color = ExpertColors.muted, fontSize = 12.sp,
                     )
                 }
@@ -439,7 +439,7 @@ private fun ExpertRouteList(
             item {
                 ExpertEmpty(
                     "Пока нет правил",
-                    "Действует путь по умолчанию. Добавьте правило, чтобы изменить его для части трафика."
+                    "Действует путь по умолчанию. Добавь правило, чтобы изменить его для части трафика."
                 )
             }
         }

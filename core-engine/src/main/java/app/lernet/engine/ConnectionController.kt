@@ -129,6 +129,8 @@ class ConnectionController(
     /** Proxy mode credentials of the current session; a reconnect keeps them. */
     private var pendingUserProxy: LocalProxyAccess? = null
     private var resolveFailoverProfile: (suspend (String) -> Pair<Profile, List<RuleNodeRecord>>?)? = null
+    /** Names of profiles this session ran, so «Что пробовали» can name the config that failed first. */
+    private val profileNames = java.util.concurrent.ConcurrentHashMap<String, String>()
     private var onFailoverSelected: (suspend (String) -> Unit)? = null
     private var pendingProxyTag: String? = null
     private var pendingDnsPolicy: DnsPolicy = DnsPolicy.UNDERLAY
@@ -298,6 +300,7 @@ class ConnectionController(
     ) {
         val epoch = userIntentEpoch.incrementAndGet()
         CrashTrail.mark("controller.connect enter profile=${profile.id} mode=$mode")
+        profileNames[profile.id] = profile.name
         val outbound = profile.selectedOutbound()
         if (outbound == null) {
             dispatch(PolicyEvent.EngineFailed(ConnectionCause.InvalidConfig(listOf("нет выбранного outbound"))))
@@ -720,6 +723,13 @@ class ConnectionController(
                     val resolve = resolveFailoverProfile
                     var winner: String? = null
                     val attempts = mutableListOf<app.lernet.engine.policy.FailoverAttempt>()
+                    // The config that just failed goes first, with the reason the machine recorded.
+                    _snapshot.value.let { failed ->
+                        val name = failed.activeProfileId?.let(profileNames::get)
+                        if (name != null) attempts += app.lernet.engine.policy.FailoverAttempt(
+                            name, failedReason(failed.cause), System.currentTimeMillis(),
+                        )
+                    }
                     if (resolve != null) {
                         // Backups verified by the background checks go first: the switch takes seconds.
                         val ordered = app.lernet.engine.policy.BackupHealth.order(command.outboundIds, backupHealth, System.currentTimeMillis())
@@ -741,6 +751,7 @@ class ConnectionController(
                                 LerNetLog.w(TAG, "failover candidate probe failed: ${error.message}", error)
                                 Result.failure(error)
                             }
+                            profileNames[profile.id] = profile.name
                             if (dial.isSuccess) {
                                 winner = outboundId
                                 break
@@ -758,7 +769,7 @@ class ConnectionController(
                         }
                     }
                     onProbeResult(winner?.let(::setOf) ?: emptySet())
-                    if (winner == null && attempts.isNotEmpty()) mutex.withLock {
+                    if (winner == null && attempts.size > 0) mutex.withLock {
                         val wait = pendingRecheck?.delayMs?.let(RecheckJitter::label)
                         _snapshot.value = _snapshot.value.copy(
                             tried = app.lernet.engine.policy.FailoverReport.merge(_snapshot.value.tried, null, attempts, wait),
@@ -1291,4 +1302,16 @@ class ConnectionController(
         private const val HEALTH_TICK_MS = 1_000L
         private const val TAG = "LerNet.Engine"
     }
+
+    private fun failedReason(cause: ConnectionCause?): String = when (cause) {
+        is ConnectionCause.TunnelHealthFailed -> "сервер отвечает, но трафик через него не идёт"
+        is ConnectionCause.BlockingSuspected -> "похоже на блокировку в этой сети"
+        is ConnectionCause.DialTimeout, is ConnectionCause.ConnectTimeout -> "нет ответа · время истекло"
+        is ConnectionCause.TlsFailure, is ConnectionCause.HandshakeFailure -> "рукопожатие с сервером не прошло"
+        is ConnectionCause.ConnectionReset -> "соединение сбрасывается"
+        is ConnectionCause.WatchdogTimeout, is ConnectionCause.DnsStalled, is ConnectionCause.DnsUnreachable -> "трафик перестал идти"
+        is ConnectionCause.ReconnectExhausted -> failedReason(cause.last)
+        else -> "перестал отвечать"
+    }
+
 }

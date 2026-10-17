@@ -551,7 +551,10 @@ class ConnectionControllerTest {
         val tried = controller.snapshot.value.tried
         assertThat(tried).isNotNull()
         assertThat(tried!!.attempts.map { it.name }).containsAtLeast("резерв 2", "резерв 3")
-        assertThat(tried.attempts.first().reason).isEqualTo("нет ответа · время истекло")
+        // The config that failed first is listed first, with its own reason.
+        assertThat(tried.attempts.first().name).isEqualTo(first.name)
+        assertThat(tried.attempts.first().reason).isEqualTo("сервер отвечает, но трафик через него не идёт")
+        assertThat(tried.attempts.single { it.name == "резерв 2" }.reason).isEqualTo("нет ответа · время истекло")
         assertThat(controller.snapshot.value.state).isNotEqualTo(ConnectionState.DISCONNECTED)
         // Traffic through the tunnel again: the report goes away.
         engine.emit(EngineEvent.DnsAlive(answers = 1))

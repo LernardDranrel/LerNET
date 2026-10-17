@@ -105,6 +105,8 @@ private val panel = Color(0xFF151D2B)
 private val blue = Color(0xFF91ABFF)
 private val muted = Color(0xFFA1AEC4)
 private val green = Color(0xFF80DEBE)
+/** The one extra palette colour: amber for «нет связи · VPN держим» (same value as LerNetHold on Android). */
+internal val hold = Color(0xFFF0A93B)
 internal val APP_VERSION: String = AppVersionResource::class.java.getResourceAsStream("/lernet-version.txt")
     ?.bufferedReader()?.use { it.readText().trim() }?.takeIf { it.isNotBlank() } ?: "dev"
 private object AppVersionResource
@@ -447,9 +449,34 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
     var exportRequest by remember { mutableStateOf<ExportSelection?>(null) }
     Row(Modifier.fillMaxSize().background(background)) {
         // Mockup 03: the sidebar is not a menu any more; rules, journal and settings open from the top-right buttons.
-        DesktopWorkspaceSidebar(onOpenNetwork) {
+        // Mockup 03: folders and configs live in a permanent left column (the desktop twin of the phone drawer).
+        DesktopWorkspaceSidebar(onOpenNetwork, width = 316.dp) {
             if (tab != Tab.PROFILES) {
                 WorkspaceNavigationItem("← Главная", false, { tab = Tab.PROFILES }) { NavSymbol(Tab.PROFILES, false) }
+            }
+            ConfigList(ui.saved, tunnel, ui.busy, ui.probes, controller,
+                onImport = { groupId -> importGroupId = groupId; importOpen = true },
+                onGroupRoutes = { groupId -> routeOwnerId = "grp_$groupId"; tab = Tab.ROUTES },
+                onExportGroup = { group -> exportRequest = ExportSelection(group.id, "LerNET-${group.name.take(30)}.lernet.json") },
+                onSelect = { id -> controller.select(id); tab = Tab.PROFILES },
+            ) {
+                Box {
+                    GroupActionButton("Добавить конфиг или папку", onClick = { createMenu = true }) { color ->
+                        Text("+", color = color, fontSize = 20.sp, lineHeight = 20.sp)
+                    }
+                    DropdownMenu(createMenu, onDismissRequest = { createMenu = false }) {
+                        DropdownMenuItem(text = { Text("Импортировать конфиг") }, onClick = { importGroupId = null; importOpen = true; createMenu = false })
+                        DropdownMenuItem(text = { Text("Импорт архива LerNET") }, onClick = {
+                            createMenu = false
+                            chooseTransferFile(false)?.let(controller::importFrom)
+                        })
+                        DropdownMenuItem(text = { Text("Создать папку") }, onClick = { newGroupOpen = true; createMenu = false })
+                        DropdownMenuItem(text = { Text("Экспортировать всё") }, onClick = {
+                            createMenu = false
+                            exportRequest = ExportSelection(null, "LerNET-all.lernet.json")
+                        })
+                    }
+                }
             }
         }
         Column(Modifier.weight(1f).fillMaxHeight().padding(22.dp)) {
@@ -462,6 +489,7 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
                     Spacer(Modifier.height(4.dp))
                     Text(statusLine, style = MaterialTheme.typography.bodyMedium,
                         color = when {
+                            holding -> hold
                             ui.healthFailures >= 2 -> desktopColors.error
                             tunnel.status == TunnelStatus.RUNNING && ui.healthVerified != true -> Color(0xFFFFD27B)
                             else -> statusColor(tunnel.status)
@@ -482,41 +510,24 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
                         }
                     }
                 }
-                if (tab == Tab.PROFILES) {
-                    Spacer(Modifier.width(8.dp))
-                    Box {
-                        Button(onClick = { createMenu = true }) { Text("+ Добавить") }
-                        DropdownMenu(createMenu, onDismissRequest = { createMenu = false }) {
-                            DropdownMenuItem(text = { Text("Импортировать конфиг") }, onClick = { importGroupId = null; importOpen = true; createMenu = false })
-                            DropdownMenuItem(text = { Text("Импорт архива LerNET") }, onClick = {
-                                createMenu = false
-                                chooseTransferFile(false)?.let(controller::importFrom)
-                            })
-                            DropdownMenuItem(text = { Text("Создать папку") }, onClick = { newGroupOpen = true; createMenu = false })
-                            DropdownMenuItem(text = { Text("Экспортировать всё") }, onClick = {
-                                createMenu = false
-                                exportRequest = ExportSelection(null, "LerNET-all.lernet.json")
-                            })
-                        }
-                    }
-                }
             }
             if (ui.message.isNotBlank() && ui.message != statusLine)
                 Text(ui.message, color = if (ui.connectionError != null) desktopColors.error else muted, maxLines = 2)
                 if (ui.networkWarning.isNotBlank()) Text(ui.networkWarning, color = Color(0xFFF1CC80), fontSize = 12.sp, maxLines = 3)
             ui.guardProblem?.let { Text(it, color = desktopColors.error, fontSize = 12.sp, maxLines = 3) }
             Spacer(Modifier.height(18.dp))
-            if (tab == Tab.PROFILES && holding) ui.tried?.let { FailoverReportCard(it) }
             when (tab) {
-                Tab.PROFILES -> Profiles(ui.saved, tunnel, ui.busy, ui.probes, ui.tunnelLatencyMs, trace, controller,
-                    onRequestElevation = onRequestElevation,
+                Tab.PROFILES -> ProfileHome(ui.saved, tunnel, ui.busy, ui.probes, ui.tunnelLatencyMs, trace, controller,
                     onImport = { groupId -> importGroupId = groupId; importOpen = true }, onDiagnostics = { traceDetailsRequest++; tab = Tab.DIAGNOSTICS },
-                    onGroupRoutes = { groupId -> routeOwnerId = "grp_$groupId"; tab = Tab.ROUTES },
-                    onExportGroup = { group -> exportRequest = ExportSelection(group.id, "LerNET-${group.name.take(30)}.lernet.json") },
-                    localProxy = ui.localProxy.takeIf { tunnel.status == TunnelStatus.RUNNING })
+                    localProxy = ui.localProxy.takeIf { tunnel.status == TunnelStatus.RUNNING },
+                    tried = ui.tried.takeIf { holding }, history = connectionHistory,
+                    onOpenRules = { owner -> routeOwnerId = owner; tab = Tab.ROUTES },
+                    onOpenJournal = { tab = Tab.DIAGNOSTICS })
                 Tab.ROUTES -> DesktopRoutes(ui.saved, controller, routeOwnerId)
                 Tab.DIAGNOSTICS -> Diagnostics(ui.saved, tunnel, diagnostics, connectionHistory, trace, traceDetailsRequest, controller)
-                Tab.SETTINGS -> Settings(ui.saved, controller, onRequestElevation)
+                Tab.SETTINGS -> Settings(ui.saved, controller, onRequestElevation,
+                    localProxy = ui.localProxy.takeIf { tunnel.status == TunnelStatus.RUNNING },
+                    locked = ui.busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RECONNECTING))
             }
         }
     }
@@ -602,20 +613,15 @@ private fun NavSymbol(tab: Tab, selected: Boolean) {
 }
 
 @Composable
-private fun Profiles(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, probes: Map<String, ProbeResult>, tunnelLatencyMs: Long?, trace: TraceSnapshot,
-    controller: DesktopController, onRequestElevation: () -> Unit, onImport: (String?) -> Unit, onDiagnostics: () -> Unit, onGroupRoutes: (String) -> Unit,
-    onExportGroup: (StoredGroup) -> Unit, localProxy: LocalProxyAccess? = null) {
-    val selected = saved.profiles.firstOrNull { it.id == saved.selectedProfileId }
-    LaunchedEffect(selected?.id) { selected?.let { controller.probe(listOf(it.id)) } }
+private fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, probes: Map<String, ProbeResult>,
+    controller: DesktopController, onImport: (String?) -> Unit, onGroupRoutes: (String) -> Unit,
+    onExportGroup: (StoredGroup) -> Unit, onSelect: (String) -> Unit, addAction: @Composable () -> Unit) {
     val selectionLocked = busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RECONNECTING)
-    var editProfile by remember { mutableStateOf<StoredProfile?>(null) }
     var delete by remember { mutableStateOf<StoredProfile?>(null) }
     var renameGroup by remember { mutableStateOf<StoredGroup?>(null) }
     var deleteGroup by remember { mutableStateOf<StoredGroup?>(null) }
     var groupMenu by remember { mutableStateOf<String?>(null) }
     var moveMenu by remember { mutableStateOf(false) }
-    var showJson by remember(selected?.id) { mutableStateOf(false) }
-    var showDetails by remember(selected?.id) { mutableStateOf(false) }
     var expanded by remember(saved.groups) { mutableStateOf(saved.groups.map { it.id }.toSet()) }
     val profileBounds = remember { mutableStateMapOf<String, Rect>() }
     val groupBounds = remember { mutableStateMapOf<String, Rect>() }
@@ -667,12 +673,13 @@ private fun Profiles(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, 
         draggingGroupId = null
         groupDragDelta = Offset.Zero
     }
-    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-        Column(Modifier.width(294.dp)) {
+    Column(Modifier.fillMaxSize()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Профили · " + saved.profiles.size, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                TextButton(onClick = { controller.probe(saved.profiles.map { it.id }) }, enabled = saved.profiles.isNotEmpty() && probes.values.none { it.checking }) { Text("Проверить все") }
+                Text("Конфиги · " + saved.profiles.size, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                addAction()
             }
+            TextButton(onClick = { controller.probe(saved.profiles.map { it.id }) }, enabled = saved.profiles.isNotEmpty() && probes.values.none { it.checking },
+                contentPadding = PaddingValues(horizontal = 0.dp)) { Text("Проверить все", fontSize = 12.sp) }
             Text("Сервер TCP/TLS  ·  Канал HTTP", color = muted, fontSize = 11.sp)
             if (probes.isNotEmpty()) {
                 val completed = probes.values.count { !it.checking }
@@ -769,7 +776,7 @@ private fun Profiles(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, 
                             onBounds = { profileBounds[profile.id] = it },
                             onDragStart = { local -> beginDrag(profile.id, (profileBounds[profile.id]?.topLeft ?: Offset.Zero) + local) },
                             onDrag = { dragDelta += it }, onDragEnd = finishDrag,
-                            onDelete = { delete = profile }) { controller.select(profile.id) }
+                            onDelete = { delete = profile }) { onSelect(profile.id) }
                     }
                 }
                 items(saved.profiles.filter { it.groupId == null }, key = { it.id }) { profile ->
@@ -784,7 +791,7 @@ private fun Profiles(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, 
                         onBounds = { profileBounds[profile.id] = it },
                         onDragStart = { local -> beginDrag(profile.id, (profileBounds[profile.id]?.topLeft ?: Offset.Zero) + local) },
                         onDrag = { dragDelta += it }, onDragEnd = finishDrag,
-                        onDelete = { delete = profile }) { controller.select(profile.id) }
+                        onDelete = { delete = profile }) { onSelect(profile.id) }
                 }
                 if (draggingId != null) item("drop-root") {
                     DisposableEffect(Unit) { onDispose { rootBounds = null } }
@@ -795,49 +802,109 @@ private fun Profiles(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, 
                     }
                 }
             }
+    }
+    renameGroup?.let { group ->
+        NameDialog("Название папки", group.name, { renameGroup = null }) {
+            controller.renameGroup(group.id, it); renameGroup = null
         }
-        Column(Modifier.weight(1f).fillMaxHeight().then(if (selected != null) Modifier.verticalScroll(rememberScrollState()) else Modifier)) {
-            if (selected == null) {
-                Panel { HomeModeSelector(saved, null, selectionLocked, controller, onRequestElevation) }
-                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                    Column(Modifier.widthIn(max = 490.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Surface(color = Color.Black, shape = androidx.compose.foundation.shape.CircleShape) {
-                            Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) { Text("L", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold) }
-                        }
-                        Spacer(Modifier.height(20.dp))
-                        Text("Ваши подключения — в одном месте", style = MaterialTheme.typography.headlineSmall, color = desktopColors.onBackground)
-                        Spacer(Modifier.height(8.dp))
-                        Text("Добавьте VLESS-ссылку, sing-box JSON или подписку. После импорта здесь появятся управление подключением и итоговая конфигурация.", color = muted, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                        Spacer(Modifier.height(20.dp))
-                        Button(onClick = { onImport(null) }) { Text("+ Добавить профиль") }
-                    }
+    }
+    deleteGroup?.let { group ->
+        val confirm = { controller.deleteGroup(group.id); deleteGroup = null }
+        AlertDialog(
+            modifier = Modifier.onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) false else when (event.key) {
+                    Key.Enter, Key.NumPadEnter -> { confirm(); true }
+                    Key.Escape -> { deleteGroup = null; true }
+                    else -> false
                 }
-            } else {
-                val endpoint = remember(selected.selectedOutbound?.singBoxJson) {
-                    selected.selectedOutbound?.let { OutboundPatch.read(it.singBoxJson) }
+            },
+            onDismissRequest = { deleteGroup = null },
+            title = { Text("Удалить папку «${group.name}»?") },
+            text = { Text("Конфиги останутся в общем списке. Правила папки будут удалены.") },
+            confirmButton = { TextButton(onClick = confirm) { Text("Удалить") } },
+            dismissButton = { TextButton(onClick = { deleteGroup = null }) { Text("Отмена") } },
+        )
+    }
+    delete?.let { profile ->
+        AlertDialog(
+            modifier = Modifier.onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) false else when (event.key) {
+                    Key.Enter, Key.NumPadEnter -> { controller.delete(profile.id); delete = null; true }
+                    Key.Escape -> { delete = null; true }
+                    else -> false
                 }
-                val active = busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RUNNING, TunnelStatus.RECONNECTING)
+            },
+            onDismissRequest = { delete = null },
+            title = { Text("Удалить «" + profile.name + "»?") },
+            text = { Text("Профиль и его правила будут удалены.") },
+            confirmButton = {
+                TextButton(onClick = { controller.delete(profile.id); delete = null }) { Text("Удалить") }
+            },
+            dismissButton = { TextButton(onClick = { delete = null }) { Text("Отмена") } },
+        )
+    }
+}
+
+@Composable
+internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, probes: Map<String, ProbeResult>, tunnelLatencyMs: Long?, trace: TraceSnapshot,
+    controller: DesktopController, onImport: (String?) -> Unit, onDiagnostics: () -> Unit,
+    localProxy: LocalProxyAccess?, tried: FailoverReport?, history: List<LiveConnection>,
+    onOpenRules: (String) -> Unit, onOpenJournal: () -> Unit) {
+    val selected = saved.profiles.firstOrNull { it.id == saved.selectedProfileId }
+    LaunchedEffect(selected?.id) { selected?.let { controller.probe(listOf(it.id)) } }
+    var editProfile by remember { mutableStateOf<StoredProfile?>(null) }
+    var delete by remember { mutableStateOf<StoredProfile?>(null) }
+    var moveMenu by remember { mutableStateOf(false) }
+    var showJson by remember(selected?.id) { mutableStateOf(false) }
+    var showDetails by remember(selected?.id) { mutableStateOf(false) }
+    if (selected == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(Modifier.widthIn(max = 490.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Surface(color = Color.Black, shape = androidx.compose.foundation.shape.CircleShape) {
+                    Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) { Text("L", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold) }
+                }
+                Spacer(Modifier.height(20.dp))
+                Text("Ваши подключения — в одном месте", style = MaterialTheme.typography.headlineSmall, color = desktopColors.onBackground)
+                Spacer(Modifier.height(8.dp))
+                Text("Добавьте VLESS-ссылку, sing-box JSON или подписку. После импорта здесь появятся управление подключением и итоговая конфигурация.", color = muted, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Spacer(Modifier.height(20.dp))
+                Button(onClick = { onImport(null) }) { Text("+ Добавить профиль") }
+            }
+        }
+        return
+    }
+    val endpoint = remember(selected.selectedOutbound?.singBoxJson) {
+        selected.selectedOutbound?.let { OutboundPatch.read(it.singBoxJson) }
+    }
+    val active = busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RUNNING, TunnelStatus.RECONNECTING)
+    val holding = tried != null
+    val proxyMode = controller.effectiveMode(selected) == RunMode.PROXY
+    val group = saved.groups.firstOrNull { it.id == selected.groupId }
+    val (statusTitle, statusTone) = when {
+        holding -> "Нет связи · VPN держим" to hold
+        tunnel.status == TunnelStatus.RUNNING -> "Подключено" to green
+        active -> "Подключаемся…" to blue
+        else -> "Отключено" to muted
+    }
+    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+        Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())) {
                 Panel {
-                    saved.groups.firstOrNull { it.id == selected.groupId }?.let { group ->
-                        Text(group.name + if (group.autoSwap) "  ·  автосмена" else "", color = blue, fontSize = 12.sp)
-                    }
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(22.dp)) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("ВЫБРАННОЕ ПОДКЛЮЧЕНИЕ", color = blue, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                            Text(selected.name, style = MaterialTheme.typography.headlineMedium, maxLines = 2,
-                                overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
-                            Text(listOfNotNull(selected.selectedOutbound?.type?.uppercase(),
-                                if (controller.effectiveMode(selected) == RunMode.PROXY) "Локальный прокси" else "VPN · весь трафик")
-                                .joinToString("  ·  "), color = muted, fontSize = 13.sp)
-                            Text(endpoint?.server.orEmpty(), color = muted, fontSize = 12.sp,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        ConnectionPower(active = active, busy = busy, onClick = {
+                    Column(Modifier.fillMaxWidth().testTag("home_center"), horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        ConnectionPower(active = active, busy = busy, holding = holding, onClick = {
                             if (active) controller.disconnect() else controller.connect()
                         })
+                        Text(statusTitle, style = MaterialTheme.typography.titleLarge, color = statusTone, fontWeight = FontWeight.SemiBold)
+                        Text(selected.name, style = MaterialTheme.typography.headlineSmall, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
+                        Text(listOfNotNull(selected.selectedOutbound?.type?.uppercase(),
+                            if (proxyMode) "Локальный прокси" else "VPN · весь трафик",
+                            group?.let { "папка «${it.name}»" + if (it.autoSwap) " · автосмена" else "" })
+                            .joinToString("  ·  "), color = muted, fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        Text(endpoint?.server.orEmpty(), color = muted, fontSize = 12.sp,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (proxyMode) Text("Режим прокси. Сменить режим можно в Настройках.", color = blue, fontSize = 12.sp)
                     }
-                    HomeModeSelector(saved, selected, selectionLocked, controller, onRequestElevation)
                     localProxy?.let { LocalProxyCard(it) }
                     Spacer(Modifier.height(2.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -915,7 +982,7 @@ private fun Profiles(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, 
                         DropdownMenu(expanded = moveMenu, onDismissRequest = { moveMenu = false }) {
                             DropdownMenuItem(text = { Text("Без папки") }, onClick = { controller.setGroup(selected.id, null); moveMenu = false })
                             saved.groups.forEach { group -> DropdownMenuItem(text = { Text(group.name) }, onClick = {
-                                if (controller.setGroup(selected.id, group.id)) expanded = expanded + group.id
+                                controller.setGroup(selected.id, group.id)
                                 moveMenu = false
                             }) }
                         }
@@ -953,84 +1020,145 @@ private fun Profiles(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, 
                     }
                 }
                 }
+        }
+        Column(Modifier.width(340.dp).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            tried?.let { report ->
+                Column {
+                    FailoverReportCard(report)
+                    HoldActions(saved, selected, controller)
+                }
             }
+            HomeRulesCard(saved, selected, onOpenRules)
+            HomeRecentRequests(history, onOpenJournal)
+            HomeSkippedConditions(saved, selected)
         }
     }
     editProfile?.let { profile -> DesktopProfileEditor(profile, saved, controller) { editProfile = null } }
-    renameGroup?.let { group ->
-        NameDialog("Название папки", group.name, { renameGroup = null }) {
-            controller.renameGroup(group.id, it); renameGroup = null
-        }
-    }
-    deleteGroup?.let { group ->
-        val confirm = { controller.deleteGroup(group.id); deleteGroup = null }
-        AlertDialog(
-            modifier = Modifier.onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown) false else when (event.key) {
-                    Key.Enter, Key.NumPadEnter -> { confirm(); true }
-                    Key.Escape -> { deleteGroup = null; true }
-                    else -> false
-                }
-            },
-            onDismissRequest = { deleteGroup = null },
-            title = { Text("Удалить папку «${group.name}»?") },
-            text = { Text("Конфиги останутся в общем списке. Правила папки будут удалены.") },
-            confirmButton = { TextButton(onClick = confirm) { Text("Удалить") } },
-            dismissButton = { TextButton(onClick = { deleteGroup = null }) { Text("Отмена") } },
-        )
-    }
     delete?.let { profile ->
         AlertDialog(
-            modifier = Modifier.onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown) false else when (event.key) {
-                    Key.Enter, Key.NumPadEnter -> { controller.delete(profile.id); delete = null; true }
-                    Key.Escape -> { delete = null; true }
-                    else -> false
-                }
-            },
             onDismissRequest = { delete = null },
             title = { Text("Удалить «" + profile.name + "»?") },
             text = { Text("Профиль и его правила будут удалены.") },
-            confirmButton = {
-                TextButton(onClick = { controller.delete(profile.id); delete = null }) { Text("Удалить") }
-            },
+            confirmButton = { TextButton(onClick = { controller.delete(profile.id); delete = null }) { Text("Удалить") } },
             dismissButton = { TextButton(onClick = { delete = null }) { Text("Отмена") } },
         )
     }
 }
 
+private fun routeOwner(profile: StoredProfile): String = profile.groupId?.let { "grp_$it" } ?: profile.id
+
+/** Mockup 10: while LerNET holds the tunnel the person can pick a config from another folder or switch VPN off. */
 @Composable
-private fun HomeModeSelector(saved: StoredState, profile: StoredProfile?, locked: Boolean,
-    controller: DesktopController, onRequestElevation: () -> Unit) {
-    val requestedMode = profile?.modeOverride ?: saved.mode
-    val effectiveMode = controller.effectiveMode(profile).name
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Режим подключения", color = muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-        SegmentedChoice(
-            choices = listOf(RunMode.FULL_VPN.name to "VPN · весь трафик", RunMode.PROXY.name to "Локальный прокси"),
-            selected = effectiveMode,
-            enabled = !locked,
-            onSelect = { value ->
-                if (value == RunMode.FULL_VPN.name && !WindowsElevation.isElevated) {
-                    if (controller.prepareVpnElevation(profile)) onRequestElevation()
-                } else controller.switchMode(profile, RunMode.valueOf(value))
-            },
-        )
-        Text(if (!WindowsElevation.isElevated && requestedMode == RunMode.FULL_VPN.name)
-            "Без прав администратора используется локальный прокси SOCKS/HTTP 127.0.0.1:2080 с логином и паролем. Для полного VPN выберите его снова и подтвердите запрос Windows."
-        else if (effectiveMode == RunMode.PROXY.name)
-            "Только приложения с прокси SOCKS/HTTP 127.0.0.1:2080. Логин и пароль видны здесь после подключения. Системный трафик идёт напрямую."
-        else "Направляет трафик устройства по правилам LerNET. Права администратора подтверждены.",
-            color = muted, fontSize = 11.sp, lineHeight = 16.sp)
-        if (locked) Text("Дождитесь завершения переключения.", color = blue, fontSize = 11.sp)
-        else if (profile?.modeOverride != null) {
+private fun HoldActions(saved: StoredState, selected: StoredProfile, controller: DesktopController) {
+    var other by remember { mutableStateOf(false) }
+    val candidates = saved.profiles.filter { it.groupId != selected.groupId }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = { other = true }, enabled = candidates.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
+                Text("Конфиг из другой папки", maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
+            }
+            DropdownMenu(other, onDismissRequest = { other = false }) {
+                candidates.forEach { profile ->
+                    val folder = saved.groups.firstOrNull { it.id == profile.groupId }?.name ?: "без папки"
+                    DropdownMenuItem(text = { Text("${profile.name}  ·  $folder", maxLines = 1) },
+                        onClick = { other = false; controller.select(profile.id) })
+                }
+            }
+        }
+        OutlinedButton(onClick = controller::disconnect, modifier = Modifier.fillMaxWidth()) {
+            Text("Выключить VPN", maxLines = 1, fontSize = 12.sp)
+        }
+    }
+    Text("Выключить VPN можно только вручную. Тогда трафик пойдёт напрямую, и LerNET покажет это.",
+        color = muted, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 6.dp))
+}
+
+@Composable
+private fun HomeChip(text: String, tone: Color) {
+    Text(text, color = tone, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+        modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(tone.copy(alpha = .13f)).padding(horizontal = 6.dp, vertical = 2.dp))
+}
+
+@Composable
+private fun HomeCardHeader(title: String, action: String?, onClick: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(title, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        if (action != null) TextButton(onClick = onClick, contentPadding = PaddingValues(horizontal = 6.dp)) { Text(action, fontSize = 12.sp) }
+    }
+}
+
+/** Top-level rules of the folder (or config) that is selected; the editor itself stays on the «Правила» page. */
+@Composable
+private fun HomeRulesCard(saved: StoredState, selected: StoredProfile, onOpenRules: (String) -> Unit) {
+    val owner = routeOwner(selected)
+    val top = saved.rules.filter { it.profileId == owner && it.parentId == null }.sortedWith(compareBy<StoredRule> { it.sortIndex }.thenBy { it.id })
+    val skipped = remember(saved.rules, owner) { DesktopRouteTree.platformInactiveIds(saved.rules.filter { it.profileId == owner }) }
+    Panel(Modifier.testTag("home_rules")) {
+        HomeCardHeader("Правила", "Открыть →") { onOpenRules(owner) }
+        if (top.isEmpty()) Text("Своих правил нет: весь трафик идёт через выбранный конфиг.", color = muted, fontSize = 12.sp)
+        top.take(6).forEach { rule ->
+            val children = saved.rules.count { it.parentId == rule.id }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Режим задан для этого профиля", color = muted, fontSize = 11.sp, modifier = Modifier.weight(1f))
-                TextButton(onClick = { controller.clearModeOverride(profile.id) }) { Text("Как для всех") }
+                Text(rule.title.ifBlank { "Без названия" }, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    fontSize = 13.sp, color = if (rule.enabled) desktopColors.onSurface else muted)
+                Spacer(Modifier.width(6.dp))
+                when {
+                    !rule.enabled -> HomeChip("выключено", muted)
+                    rule.id in skipped -> HomeChip("пропущено", hold)
+                    children > 0 -> HomeChip("ветка · $children", blue)
+                    rule.action == "DIRECT" -> HomeChip("напрямую", green)
+                    rule.action == "BLOCK" -> HomeChip("запрет · только в Эксперте", desktopColors.error)
+                    else -> HomeChip("через VPN", blue)
+                }
+            }
+        }
+        if (top.size > 6) Text("и ещё ${top.size - 6}", color = muted, fontSize = 12.sp)
+    }
+}
+
+/** Real requests from the core's connection list; nothing is shown before the first connection. */
+@Composable
+private fun HomeRecentRequests(history: List<LiveConnection>, onOpenJournal: () -> Unit) {
+    val recent = history.sortedByDescending { it.lastSeenAt }.take(6)
+    Panel(Modifier.testTag("home_recent")) {
+        HomeCardHeader("Последние запросы", "Журнал →", onOpenJournal)
+        if (recent.isEmpty()) Text("Появятся после подключения.", color = muted, fontSize = 12.sp)
+        recent.forEach { item ->
+            val route = item.chains.firstOrNull().orEmpty().lowercase()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(listOf(item.process.substringAfterLast('\\').ifBlank { "—" }, item.host.ifBlank { item.destination }).joinToString(" · "),
+                    Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
+                Spacer(Modifier.width(6.dp))
+                when {
+                    "block" in route || "reject" in route -> HomeChip("запрет", desktopColors.error)
+                    "direct" in route -> HomeChip("напрямую", green)
+                    else -> HomeChip("через VPN", blue)
+                }
             }
         }
     }
 }
+
+/** Mockup 10: a branch that depends on Android apps cannot match here; say so instead of silently skipping it. */
+@Composable
+private fun HomeSkippedConditions(saved: StoredState, selected: StoredProfile) {
+    val owner = routeOwner(selected)
+    val rules = saved.rules.filter { it.profileId == owner }
+    val inactive = remember(rules) { DesktopRouteTree.platformInactiveIds(rules) }
+    val top = rules.filter { it.id in inactive && it.parentId !in inactive }
+    if (top.isEmpty()) return
+    Panel(Modifier.testTag("skipped_conditions")) {
+        Text("Пропущенные условия", fontWeight = FontWeight.SemiBold)
+        top.take(5).forEach { rule ->
+            Text("«${rule.title.ifBlank { "Без названия" }}»: условие для Android-приложений в Windows не работает",
+                fontSize = 12.sp, lineHeight = 16.sp)
+        }
+        if (top.size > 5) Text("и ещё ${top.size - 5}", color = muted, fontSize = 12.sp)
+        Text("Такие ветки пропускаются на этом компьютере вместе с вложенными правилами; на Android они работают.",
+            color = muted, fontSize = 11.sp, lineHeight = 15.sp)
+    }
+}
+
 
 @Composable
 private fun SegmentedChoice(choices: List<Pair<String, String>>, selected: String, enabled: Boolean = true,
@@ -1062,8 +1190,8 @@ private fun SegmentedChoice(choices: List<Pair<String, String>>, selected: Strin
 }
 
 @Composable
-private fun ConnectionPower(active: Boolean, busy: Boolean, onClick: () -> Unit) {
-    val accent by animateColorAsState(if (active) green else blue, tween(250), label = "power-color")
+private fun ConnectionPower(active: Boolean, busy: Boolean, holding: Boolean = false, onClick: () -> Unit) {
+    val accent by animateColorAsState(if (holding) hold else if (active) green else blue, tween(250), label = "power-color")
     val interactions = remember { MutableInteractionSource() }
     val hovered by interactions.collectIsHoveredAsState()
     val pressed by interactions.collectIsPressedAsState()
@@ -1589,7 +1717,8 @@ private fun bytesText(value: Long): String = when {
 }
 
 @Composable
-private fun Settings(saved: StoredState, controller: DesktopController, onRequestElevation: () -> Unit) {
+internal fun Settings(saved: StoredState, controller: DesktopController, onRequestElevation: () -> Unit,
+    localProxy: LocalProxyAccess? = null, locked: Boolean = false) {
     var path by remember(saved.corePath) { mutableStateOf(saved.corePath) }
     var mtu by remember(saved.tunMtu) { mutableStateOf(saved.tunMtu.toString()) }
     var xmuxMin by remember(saved.xmuxConcurrency) { mutableStateOf(saved.xmuxConcurrency.substringBefore('-')) }
@@ -1609,25 +1738,8 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
         directDns.trim() != saved.directDnsServer || dnsPolicy != saved.defaultDnsPolicy || logLevel != saved.logLevel
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Panel(Modifier.testTag("settings_run_mode")) { SettingsRunMode(saved, controller, onRequestElevation, localProxy, locked) }
         Panel { DesktopUpdateCard() }
-        Panel {
-            SettingHeading("ЗАПУСК", "Режим по умолчанию",
-                "VPN направляет трафик устройства через туннель. Прокси работает только для приложений, настроенных на 127.0.0.1:2080 с логином и паролем.")
-            SegmentedChoice(
-                listOf(RunMode.FULL_VPN.name to "VPN · весь трафик", RunMode.PROXY.name to "Локальный прокси"),
-                saved.mode,
-            ) { value ->
-                if (value == RunMode.FULL_VPN.name && !WindowsElevation.isElevated) {
-                    if (controller.prepareVpnElevation(null)) onRequestElevation()
-                } else controller.switchMode(null, RunMode.valueOf(value))
-            }
-            Text(
-                if (saved.mode == RunMode.FULL_VPN.name)
-                    "При запуске Windows запросит права администратора. Если доступ не предоставлен, LerNET откроется в режиме прокси. Профиль может иметь собственный режим."
-                else "LerNET откроется без запроса прав администратора. Режим можно изменить на главном экране.",
-                color = muted, fontSize = 12.sp, lineHeight = 18.sp,
-            )
-        }
         Panel {
             SettingHeading(SecurityTexts.PANEL_TAG, SecurityTexts.PANEL_TITLE, SecurityTexts.PANEL_BODY)
             SecurityToggle(SecurityTexts.CRASH_GUARD, SecurityTexts.CRASH_GUARD_HINT, saved.crashGuard, controller::setCrashGuard)
@@ -1777,6 +1889,47 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
             Button(onClick = { controller.setCorePath(path) }, enabled = path != saved.corePath) { Text("Сохранить путь") }
         }
     }
+}
+
+/** v2: the VPN/proxy choice moved off the home screen; full VPN stays the default. */
+@Composable
+internal fun SettingsRunMode(saved: StoredState, controller: DesktopController, onRequestElevation: () -> Unit,
+    localProxy: LocalProxyAccess?, locked: Boolean) {
+    val selected = saved.profiles.firstOrNull { it.id == saved.selectedProfileId }
+    SettingHeading("РЕЖИМ", "Режим работы",
+        "Полный VPN (по умолчанию) направляет трафик устройства через туннель. Прокси работает только для приложений, настроенных на 127.0.0.1:2080 с логином и паролем.")
+    SegmentedChoice(
+        listOf(RunMode.FULL_VPN.name to "VPN · весь трафик", RunMode.PROXY.name to "Локальный прокси"),
+        saved.mode, enabled = !locked,
+    ) { value ->
+        if (value == RunMode.FULL_VPN.name && !WindowsElevation.isElevated) {
+            if (controller.prepareVpnElevation(null)) onRequestElevation()
+        } else controller.switchMode(null, RunMode.valueOf(value))
+    }
+    Text(
+        when {
+            saved.mode == RunMode.FULL_VPN.name && !WindowsElevation.isElevated ->
+                "Для полного VPN нужны права администратора: Windows спросит их при выборе VPN или при запуске. Если доступ не дан, LerNET работает как локальный прокси."
+            saved.mode == RunMode.FULL_VPN.name -> "Права администратора подтверждены. Трафик устройства идёт по правилам LerNET."
+            else -> "LerNET запускается без прав администратора. Системный трафик идёт напрямую, через VPN идут только приложения с этим прокси."
+        },
+        color = muted, fontSize = 12.sp, lineHeight = 18.sp,
+    )
+    if (locked) Text("Дождитесь завершения переключения.", color = blue, fontSize = 12.sp)
+    if (selected?.modeOverride != null) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("У конфига «${selected.name}» свой режим: " +
+                (if (controller.effectiveMode(selected) == RunMode.PROXY) "локальный прокси" else "полный VPN"),
+                color = muted, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            TextButton(onClick = { controller.clearModeOverride(selected.id) }, enabled = !locked) { Text("Как для всех") }
+        }
+    }
+    if (controller.effectiveMode(selected) == RunMode.PROXY) {
+        if (localProxy != null) LocalProxyCard(localProxy)
+        else Text("Адрес, логин и пароль прокси появятся здесь после подключения. Логин и пароль можно задать ниже.",
+            color = muted, fontSize = 12.sp)
+    }
+    Text("Режим применяется при следующем подключении.", color = muted, fontSize = 11.sp)
 }
 
 @Composable
@@ -1956,7 +2109,7 @@ internal fun FailoverReportCard(report: FailoverReport) {
                     Box(Modifier.size(7.dp).background(desktopColors.error, CircleShape))
                     Spacer(Modifier.width(8.dp))
                     Text(attempt.name, Modifier.weight(0.35f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(attempt.reason, Modifier.weight(0.5f), color = muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(attempt.reason, Modifier.weight(0.5f), color = muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(
                         java.time.Instant.ofEpochMilli(attempt.atMs).atZone(java.time.ZoneId.systemDefault()).format(time),
                         Modifier.weight(0.15f), color = muted, fontSize = 12.sp,

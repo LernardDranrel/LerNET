@@ -130,13 +130,13 @@ internal class WindowsExpertBackend(
     }
 
     override suspend fun start(program: PolicyProgram): ExpertTunnelAck = withContext(Dispatchers.IO) {
-        val ticket = requireNotNull(negotiatedEpoch) { "Запуск управления отменён; повторите включение" }
+        val ticket = requireNotNull(negotiatedEpoch) { "Запуск управления отменён; повтори включение" }
         check(ticket == epoch.get()) { "Запуск был отменён" }
         check(elevated()) { "Экспертному режиму нужны права администратора для общего туннеля" }
         val owner = ensureControl(ticket)
         val local = owner.client
         check(capabilities.preservesTun && capabilities.atomicRules && capabilities.independentExits) {
-            "Комплектное ядро не подтвердило постоянный туннель и независимые выходы"
+            "Встроенное ядро не подтвердило постоянный туннель и независимые выходы"
         }
         val config = assemble(program)
         check(config.isValid) { config.errors.joinToString("\n") }
@@ -214,7 +214,7 @@ internal class WindowsExpertBackend(
                 else -> {
                     shutdownOwnedProcess(before.owner)
                     throw ExpertStateUncertainException(
-                        "Ядро не подтвердило активную версию. Общий TUN остановлен; повторите запуск.", failure
+                        "Ядро не подтвердило активную версию. Общий TUN остановлен; повтори запуск.", failure
                     )
                 }
             }
@@ -294,13 +294,13 @@ internal class WindowsExpertBackend(
     private fun ensureControl(ticket: Long): OwnedControl = synchronized(lifecycleLock) {
         check(ticket == epoch.get()) { "Запуск управления отменён" }
         if (revocationPending) {
-            throw ExpertStateUncertainException("Windows не подтвердила отзыв разрешения туннеля; повторите «Остановить»")
+            throw ExpertStateUncertainException("Windows не подтвердила отзыв разрешения туннеля; повтори «Остановить»")
         }
         val existing = process
         client?.takeIf { existing?.isAlive == true }?.let {
             return@synchronized OwnedControl(requireNotNull(existing), it, ticket)
         }
-        check(elevated()) { "Запустите LerNET от имени администратора для экспертного режима" }
+        check(elevated()) { "Запусти LerNET от имени администратора для экспертного режима" }
         val directory = simple.workspaceDirectory().resolve("expert-runtime")
         Files.createDirectories(directory)
         val secured = prepareBinary?.invoke(directory) ?: WindowsExpertProtection.prepareProtectedCore(installCore(directory)).getOrThrow()
@@ -411,7 +411,7 @@ internal class WindowsExpertBackend(
     private suspend fun receiveStatus(body: JsonObject, snapshot: Applied): Boolean {
         if (applied !== snapshot) return true
         val actual = snapshot.owner.client.acknowledgement(body)
-        check(actual == snapshot.ack) { "Ядро сообщило другую идентичность или версию туннеля" }
+        check(actual == snapshot.ack) { "Ядро сообщило о другом туннеле или другой версии схемы" }
         if (body.nativeBoolean("running") != true) {
             val code = body.nativeString("stop_reason", 256)
             val reason = code?.let(::nativeReason) ?: "Ядро не подтвердило работающий туннель"

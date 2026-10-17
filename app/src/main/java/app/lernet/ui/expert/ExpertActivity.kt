@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -146,7 +147,10 @@ internal fun ExpertActivity(
                 }
             }
         }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Phone: filters, limits and hints fold behind one button so the list gets room (v2 review: «События» too dense).
+        var tools by rememberSaveable { mutableStateOf(false) }
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(if (wide) 12.dp else 18.dp)) {
             item { header(totalRate) }
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -154,6 +158,11 @@ internal fun ExpertActivity(
                         query, { query = it }, Modifier.fillMaxWidth(), singleLine = true,
                         label = { Text(stringResource(R.string.expert_activity_search)) }
                     )
+                    if (!wide) TextButton({ tools = !tools }, Modifier.testTag("expert_events_tools")) {
+                        Text(stringResource(if (tools) R.string.expert_events_tools_hide else R.string.expert_events_tools_show,
+                            stringResource(filter.label)))
+                    }
+                    if (wide || tools) {
                     Row(
                         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -167,13 +176,14 @@ internal fun ExpertActivity(
                         stringResource(R.string.expert_history_limit, runtime.connectionHistoryLimit),
                         style = MaterialTheme.typography.bodySmall,
                     )
+                    TextButton(onClear, enabled = runtime.connections.isNotEmpty()) { Text(stringResource(R.string.expert_history_clear)) }
+                    }
                     if (runtime.connectionHistoryTruncated) {
                         Text(
                             stringResource(R.string.expert_history_partial, runtime.connectionDroppedCount),
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary
                         )
                     }
-                    TextButton(onClear, enabled = runtime.connections.isNotEmpty()) { Text(stringResource(R.string.expert_history_clear)) }
                 }
             }
             if (!wide) item {
@@ -472,7 +482,7 @@ private fun ActivityFlowContent(inspection: FlowInspection?, network: String?, p
         if (encrypted) {
             "Тело запросов скрыто. Ниже исходные байты, а не расшифрованные сообщения. Для расшифровки нужны ключи приложения или доверенный TLS-прокси."
         } else {
-            "Первые ${FlowInspection.PREFIX_LIMIT} байт каждого направления: фрагмент, а не полный запрос. У открытого протокола видны заголовки и начало тела; бинарные данные смотрите в HEX."
+            "Первые ${FlowInspection.PREFIX_LIMIT} байт каждого направления: фрагмент, а не полный запрос. У открытого протокола видны заголовки и начало тела; бинарные данные смотри в HEX."
         },
         style = MaterialTheme.typography.bodySmall
     )

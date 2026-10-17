@@ -628,17 +628,19 @@ private fun ExpertStatus(
             ExpertUptimeLine(runtime)
             summary()
         }
-        Text(
-            app.lernet.engine.policy.ExpertPult.schemaLine(
-                pult,
-                unsavedDraft = runtime.hasDraftChanges,
-                unapplied = runtime.appliedRevision != null && runtime.appliedRevision != runtime.saved.revision,
-                applied = runtime.appliedRevision != null,
-            ),
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.fillMaxWidth().testTag("expert_pult_schema"),
-            textAlign = TextAlign.Center,
-        )
+        app.lernet.engine.policy.ExpertPult.schemaNote(
+            pult,
+            unsavedDraft = runtime.hasDraftChanges,
+            unapplied = runtime.appliedRevision != null && runtime.appliedRevision != runtime.saved.revision,
+            applied = runtime.appliedRevision != null,
+        )?.let { line ->
+            Text(
+                line,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.fillMaxWidth().testTag("expert_pult_schema"),
+                textAlign = TextAlign.Center,
+            )
+        }
         TextButton({ details = !details }, Modifier.fillMaxWidth()) {
             Text(stringResource(if (details) R.string.expert_hide_tunnel_details else R.string.expert_tunnel_details))
         }

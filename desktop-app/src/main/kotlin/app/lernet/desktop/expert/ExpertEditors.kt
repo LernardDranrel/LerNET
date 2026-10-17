@@ -100,11 +100,11 @@ internal fun ExpertRuleEditor(
     val effectiveProtection = protected || inheritedProtection
     val errors = RouteCompiler.validateConditions(original.id, conditions).map { it.message } + buildList {
         if (!otherwise && conditions.blocks.isEmpty() && tree.nodes.none { it.id == original.id }) {
-            add("Добавьте условие. Для оставшегося трафика используйте ветку ИНАЧЕ.")
+            add("Добавь условие. Для оставшегося трафика используй ветку ИНАЧЕ.")
         }
-        if (rewrite && address.isBlank() && port.isBlank()) add("Укажите адрес или порт перенаправления.")
+        if (rewrite && address.isBlank() && port.isBlank()) add("Укажи адрес или порт перенаправления.")
         if (rewrite && address.isNotBlank() && PolicyDestinationAddress.normalize(address.trim()) == null) {
-            add("Укажите IP или имя назначения без схемы https:// и пути.")
+            add("Укажи IP или имя назначения без схемы https:// и пути.")
         }
         if (rewrite && port.isNotBlank() && port.toIntOrNull()?.let { it in 1..65535 } != true) add("Порт должен быть от 1 до 65535.")
         if (effectiveProtection && (target == PolicyTarget.Direct || targetFallback(target) == UnavailableFallback.DIRECT)) {
@@ -113,7 +113,7 @@ internal fun ExpertRuleEditor(
         if (tree.nodes.any { it.parentId == original.id } &&
             (target is PolicyTarget.Profile || target is PolicyTarget.Folder || target is PolicyTarget.Channel)
         ) {
-            add("Ветка с детьми задаёт условия. Привязку к физическому выходу задайте в конечной ветке.")
+            add("Ветка с детьми задаёт условия. Привязку к физическому выходу задай в конечной ветке.")
         }
     }
     val descendants = ExpertPolicyEditing.descendants(tree, original.id)
@@ -152,7 +152,7 @@ internal fun ExpertRuleEditor(
             if (original.protected) {
                 ExpertMessage(
                     "Защита этой ветки здесь не действует",
-                    "Неактивная ветка не проверяет трафик. Если причина — условие Android, добавьте отдельную защищённую ветку " +
+                    "Неактивная ветка не проверяет трафик. Если причина — условие Android, добавь отдельную защищённую ветку " +
                         "с программой Windows. Исходное правило сохранится для Android.",
                     warning = true
                 )
@@ -162,7 +162,7 @@ internal fun ExpertRuleEditor(
             ExpertMessage(
                 "Оставшийся трафик этой развилки",
                 "Эта ветка выбирается после остальных условий на том же уровне. " +
-                    "Добавьте дочерние правила, чтобы продолжить проверку оставшегося трафика."
+                    "Добавь дочерние правила, чтобы продолжить проверку оставшегося трафика."
             )
             if (original.parentId != null && tree.nodes.none { it.id == original.id }) {
                 ExpertMessage(
@@ -200,7 +200,7 @@ internal fun ExpertRuleEditor(
             }
             ExpertSelect<ConditionKind?>(
                 "Добавить условие",
-                listOf(null to "Выберите тип") + ConditionKind.entries.map {
+                listOf(null to "Выбери тип") + ConditionKind.entries.map {
                     it to ExpertPolicyEditing.kindName(it)
                 },
                 null
@@ -225,7 +225,7 @@ internal fun ExpertRuleEditor(
         if (structural) {
             ExpertMessage(
                 "Путь задаётся в дочерних ветках",
-                "Это развилка. Выберите выход в конечных правилах или в её дочерней ветке ИНАЧЕ."
+                "Это развилка. Выбери выход в конечных правилах или в её дочерней ветке ИНАЧЕ."
             )
         } else {
             ExpertTargetEditor(target, tree.scope, state, effectiveProtection) { target = it }
@@ -263,7 +263,7 @@ internal fun ExpertRuleEditor(
                 "Отсоединённое правило можно редактировать, но оно не выполняется.", detached
             ) { detached = it }
         }
-        if (errors.isNotEmpty()) ExpertMessage("Проверьте правило", errors.joinToString("\n"), error = true)
+        if (errors.isNotEmpty()) ExpertMessage("Проверь правило", errors.joinToString("\n"), error = true)
     }
     apps?.let { index ->
         val block = conditions.blocks.getOrNull(index)
@@ -326,12 +326,12 @@ internal fun ExpertTargetEditor(
         )
     }
     if (target == PolicyTarget.Direct) Text(
-        if (protected) "Прямой выход противоречит запрету этой ветки. Выберите VPN/прокси или блокировку."
+        if (protected) "Прямой выход противоречит запрету этой ветки. Выбери VPN/прокси или блокировку."
         else "Трафик проходит через туннель и выходит через обычную сеть устройства, без выбранного VPN/прокси.",
         color = if (protected) ExpertColors.red else ExpertColors.muted, fontSize = 12.sp,
     )
     if (protected && target == PolicyTarget.Block) Text(
-        "Сейчас выбран запрет всего трафика этой ветки. Чтобы разрешить соединения, выберите профиль, папку или канал с VPN/прокси.",
+        "Сейчас выбран запрет всего трафика этой ветки. Чтобы разрешить соединения, выбери профиль, папку или канал с VPN/прокси.",
         color = ExpertColors.muted, fontSize = 12.sp,
     )
     when (target) {
@@ -373,7 +373,7 @@ internal fun ExpertTargetEditor(
     }
     if (childScope != null) {
         Text(
-            if (protected) "Запрет прямого выхода действует и в этом дереве. Правила «Напрямую» внутри него вызовут конфликт. Измените эти правила или используйте VPN/прокси без дочернего дерева."
+            if (protected) "Запрет прямого выхода действует и в этом дереве. Правила «Напрямую» внутри него вызовут конфликт. Измени эти правила или используй VPN/прокси без дочернего дерева."
             else "Трафик сначала проверяется по этому дереву. Его правила могут направить соединение напрямую, заблокировать или передать выбранному VPN/прокси.",
             color = ExpertColors.muted, fontSize = 12.sp,
         )
@@ -453,7 +453,7 @@ internal fun ExpertChannelEditor(
             TextButton(onClick = onDelete) { Text("Удалить неиспользуемый канал", color = ExpertColors.red) }
         } else if (references.isNotEmpty() || rootReference || channelReferences.isNotEmpty()) {
             Text(
-                "Для удаления сначала переведите все входящие ветки и пути по умолчанию на другую цель.",
+                "Для удаления сначала переведи все входящие ветки и пути по умолчанию на другую цель.",
                 color = ExpertColors.muted, fontSize = 12.sp
             )
         }
@@ -517,9 +517,9 @@ internal fun ExpertLifecycleEditor(
     }
     if (!valid) {
         ExpertMessage(
-            "Проверьте ограничения",
+            "Проверь ограничения",
             "Время простоя: 1–86400 секунд; ожидание: 1–45 секунд; " +
-                "очередь: 1–1000 запросов. Можно указать до трёх знаков после запятой. Откройте ограничения очереди для " +
+                "очередь: 1–1000 запросов. Можно указать до трёх знаков после запятой. Открой ограничения очереди для " +
                 "скрытых полей.",
             error = true
         )
@@ -701,7 +701,7 @@ private fun ExpertApplicationPicker(
             "Выбрано: ${selected.size}. Сохраняются имена процессов или полные пути, а не положение программы в списке.",
             color = ExpertColors.muted, fontSize = 12.sp
         )
-        if (applications.isEmpty()) ExpertEmpty("Программы не найдены", "Измените фильтр или укажите исполняемый файл вручную.")
+        if (applications.isEmpty()) ExpertEmpty("Программы не найдены", "Измени фильтр или укажи исполняемый файл вручную.")
         if (applications.isNotEmpty()) {
             LazyColumn(Modifier.fillMaxWidth().height(340.dp)) {
                 items(applications, key = { it.executable.lowercase() }) { app ->

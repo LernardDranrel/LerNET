@@ -16,3 +16,5 @@ val LerNetErrorContainer = Color(0xFF8C1D18)
 val LerNetOnErrorContainer = Color(0xFFFFDAD6)
 val LerNetWarn = Color(0xFFF5C16C)
 val LerNetOk = Color(0xFF5EE4A6)
+/** Amber «держим»: the tunnel is held while no config works. Used only for that state. */
+val LerNetHold = Color(0xFFF0A93B)

@@ -239,7 +239,7 @@ internal fun ExpertSimulation(
                         )
                     }
                     if (latestPolicy == selectedPolicy) preview = selectedPolicy to calculated
-                    else failure = "Схема изменилась во время расчёта. Проверьте путь ещё раз."
+                    else failure = "Схема изменилась во время расчёта. Проверь путь ещё раз."
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {

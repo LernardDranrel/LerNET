@@ -210,7 +210,7 @@ class ExpertRuntimeController(
             session.saved != expected ||
             !ExpertVpnHandover.available(session.saved, session.draft)
         ) {
-            val message = "Схема изменилась. Проверьте основной путь и повторите включение."
+            val message = "Схема изменилась. Проверь основной путь и повтори включение."
             mutableState.value = current.copy(errors = listOf(message))
             reason(ExpertReasonLevel.WARNING, message)
             return@withLock false
@@ -242,7 +242,7 @@ class ExpertRuntimeController(
         val negotiationGeneration = mutex.withLock {
             if (mutableState.value.phase !in setOf(ExpertSessionPhase.STOPPED, ExpertSessionPhase.FAILED)) return
             if (mutableState.value.tun != null || startupStopUnconfirmed) {
-                reason(ExpertReasonLevel.ERROR, "Сначала остановите прежний обработчик сети.")
+                reason(ExpertReasonLevel.ERROR, "Сначала останови прежний обработчик сети.")
                 return
             }
             mutableState.value = mutableState.value.copy(
@@ -350,7 +350,7 @@ class ExpertRuntimeController(
                     if (failure is ExpertStateUncertainException) startupStopUnconfirmed = true
                     mutableState.value = mutableState.value.copy(phase = ExpertSessionPhase.FAILED)
                     reportFailure(
-                        if (startupStopUnconfirmed) "Состояние TUN не подтверждено; повторите «Остановить»" else "Общий TUN не запущен",
+                        if (startupStopUnconfirmed) "Состояние TUN не подтверждено; повтори «Остановить»" else "Общий TUN не запущен",
                         failure,
                     )
                     publish()
@@ -390,7 +390,7 @@ class ExpertRuntimeController(
             mutex.withLock {
                 if (generation == attemptGeneration) {
                     mutableState.value = mutableState.value.copy(phase = ExpertSessionPhase.FAILED)
-                    reportFailure("Остановка прерванного запуска не подтверждена; нажмите «Остановить»", failure)
+                    reportFailure("Остановка прерванного запуска не подтверждена; нажми «Остановить»", failure)
                     publish()
                 }
             }
@@ -435,7 +435,7 @@ class ExpertRuntimeController(
                 mutex.withLock {
                     if (generation == operation.first && mutableState.value.phase == ExpertSessionPhase.STOPPING) {
                         mutableState.value = mutableState.value.copy(phase = ExpertSessionPhase.FAILED)
-                        reportFailure("Остановка прервана; состояние TUN не подтверждено, повторите «Остановить»", cancelled)
+                        reportFailure("Остановка прервана; состояние TUN не подтверждено, повтори «Остановить»", cancelled)
                         publish()
                     }
                 }
@@ -456,7 +456,7 @@ class ExpertRuntimeController(
         val request = mutex.withLock {
             val tun = mutableState.value.tun
             if (mutableState.value.phase != ExpertSessionPhase.RUNNING || tun == null) {
-                reason(ExpertReasonLevel.WARNING, "Для применения сначала включите экспертный режим.")
+                reason(ExpertReasonLevel.WARNING, "Для применения сначала включи экспертный режим.")
                 return
             }
             when (val candidate = session.requestApply(inventory, mutableState.value.capabilities, tun)) {
@@ -481,7 +481,7 @@ class ExpertRuntimeController(
                     activeInventory = null
                     applyingSnapshot = null
                     val error = "Ядро сообщило другую версию. Работающая схема не подтверждена. " +
-                        "Нажмите «Остановить» перед новым запуском."
+                        "Нажми «Остановить» перед новым запуском."
                     mutableState.value = mutableState.value.copy(
                         phase = ExpertSessionPhase.FAILED, errors = errorsWithPersistence(listOf(error)),
                     )
@@ -529,7 +529,7 @@ class ExpertRuntimeController(
                         activeInventory = null
                         applyingSnapshot = null
                         val error = "Применение прервано. Активная версия ядра не подтверждена. " +
-                            "Нажмите «Остановить» перед новым запуском."
+                            "Нажми «Остановить» перед новым запуском."
                         mutableState.value = mutableState.value.copy(
                             phase = ExpertSessionPhase.FAILED, errors = errorsWithPersistence(listOf(error)),
                         )
@@ -1100,7 +1100,7 @@ class ExpertRuntimeController(
             reason(
                 ExpertReasonLevel.ERROR,
                 "Предыдущая версия правил ${failure.revision}: $detail. " +
-                    "Текущие выходы проверяются отдельно. Повторите остановку экспертного режима для освобождения ресурсов.",
+                    "Текущие выходы проверяются отдельно. Повтори остановку экспертного режима для освобождения ресурсов.",
             )
         }
         mutableState.value = mutableState.value.copy(retiredCleanupFailures = bounded)

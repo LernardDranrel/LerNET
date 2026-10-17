@@ -157,14 +157,11 @@ private fun TunControl(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, c
                 )
                 // A network note goes under the headline, never instead of the state.
                 state.networkReason?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = ExpertColors.amber) }
-                Text(
-                    app.lernet.engine.policy.ExpertPult.schemaLine(
-                        pult, unsavedDraft = state.hasDraftChanges,
-                        unapplied = state.appliedRevision != null && state.hasUnappliedChanges,
-                        applied = state.appliedRevision != null,
-                    ),
-                    style = MaterialTheme.typography.bodySmall, color = ExpertColors.muted,
-                )
+                app.lernet.engine.policy.ExpertPult.schemaNote(
+                    pult, unsavedDraft = state.hasDraftChanges,
+                    unapplied = state.appliedRevision != null && state.hasUnappliedChanges,
+                    applied = state.appliedRevision != null,
+                )?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = ExpertColors.muted) }
                 val policy = state.applied.takeIf { running } ?: state.saved
                 Text(
                     "Основной путь: ${ExpertPolicyEditing.targetName(policy.device.defaultTarget, state)}",
@@ -362,7 +359,7 @@ private fun TrafficColumn(
                         item {
                             Text(
                                 if (state.phase == ExpertPhase.STOPPED) {
-                                    "Включите туннель для наблюдения"
+                                    "Включи туннель для наблюдения"
                                 } else {
                                     "Подходящих соединений пока нет"
                                 },
@@ -522,7 +519,7 @@ private fun FlowContent(inspection: FlowInspection?, network: String?, protocol:
                 "Для расшифровки нужны ключи приложения или отдельный доверенный TLS-прокси."
         } else {
             "Первые ${FlowInspection.PREFIX_LIMIT} байт в каждом направлении. Это фрагмент, а не полная запись запроса. " +
-                "Текст может содержать заголовки и начало тела открытого протокола. Бинарные данные смотрите в HEX."
+                "Текст может содержать заголовки и начало тела открытого протокола. Бинарные данные смотри в HEX."
         },
     )
     Text(

@@ -63,7 +63,7 @@ class PolicyApplySession(initial: NetworkPolicy, private val platform: RoutePlat
     /** The platform persists the returned value before presenting it as saved. */
     @Synchronized
     fun save(inventory: PolicyInventory, persist: (NetworkPolicy) -> Unit): List<String> {
-        if (pending != null) return listOf("Дождитесь применения предыдущей версии")
+        if (pending != null) return listOf("Дождись применения предыдущей версии")
         val candidate = draft.copy(revision = Math.addExact(saved.revision, 1))
         val program = PolicyProgramCompiler.compile(candidate, inventory, platform)
         if (!program.isValid) return program.errors.map { it.message }

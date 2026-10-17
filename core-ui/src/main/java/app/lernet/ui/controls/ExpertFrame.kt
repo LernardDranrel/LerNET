@@ -40,11 +40,14 @@ data class ExpertFrameSpec(
     val chamfer: Dp,
     val lampRadius: Dp,
     val glowLength: Dp,
+    /** On windows at least [wideFrom] wide the cuts grow to [wideChamfer] (mockup 11 B on big screens). */
+    val wideChamfer: Dp? = null,
+    val wideFrom: Dp = 1000.dp,
 ) {
     companion object {
         // Same small inset as before (no layout space), but deeper 45° cuts and bigger recessed lamps.
         val Phone = ExpertFrameSpec(ExpertFrameStyle.LINE_ROUND, inset = 4.dp, chamfer = 24.dp, lampRadius = 3.6.dp, glowLength = 120.dp)
-        val Windows = ExpertFrameSpec(ExpertFrameStyle.DOUBLE_SLOT, inset = 6.dp, chamfer = 26.dp, lampRadius = 3.0.dp, glowLength = 160.dp)
+        val Windows = ExpertFrameSpec(ExpertFrameStyle.DOUBLE_SLOT, inset = 6.dp, chamfer = 26.dp, lampRadius = 3.0.dp, glowLength = 160.dp, wideChamfer = 34.dp)
     }
 }
 
@@ -108,7 +111,8 @@ fun ExpertFramedBox(
 
 fun DrawScope.drawExpertFrame(spec: ExpertFrameSpec, lit: Float) {
     val i = spec.inset.toPx()
-    val c = spec.chamfer.toPx()
+    val wide = spec.wideChamfer != null && size.width >= spec.wideFrom.toPx()
+    val c = (if (wide) spec.wideChamfer!! else spec.chamfer).toPx()
     val path = chamferPath(size, i, c)
     val corners = listOf(Offset(i, i), Offset(size.width - i, i), Offset(size.width - i, size.height - i), Offset(i, size.height - i))
     val reach = c + spec.glowLength.toPx() * lit.coerceAtLeast(0.05f)
@@ -153,7 +157,7 @@ fun DrawScope.drawExpertFrame(spec: ExpertFrameSpec, lit: Float) {
         val inner = chamferPath(size, i + 3.5.dp.toPx(), c + 1.5.dp.toPx())
         drawPath(inner, Graphite.copy(alpha = 0.45f), style = Stroke(width = 0.6.dp.toPx()))
     }
-    val r = spec.lampRadius.toPx()
+    val r = spec.lampRadius.toPx() * if (wide) 1.15f else 1f
     chamferLampCentres(size, i, c).forEachIndexed { index, centre ->
         val angle = if (index % 2 == 0) -45f else 45f
         translate(centre.x, centre.y) {

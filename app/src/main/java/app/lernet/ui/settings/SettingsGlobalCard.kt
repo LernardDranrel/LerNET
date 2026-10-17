@@ -201,7 +201,7 @@ internal fun ProxyPasswordCard(state: SettingsUiState, onIntent: (SettingsIntent
             onClick = { onIntent(SettingsIntent.SetProxyCredentials(user, password)) },
             enabled = valid && (user.trim() != savedUser || password != savedPassword),
             modifier = Modifier.fillMaxWidth(),
-        ) { Text(stringResource(R.string.settings_journal_apply)) }
+        ) { Text(stringResource(R.string.save)) }
     }
 }
 

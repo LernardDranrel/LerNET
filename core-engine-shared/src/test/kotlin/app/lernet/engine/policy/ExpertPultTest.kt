@@ -31,4 +31,12 @@ class ExpertPultTest {
         assertEquals("Схема сохранена · заработает, когда включишь",
             ExpertPult.schemaLine(PultStatus.OFF, unsavedDraft = false, unapplied = false, applied = false))
     }
+
+    @Test fun `working pult does not repeat itself`() {
+        assertEquals(null, ExpertPult.schemaNote(PultStatus.WORKING, unsavedDraft = false, unapplied = false, applied = true))
+        assertEquals("Есть изменения · применятся после «Применить»",
+            ExpertPult.schemaNote(PultStatus.WORKING, unsavedDraft = false, unapplied = true, applied = true))
+        assertEquals("Схема работает",
+            ExpertPult.schemaNote(PultStatus.HOLDING, unsavedDraft = false, unapplied = false, applied = true))
+    }
 }

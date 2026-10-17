@@ -72,19 +72,19 @@ object ExpertPolicyEditing {
     }
 
     fun graphProblem(tree: PolicyTree): String? {
-        if (tree.nodes.size > 2000) return "В этом дереве больше 2000 правил. Для устойчивой работы используйте список."
+        if (tree.nodes.size > 2000) return "В этом дереве больше 2000 правил. Для устойчивой работы используй список."
         val byId = tree.nodes.associateBy { it.id }
         if (byId.size !=
             tree.nodes.size
         ) {
-            return "В черновике повторяются идентификаторы правил. Схему нельзя применить; отмените черновик или исправьте архив."
+            return "В черновике повторяются идентификаторы правил. Схему нельзя применить; отмени черновик или исправь архив."
         }
         for (node in tree.nodes) {
             val visited = mutableSetOf<String>()
             var cursor: PolicyNode? = node
             while (cursor != null) {
-                if (!visited.add(cursor.id)) return "В черновике замкнутая связь. Перенесите родителя правила, чтобы разомкнуть её."
-                if (visited.size > 64) return "Дерево глубже 64 уровней. Перенесите часть правил ближе к корню."
+                if (!visited.add(cursor.id)) return "В черновике замкнутая связь. Перенеси родителя правила, чтобы разомкнуть её."
+                if (visited.size > 64) return "Дерево глубже 64 уровней. Перенеси часть правил ближе к корню."
                 cursor = cursor.parentId?.let { byId[it] }
             }
         }
@@ -150,7 +150,7 @@ object ExpertPolicyEditing {
             }
             if (cursor.conditions.blocks.any { it.kind == ConditionKind.APP }) {
                 return "Эта ветка зависит от пакета Android. В Windows она и её дочерние правила не выполняются; " +
-                    "данные сохраняются для Android. Добавьте отдельную ветку с программой Windows."
+                    "данные сохраняются для Android. Добавь отдельную ветку с программой Windows."
             }
             cursor = cursor.parentId?.let { id -> tree.nodes.firstOrNull { it.id == id } }
         }

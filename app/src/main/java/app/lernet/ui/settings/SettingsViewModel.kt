@@ -30,6 +30,10 @@ data class SettingsUiState(
     val engineVersion: String = "",
     val appVersion: String = BuildConfig.VERSION_NAME,
     val pendingJournalMb: Int? = null,
+    /** Address, login and password of the running local proxy; null while it is not running. */
+    val liveProxy: LocalProxyAccess? = null,
+    /** True while a session runs: a new mode applies from the next connection. */
+    val sessionActive: Boolean = false,
 )
 
 sealed class SettingsIntent {
@@ -53,6 +57,8 @@ sealed class SettingsIntent {
 
     data class SetProxyCredentials(val username: String, val password: String) : SettingsIntent()
 
+    data class SetMode(val mode: app.lernet.engine.RunMode) : SettingsIntent()
+
     data class ProposeJournal(val mb: Int) : SettingsIntent()
 
     data object ConfirmJournal : SettingsIntent()
@@ -73,8 +79,16 @@ class SettingsViewModel @Inject constructor(
     val state: StateFlow<SettingsUiState> = combine(
         settingsStore.settings,
         pendingJournal,
-    ) { settings, pending ->
-        SettingsUiState(settings, controller.engineVersion, pendingJournalMb = pending)
+        controller.snapshot,
+    ) { settings, pending, snapshot ->
+        val running = snapshot.state == app.lernet.engine.ConnectionState.CONNECTED
+        SettingsUiState(
+            settings, controller.engineVersion, pendingJournalMb = pending,
+            liveProxy = app.lernet.engine.compile.LocalListeners.userProxy(snapshot.compiledJson)
+                ?.takeIf { running && snapshot.mode == app.lernet.engine.RunMode.PROXY },
+            sessionActive = snapshot.state != app.lernet.engine.ConnectionState.DISCONNECTED &&
+                snapshot.state != app.lernet.engine.ConnectionState.FAILED,
+        )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
     fun onIntent(intent: SettingsIntent) {
@@ -92,6 +106,7 @@ class SettingsViewModel @Inject constructor(
                         current.reconnect.copy(backoffCapMs = intent.value.coerceIn(2, 120) * 1000L),
                     )
                 is SettingsIntent.SetLogLevel -> settingsStore.setLogLevel(intent.level)
+                is SettingsIntent.SetMode -> settingsStore.setMode(intent.mode)
                 is SettingsIntent.SetTunMtu -> settingsStore.setEngineDefaults(
                     current.engineDefaults.copy(tunMtu = intent.value.coerceIn(1280, 9000))
                 )

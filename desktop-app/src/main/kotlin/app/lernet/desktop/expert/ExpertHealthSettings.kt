@@ -84,7 +84,7 @@ internal fun ExpertHealthSettings(state: ExpertUiState, onIntent: (ExpertIntent)
         if (changedElsewhere) {
             ExpertMessage(
                 "Настройки изменились вне этого окна",
-                "Закройте и откройте окно снова, чтобы редактировать актуальный черновик.", warning = true,
+                "Закрой и открой окно снова, чтобы редактировать актуальный черновик.", warning = true,
             )
         }
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -111,7 +111,7 @@ internal fun ExpertHealthSettings(state: ExpertUiState, onIntent: (ExpertIntent)
         }
         if (settings == null) {
             ExpertMessage(
-                "Проверьте значения",
+                "Проверь значения",
                 "Интервал: 1–60 секунд, максимум не меньше минимума. Ожидание: 1–15 секунд. " +
                     "Число неудач: целое от 1 до 10. Для секунд допускается до трёх знаков после запятой.",
                 error = true,

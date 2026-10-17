@@ -41,7 +41,7 @@ internal object WindowsAdapterInventory {
             val status = text("status").orEmpty()
             val reason = when {
                 index == excludedIndex -> "Это туннель LerNET: направлять выход обратно в него нельзя"
-                !status.equals("Up", true) -> "Интерфейс сейчас отключён; подключите корпоративный VPN и обновите список"
+                !status.equals("Up", true) -> "Интерфейс сейчас отключён; подключи корпоративный VPN и обнови список"
                 else -> null
             }
             WindowsAdapterFact(

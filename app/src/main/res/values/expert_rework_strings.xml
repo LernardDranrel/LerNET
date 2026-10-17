@@ -36,7 +36,7 @@
     <string name="expert_simulation_protocol">Прикладной протокол</string>
     <string name="expert_simulation_source_ip">Исходный IP</string>
     <string name="expert_simulation_source_port">Исходный порт</string>
-    <string name="expert_simulation_invalid_ip">Укажите IP-адрес без имени узла</string>
+    <string name="expert_simulation_invalid_ip">Укажи IP-адрес без имени узла</string>
     <string name="expert_simulation_historical">Фактический путь · версия %1$s</string>
     <string name="expert_simulation_historical_limit">Схема этой исторической версии недоступна. Сохранённые узлы и выход перечислены ниже; другую версию не подсвечиваем.</string>
     <string name="expert_simulation_confirmed_path">Подтверждённый условиями путь</string>
@@ -76,7 +76,7 @@
     <string name="expert_lever_error">СБОЙ</string>
     <string name="expert_keep_vpn_option">Использовать VPN «%1$s» для всего трафика (ИНАЧЕ)</string>
     <string name="expert_keep_vpn_body">Пустая схема направит трафик через этот профиль и его правила.</string>
-    <string name="expert_direct_switch_body">VPN будет отключён. Трафик пойдёт напрямую; заблокированные в вашей сети сайты могут перестать открываться.</string>
+    <string name="expert_direct_switch_body">VPN будет отключён. Трафик пойдёт напрямую; заблокированные в твоей сети сайты могут перестать открываться.</string>
     <string name="expert_keep_vpn_start">Сохранить VPN и включить</string>
     <string name="expert_default_path_summary">Основной путь: %1$s</string>
     <string name="expert_lamp_off">Выключено</string>
@@ -102,9 +102,9 @@
     <string name="expert_hide_tunnel_details">Скрыть сведения</string>
     <string name="expert_app_tools">Приложение</string>
     <string name="expert_profiles_folders">Профили и папки</string>
-    <string name="expert_profiles_hint">Нажмите профиль для настройки. Выходы Expert выбираются в схеме.</string>
+    <string name="expert_profiles_hint">Нажми профиль для настройки. Выходы Эксперта выбираются в схеме.</string>
     <string name="expert_app_settings">Настройки приложения</string>
     <string name="expert_device_network">Сеть устройства</string>
-    <string name="expert_back_to_menu">← Меню Expert</string>
+    <string name="expert_back_to_menu">← Меню Эксперта</string>
     <string name="expert_node_options">Действия с блоком</string>
 </resources>

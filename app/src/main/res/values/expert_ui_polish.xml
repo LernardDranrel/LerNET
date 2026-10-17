@@ -9,8 +9,8 @@
     <string name="expert_simulation_recorded_path">Как прошло тогда</string>
     <string name="expert_simulation_current_path">Как пройдёт по текущей схеме</string>
     <string name="expert_simulation_with_edits">С учётом несохранённых правок</string>
-    <string name="expert_simulation_history_first">Выберите соединение из истории. Если история пока пуста, включите туннель или создайте свой пример.</string>
-    <string name="expert_simulation_invalid_example">Откройте параметры примера и исправьте адрес или порт.</string>
+    <string name="expert_simulation_history_first">Выбери соединение из истории. Если история пока пуста, включи туннель или создай свой пример.</string>
+    <string name="expert_simulation_invalid_example">Открой параметры примера и исправь адрес или порт.</string>
     <string name="expert_now_title">Сейчас</string>
     <string name="expert_now_exits">Конфиги</string>
     <string name="expert_now_exits_none">ещё не добавлены</string>
@@ -27,4 +27,17 @@
     <string name="failover_report_next">Следующая попытка через %1$s.</string>
     <string name="failover_report_auto">Пробуем снова автоматически.</string>
     <string name="failover_report_no_leak">Маршруты VPN остаются на месте — трафик не уходит в обход.</string>
+    <string name="home_proxy_mode_note">Включён режим локального прокси: через туннель идут только приложения, настроенные на прокси. Адрес и пароль — в настройках.</string>
+    <string name="settings_mode_title">Режим работы</string>
+    <string name="settings_mode_profile_note">По умолчанию — полный VPN для всего устройства. Если у профиля задан свой режим, действует он.</string>
+    <string name="settings_mode_next_connection">Новый режим включится при следующем подключении.</string>
+    <string name="settings_proxy_not_running">Адрес, логин и пароль для копирования появятся здесь, когда прокси запущен.</string>
+    <string name="failover_other_folder">Конфиг из другой папки</string>
+    <string name="failover_turn_off">Выключить VPN</string>
+    <string name="failover_turn_off_note">Выключить VPN можно только вручную. Тогда трафик пойдёт напрямую, и LerNET покажет это.</string>
+    <string name="skipped_conditions_title">Пропущенные условия</string>
+    <string name="skipped_condition_android">Правило «%1$s»: условие для программ Windows на Android не работает</string>
+    <string name="skipped_conditions_note">Такие правила и вложенные в них пропускаются на этом устройстве; на Windows они работают.</string>
+    <string name="expert_events_tools_show">Фильтр: %1$s · история ▾</string>
+    <string name="expert_events_tools_hide">Скрыть фильтр и историю ▴</string>
 </resources>

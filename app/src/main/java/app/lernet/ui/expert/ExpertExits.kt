@@ -280,7 +280,7 @@ internal fun ExpertExits(
             externalEditor = false; formMemory.passwords.clear(); formMemory.externalProfile = null
         }, onSave = { request, profile ->
             if (externalProfileId != null && (profile == null || ExternalExitProfiles.fingerprint(profile) != externalFingerprint)) {
-                "Конфигурация изменилась. Откройте её свойства заново."
+                "Конфигурация изменилась. Открой её свойства заново."
             } else onSaveExternal(request, profile)
         }, formMemory = formMemory)
     }

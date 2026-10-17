@@ -136,7 +136,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
         simple.simpleModeRestriction = {
             if (guardEnabled || mutable.value.protection.systemGuardEnforced) {
                 "Системная защита экспертного режима блокирует обычный VPN. " +
-                    "Откройте «Экспертный режим → Защита» и восстановите сеть перед переключением."
+                    "Открой «Экспертный режим → Защита» и восстанови сеть перед переключением."
             } else {
                 null
             }
@@ -286,7 +286,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                     UiIntent.Start -> startGate.runIfCurrent(requireNotNull(startTicket)) {
                         if (handover != null) {
                             check(simple.connectedVpnProfileId() == handover.first) {
-                                "VPN-подключение изменилось. Повторите переключение режимов."
+                                "VPN-подключение изменилось. Повтори переключение режимов."
                             }
                             val target = PolicyTarget.Profile(
                                 handover.first,
@@ -315,7 +315,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                     is UiIntent.SaveExternalExit -> saveExternalExit(intent)
                     is UiIntent.WakeExit -> exitKey(intent.id)?.let { controller.handle(RuntimeIntent.WakeExit(it)) }
                     is UiIntent.SleepExit -> exitKey(intent.id)?.let { controller.handle(RuntimeIntent.SleepExit(it)) }
-                    UiIntent.EnableSystemGuard -> error("Сначала подтвердите защиту всего устройства")
+                    UiIntent.EnableSystemGuard -> error("Сначала подтверди защиту всего устройства")
                     UiIntent.DisableSystemGuard, UiIntent.RecoverSystemGuard -> disableSystemGuard()
                     // Window actions are handled by the shell.
                     UiIntent.Import, UiIntent.Export, UiIntent.ChooseExecutable, UiIntent.OpenNetworkObservation -> Unit
@@ -347,7 +347,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
             !active.state.value.applying &&
                 active.state.value.phase !in setOf(ExpertSessionPhase.STARTING, ExpertSessionPhase.STOPPING)
         ) {
-            "Дождитесь завершения переключения или применения схемы"
+            "Дождись завершения переключения или применения схемы"
         }
         refreshInventory(allowLiveApply = false)
         val beforeBundle = TransferCodec.decode(DesktopTransfer.export(simple.state.value.saved))
@@ -356,7 +356,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
         }
         if (existing != null) {
             check(intent.expectedFingerprint == ExternalExitProfiles.fingerprint(existing)) {
-                "Профиль изменился. Откройте его заново перед редактированием."
+                "Профиль изменился. Открой его заново перед редактированием."
             }
         }
         if (intent.request.kind == ExternalExitKind.CORPORATE_INTERFACE) {
@@ -367,7 +367,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                     it.binding == ExternalExitProfiles.normalizeBinding(binding)
                 }
                 check(actual?.eligible == true) {
-                    "Выбранный интерфейс изменился или отключён. Обновите список и выберите его снова."
+                    "Выбранный интерфейс изменился или отключён. Обнови список и выбери его снова."
                 }
             }
         }
@@ -386,10 +386,10 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
         )
         synchronized(simple) {
             check(TransferCodec.decode(DesktopTransfer.export(simple.state.value.saved)) == beforeBundle) {
-                "Список профилей изменился. Повторите сохранение после обновления."
+                "Список профилей изменился. Повтори сохранение после обновления."
             }
             check(repository.snapshot().legacy == beforeBundle) {
-                "Рабочая область не обновилась. Обновите список перед сохранением."
+                "Рабочая область не обновилась. Обнови список перед сохранением."
             }
             val plan = repository.previewInventory(afterBundle)
             repository.commitImported(plan) { updated -> simple.commitWorkspaceInventoryIfUnchanged(beforeBundle, updated) }
@@ -401,9 +401,9 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                 externalSaveErrorRequestId = null,
                 notice =
                 if (existing == null) {
-                    "Внешний выход добавлен. Выберите его в правиле."
+                    "Внешний выход добавлен. Выбери его в правиле."
                 } else {
-                    "Профиль сохранён. Примените сохранённую схему, чтобы изменить активный выход."
+                    "Профиль сохранён. Примени сохранённую схему, чтобы изменить активный выход."
                 }
             )
         }
@@ -455,7 +455,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                                 ExpertSessionPhase.RUNNING, ExpertSessionPhase.STARTING, ExpertSessionPhase.STOPPING,
                             )
                     ) {
-                        "Сначала остановите экспертный режим. " +
+                        "Сначала останови экспертный режим. " +
                             "Системная защита создаёт собственный адаптер при следующем включении."
                     }
                     backend.negotiateCapabilities()
@@ -494,7 +494,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
             null
         } else {
             capturedLease ?: requireNotNull(backend.processLease()) {
-                "Собственное ядро не подтвердило идентичность процесса для разрешения туннеля"
+                "Встроенное ядро не подтвердило, что разрешение на туннель выдано именно ему"
             }
         }
         protection.arm(plan, lease).getOrThrow()
@@ -504,7 +504,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
     private suspend fun disableSystemGuard() = mutex.withLock {
         runtime?.handle(RuntimeIntent.Stop)
         check(backend.identity == null && runtime?.state?.value?.tun == null) {
-            "Ядро не подтвердило остановку. Системная защита сохранена; повторите остановку перед восстановлением сети."
+            "Ядро не подтвердило остановку. Системная защита сохранена; повтори остановку перед восстановлением сети."
         }
         protection.recover().getOrThrow()
         writeGuardPreference(false)
@@ -545,14 +545,14 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
             mutex.withLock {
                 try {
                     check(runtime?.state?.value?.phase !in setOf(ExpertSessionPhase.STARTING, ExpertSessionPhase.STOPPING)) {
-                        "Дождитесь завершения переключения"
+                        "Дождись завершения переключения"
                     }
-                    check(runtime?.state?.value?.applying != true) { "Дождитесь завершения применения схемы" }
+                    check(runtime?.state?.value?.applying != true) { "Дождись завершения применения схемы" }
                     refreshInventory(allowLiveApply = false)
                     synchronized(simple) {
                         val beforeBundle = TransferCodec.decode(DesktopTransfer.export(simple.state.value.saved))
                         check(repository.snapshot().legacy == beforeBundle) {
-                            "Список профилей изменился. Обновите его перед импортом."
+                            "Список профилей изменился. Обнови его перед импортом."
                         }
                         val plan = repository.previewImported(raw, replace)
                         repository.commitImported(plan) { updated ->
@@ -564,12 +564,12 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                     externalError = null
                     mutable.update {
                         it.copy(
-                            notice = "Импортирована копия рабочей области. Проверьте схему перед применением.",
+                            notice = "Импортирована копия рабочей области. Проверь схему перед применением.",
                             error = projectedRuntimeError(runtime?.state?.value)
                         )
                     }
                 } catch (failure: kotlinx.serialization.SerializationException) {
-                    showFailure("Импорт не завершён: проверьте формат архива LerNET", null)
+                    showFailure("Импорт не завершён: проверь формат архива LerNET", null)
                 } catch (failure: Exception) {
                     showFailure("Импорт не завершён", failure)
                 }
@@ -601,7 +601,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
         scope.launch {
             val file = Path.of(path).toFile()
             if (!file.isFile || !file.extension.equals("exe", true)) {
-                showFailure("Выберите существующий EXE", null)
+                showFailure("Выбери существующий EXE", null)
                 return@launch
             }
             val icon = WindowsProcessIdentity.resolveObservation(file.absolutePath)?.icon

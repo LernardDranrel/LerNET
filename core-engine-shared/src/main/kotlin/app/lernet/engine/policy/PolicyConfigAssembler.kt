@@ -143,7 +143,7 @@ object PolicyConfigAssembler {
             invalid(program, listOf(failure.message ?: "Не удалось собрать схему"))
         } catch (_: Exception) {
             // JSON parsers can include raw credentials in their exception text.
-            invalid(program, listOf("Не удалось собрать схему: проверьте формат профилей и параметры выхода"))
+            invalid(program, listOf("Не удалось собрать схему: проверь формат профилей и параметры выхода"))
         }
     }
 
@@ -274,7 +274,7 @@ object PolicyConfigAssembler {
             ) {
                 throw AssemblyProblem(
                     "DNS: старый параметр strategy нельзя сочетать с query_type или ip_version. " +
-                        "Уберите strategy из настроек DNS профиля."
+                        "Убери strategy из настроек DNS профиля."
                 )
             }
             val dns = buildJsonObject {
@@ -316,7 +316,7 @@ object PolicyConfigAssembler {
             }
             if (program.inactiveProtections.isNotEmpty()) {
                 notes += "Защита веток другой платформы здесь не действует. " +
-                    "Добавьте условия приложений текущего устройства: ${program.inactiveProtections.size}."
+                    "Добавь условия приложений текущего устройства: ${program.inactiveProtections.size}."
             }
             if (platform == EnginePlatform.ANDROID && program.unavailableExitProfileIds.isNotEmpty()) {
                 notes += ExternalExitProfiles.ANDROID_INTERFACE_UNSUPPORTED
@@ -501,7 +501,7 @@ object PolicyConfigAssembler {
 
         private fun routeRule(rule: ProgramRule, resolution: Resolution): JsonObject = buildJsonObject {
             if (rule.protected && resolution.tag?.let { it in unproxiedExitTags } == true) {
-                throw AssemblyProblem("Защищённый выход содержит прямой маршрут. Выберите профиль без прямого выхода.")
+                throw AssemblyProblem("Защищённый выход содержит прямой маршрут. Выбери профиль без прямого выхода.")
             }
             rule.condition.forEach { (key, value) -> put(key, value) }
             put("lernet_node_ids", JsonArray(rule.nodeIds.map(::JsonPrimitive)))
@@ -586,7 +586,7 @@ object PolicyConfigAssembler {
                 if (settings.distinct().size > 1) {
                     throw AssemblyProblem(
                         "DNS: у выходов папки разные настройки DNS. " +
-                            "Задайте одинаковые настройки для динамического выбора."
+                            "Задай одинаковые настройки для динамического выбора."
                     )
                 }
             }
@@ -615,7 +615,7 @@ object PolicyConfigAssembler {
                             it["type"]?.jsonPrimitive?.contentOrNull == "dhcp" && DnsDependency.tagOf(it) in used
                         }
                     ) {
-                        throw AssemblyProblem("DNS: для DHCP DNS профиля Windows укажите адрес сервера явно или выберите DNS исходной сети")
+                        throw AssemblyProblem("DNS: для DHCP DNS профиля Windows укажи адрес сервера явно или выбери DNS исходной сети")
                     }
                 }
             }
@@ -626,7 +626,7 @@ object PolicyConfigAssembler {
                 val type = (source["type"] as? JsonPrimitive)?.contentOrNull
                 if (!protected && platform == EnginePlatform.WINDOWS && type in setOf("local", "dhcp")) {
                     if (type == "dhcp" && oldTag in explicitServers && oldTag in reachable) {
-                        throw AssemblyProblem("DNS: для DHCP DNS профиля Windows укажите адрес сервера явно или выберите DNS исходной сети")
+                        throw AssemblyProblem("DNS: для DHCP DNS профиля Windows укажи адрес сервера явно или выбери DNS исходной сети")
                     }
                     dnsServers[names.getValue(oldTag)] = buildJsonObject {
                         put("type", "local")
@@ -649,7 +649,7 @@ object PolicyConfigAssembler {
                 if (protected && type !in setOf("udp", "tcp", "tls", "https", "quic", "h3", "group")) {
                     throw AssemblyProblem(
                         "DNS: этот тип сервера не подтверждает защищённый удалённый путь. " +
-                            "Используйте UDP, TCP, TLS или HTTPS сервер для защищённой ветки."
+                            "Используй UDP, TCP, TLS или HTTPS сервер для защищённой ветки."
                     )
                 }
                 val rewritten = source.toMutableMap().apply {
@@ -673,7 +673,7 @@ object PolicyConfigAssembler {
                         if (oldTag in explicitServers || type != "udp") {
                             throw AssemblyProblem(
                                 "DNS: этот выход передаёт только TCP. " +
-                                    "Выберите TCP, TLS или HTTPS вместо UDP/QUIC DNS в профиле."
+                                    "Выбери TCP, TLS или HTTPS вместо UDP/QUIC DNS в профиле."
                             )
                         }
                         put("type", JsonPrimitive("tcp"))

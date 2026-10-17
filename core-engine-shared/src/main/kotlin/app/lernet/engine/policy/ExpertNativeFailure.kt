@@ -11,7 +11,7 @@ internal fun knownExpertNativeFailureExplanation(code: String): String? = when (
     "https_probe_certificate_failed" -> "HTTPS-проверка не смогла подтвердить сертификат. Это не означает, что TUN выключен."
     "https_probe_dns_failed" -> "Не удалось разрешить имя при HTTPS-проверке VPN/прокси."
     "https_probe_timeout" -> "Истекло время ожидания HTTPS-проверки через VPN/прокси."
-    "folder_has_no_healthy_exit" -> "Ни один профиль папки не прошёл проверку доступности. Проверьте подключения в папке."
+    "folder_has_no_healthy_exit" -> "Ни один профиль папки не прошёл проверку доступности. Проверь подключения в папке."
     "system_route_ipv4_unavailable" -> "Не найден прямой маршрут IPv4 вне нашего TUN."
     "system_route_ipv6_unavailable" -> "Не найден прямой маршрут IPv6 вне нашего TUN. Возможности VPN-выходов проверяются отдельно."
     "system_route_manager_unavailable" -> "Сведения о физических интерфейсах пока недоступны."
@@ -34,7 +34,7 @@ internal fun knownExpertNativeFailureExplanation(code: String): String? = when (
     "exit_stop_failed" -> "Закрытие старого выхода не подтверждено. Повторный запуск этого транспорта запрещён."
     "generation_stop_failed" -> "Закрытие ресурсов прежней версии схемы не подтверждено. Требуется остановка режима."
     "expert_cleanup_pending" -> "Прежний выход ещё освобождает ресурсы. Завершение очистки пока не подтверждено."
-    "generation_cleanup_unconfirmed" -> "Прежняя версия не освободила ресурсы. Новая схема не применена; остановите режим."
+    "generation_cleanup_unconfirmed" -> "Прежняя версия не освободила ресурсы. Новая схема не применена; останови режим."
     "exit_network_changed" -> "Сеть изменилась во время ожидания выхода. Запрос нужно повторить по новому пути."
     else -> null
 }

@@ -83,6 +83,14 @@ object ExpertPult {
         else -> "Схема сохранена"
     }
 
+    /**
+     * The line under the pult. Null when it would only repeat the headline («Работает» + «Схема работает»),
+     * so the pult shows one calm word instead of two.
+     */
+    fun schemaNote(status: PultStatus, unsavedDraft: Boolean, unapplied: Boolean, applied: Boolean): String? =
+        schemaLine(status, unsavedDraft, unapplied, applied)
+            .takeUnless { status == PultStatus.WORKING && !unsavedDraft && !unapplied && applied }
+
     /** Instead of «Обработчик не подтвердил безопасную смену схемы на работающем TUN». */
     const val RESTART_TO_APPLY = "На ходу эту схему не сменить. Выключи и включи — применится."
     const val APPLY_RUNNING = "Применить сейчас"

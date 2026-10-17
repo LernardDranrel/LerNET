@@ -110,6 +110,7 @@ private fun SettingsColumn(
         verticalArrangement = Arrangement.spacedBy(LerNetDimens.sectionGap),
     ) {
         // v2: everyday settings first; engine tuning folds into «Дополнительно».
+        RunModeCard(state, onIntent)
         ProxyPasswordCard(state, onIntent)
         LogsCard(onShareLogs, onOpenDiag)
         UpdatesCard()
@@ -258,4 +259,31 @@ private fun SettingNumberRow(label: String, value: Int, help: String, onChange: 
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
     )
+}
+
+
+/** v2: VPN or local proxy is chosen here, not on the home screen. Full VPN stays the default. */
+@Composable
+private fun RunModeCard(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
+    PanelCard(Modifier.testTag("settings_run_mode")) {
+        Text(stringResource(R.string.settings_mode_title), style = MaterialTheme.typography.titleMedium)
+        app.lernet.ui.home.HomeModeSelector(mode = state.settings.mode, onSelect = { onIntent(SettingsIntent.SetMode(it)) })
+        Text(
+            stringResource(R.string.settings_mode_profile_note) +
+                if (state.sessionActive) " " + stringResource(R.string.settings_mode_next_connection) else "",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (state.settings.mode == app.lernet.engine.RunMode.PROXY) {
+            if (state.liveProxy != null) {
+                app.lernet.ui.home.ProxyAddressRow(state.liveProxy)
+            } else {
+                Text(
+                    stringResource(R.string.settings_proxy_not_running),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
 }

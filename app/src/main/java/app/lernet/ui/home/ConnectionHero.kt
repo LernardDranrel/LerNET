@@ -56,6 +56,7 @@ import app.lernet.ui.layout.rememberCompactMetrics
 import app.lernet.ui.motion.motionTween
 import app.lernet.ui.motion.rememberReduceMotion
 import app.lernet.ui.theme.LerNetOk
+import app.lernet.ui.theme.LerNetHold
 
 /** The connection action stays in the first viewport, with one clear session status. */
 @Composable
@@ -65,6 +66,7 @@ internal fun ConnectionHero(
     enabled: Boolean,
     onToggle: () -> Unit,
     onOpenRoutes: (() -> Unit)?,
+    holding: Boolean = false,
     profile: @Composable ColumnScope.() -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -73,7 +75,7 @@ internal fun ConnectionHero(
     val connecting = connection == ConnectionState.CONNECTING || connection == ConnectionState.RECONNECTING
     val active = connecting || connection == ConnectionState.CONNECTED
     val accent by animateColorAsState(
-        when (connection) {
+        if (holding) LerNetHold else when (connection) {
             ConnectionState.CONNECTED -> LerNetOk
             ConnectionState.FAILED -> scheme.error
             ConnectionState.CONNECTING, ConnectionState.RECONNECTING, ConnectionState.DISCONNECTED -> scheme.primary

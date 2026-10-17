@@ -185,6 +185,7 @@ private fun HomeBody(
             enabled = state.activeProfile != null || isSessionActive(snapshot.state),
             onToggle = { onIntent(HomeIntent.ToggleConnect) },
             onOpenRoutes = homeRouteOwnerId(state)?.let { ownerId -> { onOpenRoutes(ownerId) } },
+            holding = snapshot.waitingForNetwork || snapshot.tried != null,
         ) {
             ProfileChip(
                 name = state.activeProfile?.name,
@@ -193,7 +194,8 @@ private fun HomeBody(
                 onOpenDrawer = onOpenDrawer,
             )
         }
-        HomeModeSelector(mode = state.effectiveMode, onSelect = { onIntent(HomeIntent.SetMode(it)) })
+        // v2: the mode lives in Settings; the home screen only says when the proxy is on.
+        if (state.effectiveMode == RunMode.PROXY) ProxyModeNote()
         if (snapshot.state == ConnectionState.FAILED) {
             FailedCard(
                 cause = snapshot.cause,
@@ -207,8 +209,11 @@ private fun HomeBody(
             FailoverReportCard(
                 report,
                 groupName = report.groupName ?: state.groups.firstOrNull { state.activeProfile?.id in it.profileIds }?.name,
+                onOtherFolder = onOpenDrawer,
+                onTurnOff = { onIntent(HomeIntent.ToggleConnect) },
             )
         }
+        if (state.skippedRules.isNotEmpty()) SkippedConditionsCard(state.skippedRules)
         if (state.showLockdownHint) {
             LockdownHintCard(
                 onOpenSettings = { openVpnSettings(context) },
@@ -642,7 +647,7 @@ private fun openVpnSettings(context: android.content.Context) {
 }
 
 @Composable
-private fun ProxyAddressRow(access: LocalProxyAccess?) {
+internal fun ProxyAddressRow(access: LocalProxyAccess?) {
     if (access == null) return
     val clipboard = LocalClipboardManager.current
     PanelCard {
@@ -822,7 +827,12 @@ private fun haptic(view: View, type: Int) {
 
 /** Mockup 10 A: which configs were tried, why, and that traffic does not leak meanwhile. Same as on Windows. */
 @Composable
-private fun FailoverReportCard(report: app.lernet.engine.policy.FailoverReport, groupName: String?) {
+private fun FailoverReportCard(
+    report: app.lernet.engine.policy.FailoverReport,
+    groupName: String?,
+    onOtherFolder: () -> Unit,
+    onTurnOff: () -> Unit,
+) {
     val time = remember { java.time.format.DateTimeFormatter.ofPattern("HH:mm") }
     PanelCard(modifier = Modifier.testTag("failover_report")) {
         Text(
@@ -835,7 +845,7 @@ private fun FailoverReportCard(report: app.lernet.engine.policy.FailoverReport, 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(attempt.name, Modifier.weight(0.4f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodyMedium)
-                Text(attempt.reason, Modifier.weight(0.45f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                Text(attempt.reason, Modifier.weight(0.45f), maxLines = 2, overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
                     java.time.Instant.ofEpochMilli(attempt.atMs).atZone(java.time.ZoneId.systemDefault()).format(time),
@@ -848,5 +858,38 @@ private fun FailoverReportCard(report: app.lernet.engine.policy.FailoverReport, 
                 " " + stringResource(R.string.failover_report_no_leak),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        OutlinedButton(onClick = onOtherFolder, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.failover_other_folder), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        OutlinedButton(onClick = onTurnOff, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.failover_turn_off), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Text(stringResource(R.string.failover_turn_off_note), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+}
+
+/** Mockup 10: a rule condition this platform cannot check is shown, not silently ignored. */
+@Composable
+private fun SkippedConditionsCard(rules: List<String>) {
+    PanelCard(modifier = Modifier.testTag("skipped_conditions")) {
+        Text(stringResource(R.string.skipped_conditions_title), style = MaterialTheme.typography.titleSmall)
+        rules.take(5).forEach { title ->
+            Text(stringResource(R.string.skipped_condition_android, title), style = MaterialTheme.typography.bodySmall)
+        }
+        if (rules.size > 5) Text("+${rules.size - 5}", style = MaterialTheme.typography.bodySmall)
+        Text(stringResource(R.string.skipped_conditions_note), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+
+@Composable
+private fun ProxyModeNote() {
+    Text(
+        stringResource(R.string.home_proxy_mode_note),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.testTag("home_proxy_note"),
+    )
 }
