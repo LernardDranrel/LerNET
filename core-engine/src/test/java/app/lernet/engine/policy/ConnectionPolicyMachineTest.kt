@@ -190,6 +190,46 @@ class ConnectionPolicyMachineTest {
     }
 
     @Test
+    fun directSiteTrafficDoesNotResetFailuresButTunnelRepliesDo() {
+        val ctx = ctx(failover = FailoverSettings(enabled = false), group = sampleGroup())
+        var state = connected()
+        state = machine.reduce(state, ctx, PolicyEvent.EngineFailed(ConnectionCause.DialTimeout(5))).first
+        state = machine.reduce(state, ctx, PolicyEvent.OutboundReady).first
+        assertThat(state.consecutiveFailures).isEqualTo(1)
+        // Direct sites keep answering: total downlink grows, proxied replies do not.
+        state = machine.reduce(state, ctx, status(downlinkTotal = 90_000, proxiedReplies = 0)).first
+        assertThat(state.consecutiveFailures).isEqualTo(1)
+        // A reply through the VPN exit is real evidence.
+        state = machine.reduce(state, ctx, status(downlinkTotal = 91_000, proxiedReplies = 3)).first
+        assertThat(state.consecutiveFailures).isEqualTo(0)
+    }
+
+    @Test
+    fun failuresReachTheFolderProbeDespiteDirectTraffic() {
+        val ctx = ctx(failover = FailoverSettings(enabled = true, groupId = "g1"), group = sampleGroup())
+        var state = connected()
+        var commands: List<PolicyCommand> = emptyList()
+        var down = 0L
+        repeat(3) {
+            down += 50_000
+            state = machine.reduce(state, ctx, status(downlinkTotal = down, proxiedReplies = 0)).first
+            val step = machine.reduce(state, ctx, PolicyEvent.EngineFailed(ConnectionCause.DialTimeout(5)))
+            state = step.first
+            commands = step.second
+        }
+        assertThat(commands.filterIsInstance<PolicyCommand.ProbeGroup>()).isNotEmpty()
+    }
+
+    @Test
+    fun verifiedTunnelResetsFailures() {
+        var state = connected()
+        state = machine.reduce(state, ctx(), PolicyEvent.EngineFailed(ConnectionCause.DialTimeout(5))).first
+        assertThat(state.consecutiveFailures).isEqualTo(1)
+        state = machine.reduce(state, ctx(), PolicyEvent.TunnelVerified).first
+        assertThat(state.consecutiveFailures).isEqualTo(0)
+    }
+
+    @Test
     fun watchdogUsesFakeClock() {
         val clock = FakeClock(10_000)
         val watchdog = Watchdog(clock, timeoutMs = 20_000)
@@ -380,6 +420,15 @@ class ConnectionPolicyMachineTest {
         uplinkTotal = 128,
         downlinkTotal = 512,
         connectionsOut = 1,
+    )
+
+    private fun status(downlinkTotal: Long, proxiedReplies: Long?) = PolicyEvent.EngineStatus(
+        uplinkBps = 10,
+        downlinkBps = 10,
+        uplinkTotal = downlinkTotal / 10,
+        downlinkTotal = downlinkTotal,
+        connectionsOut = 2,
+        proxiedReplies = proxiedReplies,
     )
 
     private fun zeroStatus() = PolicyEvent.EngineStatus(

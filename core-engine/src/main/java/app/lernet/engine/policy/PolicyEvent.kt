@@ -20,6 +20,11 @@ sealed class PolicyEvent {
         val downlinkTotal: Long,
         val connectionsOut: Int,
         val dnsOk: Boolean = false,
+        /**
+         * Replies seen on connections through the VPN exit (monotonic), or null when the
+         * connection feed is unavailable. Only these may clear the failure counter.
+         */
+        val proxiedReplies: Long? = null,
     ) : PolicyEvent()
 
     data class EngineFailed(val cause: ConnectionCause) : PolicyEvent()
@@ -33,6 +38,9 @@ sealed class PolicyEvent {
     data object ConnectTimeout : PolicyEvent()
 
     data object OutboundReady : PolicyEvent()
+
+    /** An HTTPS request through the tunnel itself succeeded: the config really works. */
+    data object TunnelVerified : PolicyEvent()
 
     data object UserDisconnect : PolicyEvent()
 

@@ -24,6 +24,8 @@ data class MachineState(
      * While true, no core failure except a truly unrecoverable one may drop the VPN.
      */
     val sessionHeld: Boolean = false,
+    /** Last [PolicyEvent.EngineStatus.proxiedReplies] value seen. */
+    val proxiedReplies: Long = 0,
 ) {
     companion object {
         fun idle(mode: RunMode = RunMode.FULL_VPN): MachineState =
@@ -40,6 +42,8 @@ class ConnectionPolicyMachine {
         is PolicyEvent.StartRequested -> start(state, event)
         PolicyEvent.EngineStarted -> accepted(state)
         is PolicyEvent.EngineStatus -> onStatus(state, event)
+        PolicyEvent.TunnelVerified -> if (isTerminal(state)) state to emptyList() else
+            state.copy(consecutiveFailures = 0, softReloads = 0) to emptyList()
         is PolicyEvent.EngineFailed -> onFailure(state, context, event.cause)
         PolicyEvent.WatchdogMiss -> onWatchdog(state, context)
         PolicyEvent.DnsHealthTimeout -> onDnsHealth(state, context)
@@ -109,10 +113,17 @@ class ConnectionPolicyMachine {
             downlinkTotal = event.downlinkTotal,
             dnsOk = event.dnsOk || state.snapshot.dnsOk,
         )
-        // A real reply after recovery starts a fresh health window. Merely sending bytes
-        // upstream must not clear a silent-tunnel warning.
-        val recovered = event.downlinkTotal > state.snapshot.downlinkTotal
+        // A real reply through the VPN exit starts a fresh health window. Bytes of direct
+        // connections (rules that bypass the tunnel) prove nothing about the config, so with the
+        // connection feed only proxied replies count. Without the feed: legacy total-downlink rule.
+        val proxied = event.proxiedReplies
+        val recovered = if (proxied != null) {
+            proxied > state.proxiedReplies
+        } else {
+            event.downlinkTotal > state.snapshot.downlinkTotal
+        }
         return state.copy(
+            proxiedReplies = proxied ?: state.proxiedReplies,
             snapshot = snapshot,
             softReloads = if (recovered) 0 else state.softReloads,
             consecutiveFailures = if (recovered) 0 else state.consecutiveFailures,

@@ -90,6 +90,9 @@ class ConnectionController(
     private var retryJob: Job? = null
     /** A long random recheck (all configs unavailable) that is still waiting; cut short when the network returns. */
     private var pendingRecheck: PolicyCommand.ScheduleRetry? = null
+    /** Replies through the VPN exit only; direct sites never reset the failure counter. */
+    private val proxiedReplies = app.lernet.engine.live.ProxiedReplies()
+    @Volatile private var connectionFeedSeen = false
     private var healthJob: Job? = null
     private var dnsHealthJob: Job? = null
     private val dnsHealth = DnsHealthGate()
@@ -206,6 +209,8 @@ class ConnectionController(
             }
             is EngineEvent.DnsAlive -> markDnsOk("dns path alive answers=${event.answers}")
             is EngineEvent.Connections -> {
+                connectionFeedSeen = true
+                proxiedReplies.observe(event.reset, event.rows)
                 liveFeed.apply(event.reset, event.rows)
                 noteTunnelSilence(event.rows)
             }
@@ -246,6 +251,7 @@ class ConnectionController(
                 downlinkTotal = event.downlinkTotal,
                 connectionsOut = event.connectionsOut,
                 dnsOk = dnsOkSession,
+                proxiedReplies = if (connectionFeedSeen) proxiedReplies.total else null,
             ),
         )
     }
@@ -877,6 +883,7 @@ class ConnectionController(
                 if (result.isSuccess) {
                     if (failures > 0) LerNetLog.i(TAG, "tunnel health recovered after $failures miss")
                     failures = 0
+                    dispatch(PolicyEvent.TunnelVerified)
                 } else {
                     failures++
                     val detail = result.exceptionOrNull()?.message?.take(160) ?: "HTTPS probe failed"
