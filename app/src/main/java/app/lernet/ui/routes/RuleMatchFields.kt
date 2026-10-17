@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import app.lernet.R
 import app.lernet.config.repo.RuleNodeRecord
@@ -42,11 +43,9 @@ internal fun ActionChips(
             return
         }
     }
-    val choices = listOf(
-        Triple("proxy", R.string.action_proxy, R.string.action_proxy_help),
-        Triple("direct", R.string.action_direct, R.string.action_direct_help),
-        Triple("block", R.string.action_block, R.string.action_block_help),
-    )
+    // v2: a ban is an Expert feature; the basic editor offers it only to keep an old rule visible.
+    val legacyBlock = node.action.equals("block", ignoreCase = true)
+    val choices = basicOutcomeChoices(legacyBlock)
     Text(stringResource(R.string.rule_section_action), style = MaterialTheme.typography.titleSmall)
     SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
         choices.forEachIndexed { index, (storage, label, _) ->
@@ -61,6 +60,14 @@ internal fun ActionChips(
                 shape = SegmentedButtonDefaults.itemShape(index, choices.size),
             )
         }
+    }
+    if (legacyBlock) {
+        Text(
+            stringResource(R.string.rule_block_expert_only),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.tertiary,
+            modifier = Modifier.testTag("rule_block_expert_only"),
+        )
     }
     if (node.action.equals("proxy", ignoreCase = true)) {
         Text(stringResource(R.string.rule_section_mode), style = MaterialTheme.typography.titleSmall)
@@ -138,4 +145,11 @@ internal fun showsNamedPipe(node: RuleNodeRecord, nodes: List<RuleNodeRecord>, n
     if (!node.action.equals("proxy", ignoreCase = true)) return false
     if (node.pipeName.isNotBlank()) return true
     return namingNodeId == node.id && nodes.none { it.parentId == node.id }
+}
+
+/** Basic-mode outcomes: VPN or direct. «Запрет» stays listed only for an existing old ban rule. */
+internal fun basicOutcomeChoices(legacyBlock: Boolean): List<Triple<String, Int, Int>> = buildList {
+    add(Triple("proxy", R.string.action_proxy, R.string.action_proxy_help))
+    add(Triple("direct", R.string.action_direct, R.string.action_direct_help))
+    if (legacyBlock) add(Triple("block", R.string.action_block, R.string.action_block_help))
 }

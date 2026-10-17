@@ -51,7 +51,7 @@ internal fun GlobalDefaultsCard(state: SettingsUiState, onIntent: (SettingsInten
 }
 
 @Composable
-private fun DnsDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
+internal fun DnsDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
     val saved = state.settings.engineDefaults.directDnsServer
     var draft by remember(saved) { mutableStateOf(saved) }
     PanelCard {
@@ -99,7 +99,7 @@ private fun DnsDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) -
 }
 
 @Composable
-private fun XmuxDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
+internal fun XmuxDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
     val bounds = state.settings.engineDefaults.xmuxConcurrency.split('-')
     var expanded by remember { mutableStateOf(false) }
     PanelCard {
@@ -138,7 +138,7 @@ private fun XmuxBound(value: String, label: String, modifier: Modifier) {
 }
 
 @Composable
-private fun MtuDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
+internal fun MtuDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
     val saved = state.settings.engineDefaults.tunMtu
     var draft by remember(saved) { mutableStateOf(saved.toString()) }
     val valid = draft.toIntOrNull()?.let { it in 1280..9000 } == true
@@ -166,7 +166,7 @@ private fun MtuDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) -
 }
 
 @Composable
-private fun ProxyPasswordCard(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
+internal fun ProxyPasswordCard(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
     val savedUser = state.settings.proxyUsername
     val savedPassword = state.settings.proxyPassword
     var user by remember(savedUser) { mutableStateOf(savedUser) }
@@ -203,7 +203,7 @@ private fun ProxyPasswordCard(state: SettingsUiState, onIntent: (SettingsIntent)
 }
 
 @Composable
-private fun JournalDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
+internal fun JournalDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
     val saved = state.settings.journalMaxMb
     var draft by remember(saved) { mutableStateOf(saved.toString()) }
     PanelCard {

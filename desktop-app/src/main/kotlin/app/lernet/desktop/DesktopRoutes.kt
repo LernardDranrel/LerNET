@@ -864,12 +864,15 @@ private fun RouteRuleEditor(draft: StoredRule, rules: List<StoredRule>, onClose:
         } else {
             Text("ДЕЙСТВИЕ", color = routeMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                listOf("PROXY", "DIRECT", "BLOCK").forEach { value ->
+                basicDesktopActions(draft.action.equals("BLOCK", ignoreCase = true)).forEach { value ->
                     FilterChip(action == value && (value != "PROXY" || !namedPipe),
                         onClick = { action = value; namedPipe = false }, label = { Text(actionLabelDesktop(value)) })
                 }
                 FilterChip(action == "PROXY" && namedPipe,
                     onClick = { action = "PROXY"; namedPipe = true }, label = { Text("Отдельный канал") })
+            }
+            if (action == "BLOCK") {
+                Text(BASIC_BLOCK_EXPERT_ONLY, color = routeAmber, fontSize = 12.sp)
             }
             if (action == "PROXY" && namedPipe) {
                 OutlinedTextField(pipeName, { pipeName = it }, label = { Text("Название канала") },
@@ -1145,3 +1148,10 @@ private fun RouteEmpty(title: String, description: String) {
         }
     }
 }
+
+internal const val BASIC_BLOCK_EXPERT_ONLY =
+    "Запрет работает только в Эксперте. Это старое правило пока действует как раньше, но новые запреты создаются только в Эксперте."
+
+/** Basic-mode actions; «Запретить» is listed only for an old ban rule being edited. */
+internal fun basicDesktopActions(legacyBlock: Boolean): List<String> =
+    if (legacyBlock) listOf("PROXY", "DIRECT", "BLOCK") else listOf("PROXY", "DIRECT")

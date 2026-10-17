@@ -37,6 +37,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -107,34 +109,50 @@ private fun SettingsColumn(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(LerNetDimens.sectionGap),
     ) {
-        GlobalDefaultsCard(state, onIntent)
-        PanelCard {
-            Text(stringResource(R.string.settings_connection), style = MaterialTheme.typography.titleMedium)
-            SettingNumberRow(stringResource(R.string.max_attempts), reconnect.maxAttempts, stringResource(R.string.settings_attempts_help)) {
-                onIntent(SettingsIntent.SetMaxAttempts(it))
-            }
-            SettingNumberRow(stringResource(R.string.watchdog_seconds), (reconnect.watchdogTimeoutMs / 1000L).toInt(), stringResource(R.string.settings_watchdog_help)) {
-                onIntent(SettingsIntent.SetWatchdogSeconds(it))
-            }
-            SettingNumberRow(stringResource(R.string.backoff_cap_seconds), (reconnect.backoffCapMs / 1000L).toInt(), stringResource(R.string.settings_backoff_help)) {
-                onIntent(SettingsIntent.SetBackoffCapSeconds(it))
-            }
-        }
+        // v2: everyday settings first; engine tuning folds into «Дополнительно».
+        ProxyPasswordCard(state, onIntent)
         LogsCard(onShareLogs, onOpenDiag)
-        PanelCard {
-            Text(stringResource(R.string.log_level), style = MaterialTheme.typography.titleMedium)
-            listOf("warn" to R.string.log_warn, "info" to R.string.log_info, "debug" to R.string.log_debug).forEach { (level, label) ->
-                FilterChip(
-                    selected = state.settings.logLevel == level,
-                    onClick = { onIntent(SettingsIntent.SetLogLevel(level)) },
-                    label = { Text(stringResource(label)) },
-                    modifier = Modifier.lernetButton(),
-                )
-            }
-            Text(stringResource(R.string.log_redact_hint), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        DebugPipeCard(onIntent)
         UpdatesCard()
+        var advanced by rememberSaveable { mutableStateOf(false) }
+        OutlinedButton(
+            onClick = { advanced = !advanced },
+            modifier = Modifier.fillMaxWidth().testTag("settings_advanced_toggle"),
+        ) {
+            Text(stringResource(if (advanced) R.string.settings_advanced_hide else R.string.cfg_advanced))
+        }
+        if (advanced) {
+            Text(stringResource(R.string.settings_defaults_scope), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            DnsDefaultsCard(state, onIntent)
+            XmuxDefaultsCard(state, onIntent)
+            MtuDefaultsCard(state, onIntent)
+            JournalDefaultsCard(state, onIntent)
+            PanelCard {
+                Text(stringResource(R.string.settings_connection), style = MaterialTheme.typography.titleMedium)
+                SettingNumberRow(stringResource(R.string.max_attempts), reconnect.maxAttempts, stringResource(R.string.settings_attempts_help)) {
+                    onIntent(SettingsIntent.SetMaxAttempts(it))
+                }
+                SettingNumberRow(stringResource(R.string.watchdog_seconds), (reconnect.watchdogTimeoutMs / 1000L).toInt(), stringResource(R.string.settings_watchdog_help)) {
+                    onIntent(SettingsIntent.SetWatchdogSeconds(it))
+                }
+                SettingNumberRow(stringResource(R.string.backoff_cap_seconds), (reconnect.backoffCapMs / 1000L).toInt(), stringResource(R.string.settings_backoff_help)) {
+                    onIntent(SettingsIntent.SetBackoffCapSeconds(it))
+                }
+            }
+            PanelCard {
+                Text(stringResource(R.string.log_level), style = MaterialTheme.typography.titleMedium)
+                listOf("warn" to R.string.log_warn, "info" to R.string.log_info, "debug" to R.string.log_debug).forEach { (level, label) ->
+                    FilterChip(
+                        selected = state.settings.logLevel == level,
+                        onClick = { onIntent(SettingsIntent.SetLogLevel(level)) },
+                        label = { Text(stringResource(label)) },
+                        modifier = Modifier.lernetButton(),
+                    )
+                }
+                Text(stringResource(R.string.log_redact_hint), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            DebugPipeCard(onIntent)
+        }
         AboutCard(state, snackbar)
     }
 }

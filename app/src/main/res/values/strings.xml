@@ -169,6 +169,7 @@
     <string name="action_direct">Напрямую</string>
     <string name="action_direct_help">Трафик идёт напрямую, без VPN.</string>
     <string name="action_block">Запретить</string>
+    <string name="rule_block_expert_only">Запрет работает только в Эксперте. Это старое правило пока действует как раньше, но новые запреты создаются только в Эксперте.</string>
     <string name="action_block_help">Заблокировать подходящий трафик.</string>
     <string name="rule_join_or">ИЛИ</string>
     <string name="rule_join_and">И</string>
@@ -303,6 +304,7 @@
     <string name="cfg_routes_why">Куда пойдёт трафик после DNS. Дерево правится на отдельном экране.</string>
     <string name="cfg_routes_open">Открыть маршруты</string>
     <string name="cfg_advanced">Дополнительно</string>
+    <string name="settings_advanced_hide">Скрыть дополнительные</string>
     <string name="cfg_advanced_why">Режим транспорта, общий xmux, туннель gvisor и уровень журнала. Это добавляет сборщик.</string>
     <string name="cfg_server">Сервер</string>
     <string name="cfg_port">Порт</string>
