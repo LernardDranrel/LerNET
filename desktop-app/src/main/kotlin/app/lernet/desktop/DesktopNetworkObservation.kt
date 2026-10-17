@@ -1,5 +1,7 @@
 package app.lernet.desktop
 
+import app.lernet.engine.net.observation.NetworkTable
+import app.lernet.engine.net.observation.NetworkParamSection
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -124,10 +126,17 @@ internal fun DesktopNetworkObservation(
             Column(Modifier.weight(1f).fillMaxHeight().padding(if (compact) 16.dp else 28.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Column(Modifier.weight(1f)) {
-                        Text("Сеть устройства", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+                        Text("Анализ сети", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                         Text(if (snapshot == null) "Посмотрим, как устроено подключение" else
                             "${snapshot.platform} · снимок ${observationTime(snapshot.finishedAt)} · ${if (snapshot.elevated) "права администратора" else "обычные права"}",
                             color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    }
+                    if (snapshot != null) {
+                        val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                        OutlinedButton({
+                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(NetworkTable.copyText(snapshot, NetworkTable.build(snapshot),
+                                "Анализ сети · ${snapshot.platform} · снимок ${observationTime(snapshot.finishedAt)}")))
+                        }, modifier = Modifier.testTag("network-copy-all")) { Text("Скопировать всё") }
                     }
                     if (!compact) OutlinedButton(onExport, enabled = snapshot != null && !busy) { Text("Сохранить полный разбор") }
                     if (busy && onCancel != null) TextButton(onCancel) { Text("Отменить") }
@@ -161,7 +170,7 @@ internal fun DesktopNetworkObservation(
                     EmptyObservation(busy)
                 } else when (page) {
                     ObservationPage.OVERVIEW -> LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        item { NetworkSettingsExplorer(snapshot, compact, reducedMotion, onPage = { page = it }) }
+                        item { DesktopNetworkTable(snapshot, compact) }
                         item {
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text("Внешний адрес", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
@@ -582,3 +591,57 @@ private fun sourceStateLabel(state: SourceState): String = when (state) {
 }
 
 private fun observationTime(time: Long): String = SimpleDateFormat("HH:mm:ss · d MMM", Locale.forLanguageTag("ru")).format(Date(time))
+
+
+/** v2 (mockup 09): «Параметр | Значение | Обычно» in two columns; unusual rows highlighted. */
+@Composable
+internal fun DesktopNetworkTable(snapshot: NetworkSnapshot, compact: Boolean) {
+    val sections = remember(snapshot) { NetworkTable.build(snapshot) }
+    val unusual = NetworkTable.unusualCount(sections)
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainer,
+            border = androidx.compose.foundation.BorderStroke(1.dp, if (unusual > 0) observationAmber else MaterialTheme.colorScheme.outlineVariant),
+            modifier = Modifier.fillMaxWidth().testTag("network-unusual-banner")) {
+            Column(Modifier.padding(14.dp)) {
+                Text(if (unusual > 0) "Необычных значений: $unusual" else "Необычных значений нет", fontWeight = FontWeight.SemiBold,
+                    color = if (unusual > 0) observationAmber else observationMint)
+                Text("Только чтение настроек Windows. ● собирается · ✕ скрыто от приложений. Имена, адреса и DNS-серверы — без оценки.",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        val columns = if (compact) listOf(sections) else listOf(sections.filterIndexed { i, _ -> i % 2 == 0 }, sections.filterIndexed { i, _ -> i % 2 == 1 })
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            columns.forEach { column ->
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    column.forEach { section -> DesktopNetworkSection(section) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DesktopNetworkSection(section: NetworkParamSection) {
+    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(vertical = 10.dp)) {
+            Text(section.title, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp))
+            Row(Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) {
+                listOf("Параметр" to 0.34f, "Значение" to 0.40f, "Обычно" to 0.26f).forEach { (title, weight) ->
+                    Text(title, Modifier.weight(weight), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            section.rows.forEach { row ->
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                Row(Modifier.fillMaxWidth().background(if (row.unusual) observationAmber.copy(alpha = 0.12f) else Color.Transparent)
+                    .padding(horizontal = 14.dp, vertical = 7.dp)) {
+                    Text("${row.collected.mark} ${row.name}", Modifier.weight(0.34f), fontSize = 12.sp)
+                    Column(Modifier.weight(0.40f)) {
+                        SelectionContainer { Text(row.value, fontSize = 12.sp) }
+                        if (row.unusual) Text("необычно", fontSize = 11.sp, color = observationAmber, fontWeight = FontWeight.SemiBold)
+                    }
+                    Text(row.usual, Modifier.weight(0.26f), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}

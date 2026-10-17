@@ -33,11 +33,14 @@ class NetworkObservationScreenTest {
             listOf("192.0.2.10/24"), listOf("1.1.1.1"), listOf("0.0.0.0/0" to "192.0.2.1"), 1500, "Не указан", "Активен"))
     }.collect { 1000L }
 
-    @Test fun pathExplorationExposesEvidenceAndCanShowChangesWithoutAnEngine() {
+    @Test fun tableShowsParametersAndDataTabKeepsEvidenceWithoutAnEngine() {
         rule.setContent { LerNetTheme { NetworkObservationScreen(NetworkObservationUiState(snapshot = snapshot), {}, {}, {}, {}) } }
-        rule.onNodeWithText("Разберём, куда идёт интернет").assertIsDisplayed()
+        rule.onNodeWithText("Сеть в одной таблице").assertIsDisplayed()
+        rule.onNodeWithText("Необычных значений нет").assertIsDisplayed()
+        rule.onNodeWithText("192.0.2.10/24").performScrollTo().assertIsDisplayed()
         capture("android-network-overview.png")
-        rule.onNodeWithText("Имена сайтов").performScrollTo().performClick()
+        rule.onNodeWithText("Данные").performClick()
+        rule.onNodeWithText("DNS и прокси").performScrollTo().performClick()
         rule.onNodeWithText("wlan0").performScrollTo().performClick()
         rule.onNodeWithText("Поля и их смысл · 3 ↓").performScrollTo().performClick()
         rule.onNodeWithText("1.1.1.1").performScrollTo().assertIsDisplayed()
@@ -45,6 +48,23 @@ class NetworkObservationScreenTest {
         rule.onNodeWithText("Изменения").performScrollTo().performClick()
         rule.onNodeWithText("Нужны два снимка.", substring = true).assertIsDisplayed()
         capture("android-network-changes.png")
+    }
+
+    @Test fun unusualValuesAreCountedAndCopiedAsText() {
+        val odd = AndroidNetworkCollector {
+            listOf(AndroidNetworkRecord("fixture-wifi", "wlan0", listOf("Wi-Fi"), true, true, true, false, false,
+                listOf("192.0.2.10/24"), listOf("192.0.2.1"), listOf("0.0.0.0/0" to "192.0.2.1"), 1400, "192.0.2.5:3128", "Активен"))
+        }.collect { 1000L }
+        rule.setContent { LerNetTheme { NetworkObservationScreen(NetworkObservationUiState(snapshot = odd), {}, {}, {}, {}) } }
+        rule.onNodeWithText("Необычных значений: 2").assertIsDisplayed()
+        capture("android-network-unusual.png")
+        rule.onNodeWithText("Скопировать всё").performClick()
+        rule.runOnIdle {
+            val clip = rule.activity.getSystemService(android.content.ClipboardManager::class.java).primaryClip
+            val text = clip?.getItemAt(0)?.text?.toString().orEmpty()
+            assertThat(text).contains("MTU: 1400 байт (обычно: 1500) — необычно")
+            assertThat(text).contains("HTTP-прокси сети: 192.0.2.5:3128")
+        }
     }
 
     @Test fun externalObserverIsContactedOnlyAfterExplicitConfirmation() {

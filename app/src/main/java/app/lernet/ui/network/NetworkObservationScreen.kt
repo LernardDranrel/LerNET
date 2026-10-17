@@ -1,5 +1,12 @@
 package app.lernet.ui.network
 
+import app.lernet.engine.net.observation.NetworkTable
+import app.lernet.engine.net.observation.NetworkParamSection
+import app.lernet.engine.net.observation.Collected
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.testTag
+import androidx.compose.foundation.background
 import app.lernet.R
 
 import androidx.compose.ui.res.stringResource
@@ -80,11 +87,16 @@ internal fun NetworkObservationScreen(
     val changes = remember(state.previous, snapshot) { observationChanges(state.previous, snapshot) }
     val sources = snapshot?.sources.orEmpty()
     val detail = sources.firstOrNull { it.id == selectedSource }
+    val table = remember(snapshot) { snapshot?.let(NetworkTable::build).orEmpty() }
+    val clipboard = LocalClipboardManager.current
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("Сеть устройства") }, navigationIcon = {
+            TopAppBar(title = { Text("Анализ сети") }, navigationIcon = {
                 IconButton(onClick = onBack) { Icon(LerNetSymbols.arrowBack(), "Назад") }
             }, actions = {
+                TextButton(onClick = {
+                    snapshot?.let { clipboard.setText(AnnotatedString(NetworkTable.copyText(it, table, "Анализ сети · Android · снимок ${time(it.finishedAt)}"))) }
+                }, enabled = snapshot != null, modifier = Modifier.testTag("network_copy_all")) { Text("Скопировать всё") }
                 IconButton(onClick = onRefresh, enabled = !state.collecting) { Icon(LerNetSymbols.probe(), "Обновить локальный снимок") }
                 IconButton(onClick = onExport, enabled = snapshot != null && !state.collecting) { Icon(LerNetSymbols.download(), "Сохранить снимок в файл") }
             })
@@ -93,9 +105,9 @@ internal fun NetworkObservationScreen(
         LazyColumn(Modifier.fillMaxSize().padding(padding), state = listState, contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             item {
-                Text("Разберём, куда идёт интернет", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text("Сеть в одной таблице", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
-                Text("Нажмите на участок пути: настройки, их смысл и факты будут рядом.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Параметр, значение и что обычно. Отличия от обычного подсвечены.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(if (snapshot == null) "Локальный снимок" else "Снимок ${time(snapshot.finishedAt)} · Android", style = MaterialTheme.typography.labelMedium,
@@ -112,7 +124,7 @@ internal fun NetworkObservationScreen(
             }
             stickyHeader {
                 SecondaryTabRow(selectedTabIndex = tab, containerColor = MaterialTheme.colorScheme.background) {
-                    listOf("Обзор", "Данные", "Изменения").forEachIndexed { index, title ->
+                    listOf("Таблица", "Данные", "Изменения").forEachIndexed { index, title ->
                         Tab(selected = tab == index, onClick = { selectTab(index) }, text = { Text(title) })
                     }
                 }
@@ -123,30 +135,14 @@ internal fun NetworkObservationScreen(
             }
             when (tab) {
                 0 -> {
-                    item {
-                        Column(Modifier.fillMaxWidth()) {
-                            PathStep("01", "Устройство", "Локальные адреса и интерфейсы", sources.firstOrNull { it.id == "adapters" }?.rows?.size?.let { "Видимых сетей: $it" } ?: "Ожидаем снимок",
-                                selectedSource == "adapters", reduceMotion) { selectedSource = "adapters" }
-                            PathConnector()
-                            PathStep("02", "Путь", "Маршруты и видимый VPN", sources.firstOrNull { it.id == "vpn" }?.rows?.let { if (it.isEmpty()) "VPN не виден в этой области" else "Виден VPN · ${it.size}" } ?: "Ожидаем снимок",
-                                selectedSource == "routes" || selectedSource == "vpn", reduceMotion) { selectedSource = "routes" }
-                            PathConnector()
-                            PathStep("03", "Имена сайтов", "DNS, Private DNS и прокси", "Кто помогает найти адрес назначения",
-                                selectedSource == "dns", reduceMotion) { selectedSource = "dns" }
-                            Text("Схема настроек, не трассировка пакетов", modifier = Modifier.padding(top = 10.dp), style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+                    if (snapshot != null) item {
+                        NetworkUnusualBanner(NetworkTable.unusualCount(table), snapshot.finishedAt)
                     }
-                    if (detail != null) item {
-                        if (selectedSource == "routes") Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(selected = true, onClick = { selectedSource = "routes" }, label = { Text("Маршруты") })
-                            FilterChip(selected = false, onClick = { selectedSource = "vpn" }, label = { Text("VPN") })
-                        }
-                        if (selectedSource == "vpn") Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(selected = false, onClick = { selectedSource = "routes" }, label = { Text("Маршруты") })
-                            FilterChip(selected = true, onClick = { selectedSource = "vpn" }, label = { Text("VPN") })
-                        }
-                        SourcePanel(detail, reduceMotion, snapshot = snapshot)
+                    items(table, key = { it.title }) { section -> NetworkTableCard(section) }
+                    if (snapshot != null) item {
+                        Text("● собирается · ◐ система отдаёт, LerNET пока не собирает · ✕ скрыто от приложений. " +
+                            "Оценка «обычно» есть только у полей со стандартным значением; имена, адреса и DNS-серверы — без оценки.",
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     item {
                         OutlinedCard(Modifier.fillMaxWidth(), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
@@ -249,6 +245,50 @@ internal fun NetworkObservationScreen(
         text = { Text(stringResource(R.string.network_ip_dialog_body)) },
         confirmButton = { TextButton(onClick = { confirmIp = false; onCheckIp() }) { Text("Проверить") } },
         dismissButton = { TextButton(onClick = { confirmIp = false }) { Text("Отмена") } })
+}
+
+@Composable
+private fun NetworkUnusualBanner(count: Int, at: Long) {
+    val unusual = count > 0
+    OutlinedCard(Modifier.fillMaxWidth().testTag("network_unusual_banner"),
+        border = BorderStroke(1.dp, if (unusual) Amber else MaterialTheme.colorScheme.outlineVariant)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(if (unusual) "Необычных значений: $count" else "Необычных значений нет", style = MaterialTheme.typography.titleSmall,
+                color = if (unusual) Amber else Mint, fontWeight = FontWeight.SemiBold)
+            Text("Снимок ${time(at)}. Только чтение настроек: запросы в сеть отсюда не отправляются.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun NetworkTableCard(section: NetworkParamSection) {
+    OutlinedCard(Modifier.fillMaxWidth().testTag("network_section_${section.title}")) {
+        Column(Modifier.padding(vertical = 10.dp)) {
+            Text(section.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp))
+            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp)) {
+                listOf("Параметр" to 0.36f, "Значение" to 0.38f, "Обычно" to 0.26f).forEach { (title, weight) ->
+                    Text(title, Modifier.weight(weight), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            section.rows.forEach { row ->
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                Row(Modifier.fillMaxWidth()
+                    .background(if (row.unusual) Amber.copy(alpha = 0.12f) else androidx.compose.ui.graphics.Color.Transparent)
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                    .semantics { if (row.unusual) stateDescription = "необычно" }) {
+                    Text("${row.collected.mark} ${row.name}", Modifier.weight(0.36f), style = MaterialTheme.typography.bodySmall)
+                    Column(Modifier.weight(0.38f)) {
+                        SelectionContainer { Text(row.value, style = MaterialTheme.typography.bodySmall,
+                            color = if (row.collected == Collected.YES) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant) }
+                        if (row.unusual) Text("необычно", style = MaterialTheme.typography.labelSmall, color = Amber, fontWeight = FontWeight.SemiBold)
+                    }
+                    Text(row.usual, Modifier.weight(0.26f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
 }
 
 @Composable
