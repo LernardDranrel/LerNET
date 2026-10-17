@@ -30,6 +30,7 @@ import app.lernet.engine.redact.LerNetLog
 import app.lernet.settings.AppSettings
 import app.lernet.settings.SettingsStore
 import app.lernet.vpn.AndroidProtectedDialer
+import app.lernet.vpn.AlwaysOnOffer
 import app.lernet.config.net.LocalProxyAccess
 import app.lernet.engine.compile.LocalListeners
 import app.lernet.vpn.expert.AndroidVpnLockdown
@@ -227,6 +228,16 @@ class HomeViewModel @Inject constructor(
     private var lastDeleted: DeletedSnapshot? = null
 
     init {
+        viewModelScope.launch {
+            // A tap on the always-on offer: connect to the last profile unless already connected.
+            AlwaysOnOffer.connectRequested.collect { requested ->
+                if (requested && AlwaysOnOffer.consume() && !isSessionActive(controller.snapshot.value.state)) {
+                    // The VPN permission event is dropped if nobody listens yet (cold start from the tap).
+                    events.subscriptionCount.first { it > 0 }
+                    requestConnection()
+                }
+            }
+        }
         viewModelScope.launch {
             controller.snapshot
                 .map { it.state to it.activeProfileId }
@@ -595,6 +606,7 @@ class HomeViewModel @Inject constructor(
 
     private suspend fun startEngine(profileId: String? = null) {
         expertCoordinator.noteSimpleModeIntent()
+        AlwaysOnOffer.cancel(appContext)
         val request = readConnectionRequest(profileId) ?: return
         val profile = request.profile
         val settings = request.settings

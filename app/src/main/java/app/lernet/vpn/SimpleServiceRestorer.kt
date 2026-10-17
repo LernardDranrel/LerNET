@@ -42,7 +42,12 @@ class SimpleSessionCoordinator @Inject constructor(
         if (restoreJob?.isActive == true) return
         restoreJob = scope.launch(Dispatchers.IO) {
             try {
-                val saved = store.read() ?: return@launch
+                val saved = store.read()
+                if (saved == null) {
+                    // Started as always-on VPN with nothing to restore: offer to connect instead of staying silent.
+                    if (!ExpertServiceRestorer.shouldRestore() && !ExpertVpnSession.isOwned) AlwaysOnOffer.show(context)
+                    return@launch
+                }
                 if (VpnService.prepare(context) != null || ExpertServiceRestorer.shouldRestore() || ExpertVpnSession.isOwned) return@launch
                 controller.resumePersistentSession(saved.config()) {
                     store.read()?.generation == saved.generation && !ExpertServiceRestorer.shouldRestore() && !ExpertVpnSession.isOwned

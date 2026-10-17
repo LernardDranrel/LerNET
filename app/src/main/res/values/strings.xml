@@ -40,6 +40,9 @@
     <string name="copy_proxy">Адрес прокси</string>
     <string name="proxy_addr">127.0.0.1:2080</string>
     <string name="proxy_login">Логин</string>
+    <string name="always_on_offer_channel">Предложение подключиться</string>
+    <string name="always_on_offer_title">VPN не подключён</string>
+    <string name="always_on_offer_body">Android запустил LerNET как постоянный VPN, но подключение не включено. Нажмите, чтобы подключиться к последнему профилю.</string>
     <string name="network_ip_dialog_title">Проверить внешний IP?</string>
     <string name="network_ip_dialog_body">LerNET спросит у сервиса api.ipify.org, с какого адреса пришёл запрос. Если VPN включён, запрос идёт через VPN, и сервис увидит адрес VPN. Если VPN выключен — ваш обычный адрес. Снимок сети и настройки не передаются. Это проверка одного запроса, а не гарантия защиты всего трафика.</string>
     <string name="proxy_password">Пароль</string>
