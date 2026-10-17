@@ -19,6 +19,9 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
@@ -103,9 +106,10 @@ class ExpertScreenTest {
                 )
             }
         }
-        rule.onNodeWithText("Поднимаем TUN").assertIsDisplayed()
+        // v2 texts: plain words instead of "TUN".
+        rule.onAllNodesWithText("Включаем…").onFirst().assertExists()
         capture("android-expert-overview.png")
-        rule.onNodeWithText("Остановить TUN").performClick()
+        rule.onNodeWithText("Отменить запуск").performScrollTo().performClick()
         rule.runOnIdle {
             assertThat(starts).isEqualTo(0)
             assertThat(commands).containsExactly(ExpertIntent.Stop)
@@ -199,7 +203,7 @@ class ExpertScreenTest {
                 )
             }
         }
-        rule.onNodeWithText("Остановить TUN").performClick()
+        rule.onNodeWithText("Остановить").performScrollTo().performClick()
         rule.runOnIdle {
             assertThat(commands).containsExactly(ExpertIntent.Stop)
             assertThat(starts).isEqualTo(0)

@@ -126,6 +126,7 @@ private fun SettingsColumn(
             DnsDefaultsCard(state, onIntent)
             XmuxDefaultsCard(state, onIntent)
             MtuDefaultsCard(state, onIntent)
+            TlsHandshakeCard(state, onIntent)
             JournalDefaultsCard(state, onIntent)
             PanelCard {
                 Text(stringResource(R.string.settings_connection), style = MaterialTheme.typography.titleMedium)
