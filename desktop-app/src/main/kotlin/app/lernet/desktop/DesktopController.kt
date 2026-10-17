@@ -218,15 +218,9 @@ class DesktopController(
                 val permissionFailure = tunnel.state.value.failure == TunnelFailure.TUN_PERMISSION
                 if (permissionFailure) desiredConnection = false
                 val swapped = !permissionFailure && state.value.saved.selectedProfileId?.let(::tryFailover) == true
-                if (!swapped && desiredConnection && tunnel.state.value.message.contains("попытки исчерпаны")) {
-                    val ticket = connectGeneration.get()
-                    thread(name = "lernet-windows-retry", isDaemon = true) {
-                        Thread.sleep(15_000)
-                        if (desiredConnection && connectGeneration.get() == ticket &&
-                            tunnel.state.value.status in setOf(TunnelStatus.FAILED, TunnelStatus.STOPPED)) {
-                            connectInternal(resetFailover = false)
-                        }
-                    }
+                // The old code waited for a "попытки исчерпаны" message nobody produced: a failed tunnel stayed off.
+                if (SimpleRecovery.retries(desiredConnection, tunnel.state.value.failure, swapped)) {
+                    scheduleRecovery(tunnel.state.value.message)
                 }
             }
             if (status == TunnelStatus.STOPPED && lastStatus != TunnelStatus.STOPPED) {
