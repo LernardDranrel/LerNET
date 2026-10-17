@@ -2,7 +2,7 @@
 <resources>
     <string name="expert_schema_pending">Есть неприменённые изменения</string>
     <string name="expert_schema_applied">Схема применена</string>
-    <string name="expert_schema_saved">Схема сохранена · туннель выключен</string>
+    <string name="expert_schema_saved">Схема сохранена · заработает, когда включишь</string>
     <string name="expert_simulation_hide_editor">Скрыть параметры</string>
     <string name="expert_simulation_edit_parameters">Изменить параметры</string>
     <string name="expert_simulation_create_example">Создать пример</string>
@@ -11,4 +11,13 @@
     <string name="expert_simulation_with_edits">С учётом несохранённых правок</string>
     <string name="expert_simulation_history_first">Выберите соединение из истории. Если история пока пуста, включите туннель или создайте свой пример.</string>
     <string name="expert_simulation_invalid_example">Откройте параметры примера и исправьте адрес или порт.</string>
+    <string name="expert_now_title">Сейчас</string>
+    <string name="expert_now_exits">Конфиги</string>
+    <string name="expert_now_exits_none">ещё не добавлены</string>
+    <string name="expert_now_exits_value">%1$d работают · %2$d спят · %3$d недоступны</string>
+    <string name="expert_now_connections">Активных соединений</string>
+    <string name="expert_now_open_events">Соединения, поиск и история — в «Событиях»</string>
+    <string name="expert_exits_empty_title">Конфигов пока нет</string>
+    <string name="expert_exits_empty_body">Эксперт берёт те же конфиги, что и вкладка VPN. Добавь их там — ссылкой, QR-кодом или файлом, — и они сами появятся здесь. Потом их можно сложить в папки и выбрать, как папка ищет замену.</string>
+    <string name="expert_exits_empty_external">Выход через другое приложение или интерфейс можно добавить кнопкой ниже.</string>
 </resources>

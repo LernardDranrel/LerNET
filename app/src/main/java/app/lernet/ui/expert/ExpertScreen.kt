@@ -13,6 +13,8 @@ import app.lernet.ui.controls.ExpertFrameSpec
 import app.lernet.ui.controls.ExpertFramedBox
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
@@ -390,19 +392,26 @@ internal fun ExpertScreen(
                         ExpertSchema(runtime, bundle, onIntent, Modifier.weight(1f), onSaveDraft)
                     }
                 } else if (visible == ExpertSection.OVERVIEW) {
+                    // The pult keeps the lever and a short summary; connections live in «События».
+                    Column(
+                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        state.storageError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        if (permissionDenied) {
+                            Text(stringResource(R.string.expert_permission_denied), color = MaterialTheme.colorScheme.error)
+                        }
+                        ExpertStatus(state, onIntent, onStart, reduced)
+                        ExpertNowCard(runtime, onOpenEvents = { selectSection(ExpertSection.JOURNAL) })
+                    }
+                } else if (visible == ExpertSection.JOURNAL) {
                     ExpertActivity(runtime, bundle, onSimulate = { connection, historical ->
                         simulationConnection = connection
                         historicalPath = historical
                         simulationRequest++
                         selectSection(ExpertSection.SIMULATION)
                     }, onClear = { onIntent(ExpertIntent.ClearConnectionHistory) }, header = { rate ->
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            state.storageError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                            if (permissionDenied) {
-                                Text(stringResource(R.string.expert_permission_denied), color = MaterialTheme.colorScheme.error)
-                            }
-                            ExpertStatus(state, onIntent, onStart, rate, reduced)
-                        }
+                        ExpertEventsHeader(runtime, rate)
                     })
                 } else {
                     LazyColumn(
@@ -536,12 +545,13 @@ private fun ExpertStatus(
     state: ExpertUiState,
     onIntent: (ExpertIntent) -> Unit,
     onStart: () -> Unit,
-    rate: FlowTrafficRate? = null,
     reducedMotion: Boolean = false,
 ) {
     val runtime = requireNotNull(state.runtime)
     val health = runtime.tunnelHealth
-    val statusText = runtime.networkReason ?: when {
+    // One status drives the lever word, the headline, the counter and the schema line.
+    val pult = app.lernet.engine.policy.ExpertPult.status(runtime)
+    val problemText = runtime.networkReason ?: when {
         health == ExpertTunnelHealth.ERROR -> {
             val failedExit = runtime.exits.firstOrNull {
                 it.phase == app.lernet.engine.policy.ExitPhase.FAILED || it.phase == app.lernet.engine.policy.ExitPhase.DEGRADED
@@ -555,8 +565,16 @@ private fun ExpertStatus(
         }
         health == ExpertTunnelHealth.PENDING && runtime.phase == ExpertSessionPhase.RUNNING ->
             stringResource(R.string.expert_lamp_pending)
-        else -> stringResource(runtime.phase.titleResource())
+        else -> null
     }
+    val statusText = if (pult == app.lernet.engine.policy.PultStatus.PROBLEM) {
+        problemText ?: app.lernet.engine.policy.ExpertPult.headline(pult)
+    } else {
+        app.lernet.engine.policy.ExpertPult.headline(pult)
+    }
+    // A network note (e.g. no network) is shown under the headline, never instead of the state.
+    val note = if (pult == app.lernet.engine.policy.PultStatus.HOLDING) problemText
+        else runtime.networkReason?.takeIf { pult != app.lernet.engine.policy.PultStatus.PROBLEM }
     var details by rememberSaveable { mutableStateOf(false) }
     PanelCard {
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -564,12 +582,14 @@ private fun ExpertStatus(
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(stringResource(R.string.expert_tunnel_title), textAlign = TextAlign.Center, style = MaterialTheme.typography.headlineSmall)
                 Text(statusText, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium,
-                    color = when (runtime.tunnelHealth) {
-                        ExpertTunnelHealth.ERROR -> MaterialTheme.colorScheme.error
-                        ExpertTunnelHealth.PENDING -> MaterialTheme.colorScheme.tertiary
-                        ExpertTunnelHealth.HEALTHY -> MaterialTheme.colorScheme.secondary
-                        ExpertTunnelHealth.OFF -> MaterialTheme.colorScheme.onSurfaceVariant
+                    modifier = Modifier.testTag("expert_pult_headline"),
+                    color = when (pult) {
+                        app.lernet.engine.policy.PultStatus.PROBLEM -> MaterialTheme.colorScheme.error
+                        app.lernet.engine.policy.PultStatus.WORKING -> MaterialTheme.colorScheme.secondary
+                        app.lernet.engine.policy.PultStatus.OFF -> MaterialTheme.colorScheme.onSurfaceVariant
+                        else -> MaterialTheme.colorScheme.tertiary
                     })
+                note?.let { Text(it, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary) }
                 state.inventory?.let { inventory ->
                     val policy = runtime.appliedPolicy ?: runtime.saved
                     Text(
@@ -600,21 +620,7 @@ private fun ExpertStatus(
                         ExpertTunnelHealth.ERROR -> R.string.expert_lamp_error
                     }
                 ),
-                stateLabel = stringResource(
-                    if (runtime.tunnelHealth == ExpertTunnelHealth.ERROR) {
-                        R.string.expert_lever_error
-                    } else if (runtime.applying) {
-                        R.string.expert_lever_apply
-                    } else {
-                        when (runtime.phase) {
-                            ExpertSessionPhase.RUNNING -> R.string.expert_lever_on
-                            ExpertSessionPhase.STOPPED -> R.string.expert_lever_off
-                            ExpertSessionPhase.STARTING -> R.string.expert_lever_start
-                            ExpertSessionPhase.STOPPING -> R.string.expert_lever_stop
-                            ExpertSessionPhase.FAILED -> R.string.expert_lever_error
-                        }
-                    }
-                ),
+                stateLabel = app.lernet.engine.policy.ExpertPult.lever(pult),
                 reducedMotion = reducedMotion,
             )
             }
@@ -623,24 +629,15 @@ private fun ExpertStatus(
             summary()
         }
         Text(
-            stringResource(R.string.expert_flow_active_count, runtime.connections.count { it.active == true }),
-            style = MaterialTheme.typography.bodySmall
-        )
-        Text(
-            if (rate == null) {
-                stringResource(R.string.expert_flow_rate_unknown)
-            } else {
-                stringResource(R.string.expert_flow_rate, rate.upload, rate.download)
-            },
-            style = MaterialTheme.typography.bodySmall
-        )
-        Text(
-            stringResource(when {
-                runtime.hasDraftChanges || (runtime.appliedRevision != null && runtime.appliedRevision != runtime.saved.revision) -> R.string.expert_schema_pending
-                runtime.appliedRevision != null -> R.string.expert_schema_applied
-                else -> R.string.expert_schema_saved
-            }),
-            style = MaterialTheme.typography.bodySmall
+            app.lernet.engine.policy.ExpertPult.schemaLine(
+                pult,
+                unsavedDraft = runtime.hasDraftChanges,
+                unapplied = runtime.appliedRevision != null && runtime.appliedRevision != runtime.saved.revision,
+                applied = runtime.appliedRevision != null,
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.fillMaxWidth().testTag("expert_pult_schema"),
+            textAlign = TextAlign.Center,
         )
         TextButton({ details = !details }, Modifier.fillMaxWidth()) {
             Text(stringResource(if (details) R.string.expert_hide_tunnel_details else R.string.expert_tunnel_details))
@@ -720,5 +717,51 @@ internal fun ExpertUptimeLine(runtime: app.lernet.engine.policy.ExpertRuntimeSta
             color = MaterialTheme.colorScheme.tertiary,
         )
         Text(label, style = MaterialTheme.typography.headlineSmall)
+    }
+}
+
+/** «Сейчас» on the pult: a short summary; the connections themselves are in «События». */
+@Composable
+private fun ExpertNowCard(runtime: app.lernet.engine.policy.ExpertRuntimeState, onOpenEvents: () -> Unit) {
+    val exits = runtime.exits
+    val working = exits.count { it.phase == app.lernet.engine.policy.ExitPhase.READY }
+    val sleeping = exits.count { it.phase == app.lernet.engine.policy.ExitPhase.SLEEPING }
+    val down = exits.count { it.phase == app.lernet.engine.policy.ExitPhase.FAILED || it.phase == app.lernet.engine.policy.ExitPhase.DEGRADED }
+    val active = runtime.connections.count { it.active == true }
+    PanelCard {
+        Text(stringResource(R.string.expert_now_title).uppercase(), style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.tertiary)
+        ExpertNowRow(stringResource(R.string.expert_now_exits),
+            if (exits.isEmpty()) stringResource(R.string.expert_now_exits_none)
+            else stringResource(R.string.expert_now_exits_value, working, sleeping, down))
+        ExpertNowRow(stringResource(R.string.expert_now_connections), active.toString())
+        TextButton(onOpenEvents, Modifier.fillMaxWidth().testTag("expert_open_events")) {
+            Text(stringResource(R.string.expert_now_open_events))
+        }
+    }
+}
+
+@Composable
+private fun ExpertNowRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Text(value, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.End, modifier = Modifier.padding(start = 12.dp))
+    }
+}
+
+/** Top of «События»: speed, active count and the latest app notes, above search and history. */
+@Composable
+private fun ExpertEventsHeader(runtime: app.lernet.engine.policy.ExpertRuntimeState, rate: FlowTrafficRate?) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(stringResource(R.string.expert_flow_active_count, runtime.connections.count { it.active == true }),
+            style = MaterialTheme.typography.bodySmall)
+        Text(
+            if (rate == null) stringResource(R.string.expert_flow_rate_unknown)
+            else stringResource(R.string.expert_flow_rate, rate.upload, rate.download),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        runtime.reasons.asReversed().take(5).forEach { reason ->
+            PanelCard { Text(reason.message, style = MaterialTheme.typography.bodyMedium) }
+        }
     }
 }

@@ -13,7 +13,7 @@ class WindowsAdapterInventoryTest {
         val raw = """[{"guid":"{$guid}","name":"Company VPN","index":17,"status":"Up","description":"Adapter"}]"""
         val owned = WindowsAdapterInventory.parse(raw, 17).single()
         assertFalse(owned.eligible)
-        assertTrue(owned.reason.orEmpty().contains("TUN"))
+        assertTrue(owned.reason.orEmpty().contains("туннель LerNET"))
         val available = WindowsAdapterInventory.parse(raw, 18).single()
         assertTrue(available.eligible)
         assertEquals(guid, available.binding.guid)

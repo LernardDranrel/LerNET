@@ -144,7 +144,7 @@ class WindowsBoxProcess internal constructor(
                             mutable.update {
                                 it.copy(
                                     status = TunnelStatus.FAILED,
-                                    message = "Windows запретила создание TUN. Запустите LerNET от имени администратора " +
+                                    message = "Windows запретила создание туннеля. Запустите LerNET от имени администратора " +
                                         "или выберите «Локальный прокси».",
                                     failure = TunnelFailure.TUN_PERMISSION
                                 )

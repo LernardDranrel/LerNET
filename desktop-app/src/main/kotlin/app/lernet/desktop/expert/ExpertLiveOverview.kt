@@ -70,15 +70,36 @@ internal fun ExpertLiveOverview(
     onIntent: (ExpertIntent) -> Unit,
     modifier: Modifier,
     confirm: (ExpertIntent) -> Unit,
-    simulate: (ExpertConnection) -> Unit,
-    showPath: (ExpertConnection) -> Unit,
+    openEvents: () -> Unit,
 ) {
-    BoxWithConstraints(modifier) {
-        val streamsHeight = (maxHeight * 1.65f).coerceAtLeast(620.dp)
-        ExpertScrollableColumn(Modifier.fillMaxSize()) {
-            TunControl(state, onIntent, confirm)
-            ExpertLiveStreams(state, Modifier.height(streamsHeight), simulate, showPath)
+    // The pult keeps the lever and a short summary; search, filters and history are in «События».
+    ExpertScrollableColumn(modifier.fillMaxSize()) {
+        TunControl(state, onIntent, confirm)
+        ExpertNowSummary(state, openEvents)
+    }
+}
+
+/** «Сейчас»: a short summary of exits and connections, with a way to the full list. */
+@Composable
+private fun ExpertNowSummary(state: ExpertUiState, openEvents: () -> Unit) {
+    val working = state.exits.count { it.phase == app.lernet.engine.policy.ExitPhase.READY }
+    val sleeping = state.exits.count { it.phase == app.lernet.engine.policy.ExitPhase.SLEEPING }
+    val down = state.exits.count { it.phase == app.lernet.engine.policy.ExitPhase.FAILED || it.phase == app.lernet.engine.policy.ExitPhase.DEGRADED }
+    Surface(color = ExpertColors.panel, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, ExpertColors.border)) {
+        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("СЕЙЧАС", style = MaterialTheme.typography.labelSmall, color = ExpertColors.amber)
+            NowRow("Конфиги", if (state.exits.isEmpty()) "ещё не добавлены" else "$working работают · $sleeping спят · $down недоступны")
+            NowRow("Активных соединений", state.connections.count { it.active == true }.toString())
+            TextButton(onClick = openEvents) { Text("Соединения, поиск и история — в «Событиях» →") }
         }
+    }
+}
+
+@Composable
+private fun NowRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = ExpertColors.muted)
     }
 }
 
@@ -86,12 +107,14 @@ internal fun ExpertLiveOverview(
 private fun TunControl(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, confirm: (ExpertIntent) -> Unit) {
     val running = state.phase in setOf(ExpertPhase.RUNNING, ExpertPhase.APPLYING)
     val changing = state.phase in setOf(ExpertPhase.STARTING, ExpertPhase.STOPPING, ExpertPhase.APPLYING)
+    // One status drives the lever word, headline, counter and schema line (shared with Android).
+    val pult = state.pultStatus
     val accent by animateColorAsState(
-        when (state.tunnelHealth) {
-            ExpertTunnelHealth.HEALTHY -> ExpertColors.green
-            ExpertTunnelHealth.ERROR -> MaterialTheme.colorScheme.error
-            ExpertTunnelHealth.PENDING -> ExpertColors.amber
-            ExpertTunnelHealth.OFF -> ExpertColors.muted
+        when (pult) {
+            app.lernet.engine.policy.PultStatus.WORKING -> ExpertColors.green
+            app.lernet.engine.policy.PultStatus.PROBLEM -> MaterialTheme.colorScheme.error
+            app.lernet.engine.policy.PultStatus.OFF -> ExpertColors.muted
+            else -> ExpertColors.amber
         },
         tween(if (state.reducedMotion) 0 else 180), label = "tun-control",
     )
@@ -104,7 +127,7 @@ private fun TunControl(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, c
                 checked = state.desiredEnabled,
                 onCheckedChange = { enable -> if (enable) onIntent(ExpertIntent.Start) else confirm(ExpertIntent.Stop) },
                 enabled = !state.busy && !changing,
-                accessibleName = "Постоянный туннель: ${phaseName(state.phase)}",
+                accessibleName = "Постоянный туннель: ${app.lernet.engine.policy.ExpertPult.headline(pult)}",
                 lamp = when (state.tunnelHealth) {
                     ExpertTunnelHealth.OFF -> NetworkLeverLamp.OFF
                     ExpertTunnelHealth.PENDING -> NetworkLeverLamp.PENDING
@@ -117,18 +140,7 @@ private fun TunControl(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, c
                     ExpertTunnelHealth.HEALTHY -> "Работает"
                     ExpertTunnelHealth.ERROR -> "Сбой туннеля или одного из выходов"
                 },
-                stateLabel = if (state.tunnelHealth == ExpertTunnelHealth.ERROR) {
-                    "СБОЙ"
-                } else {
-                    when (state.phase) {
-                        ExpertPhase.RUNNING -> "ВКЛ"
-                        ExpertPhase.STOPPED -> "ВЫКЛ"
-                        ExpertPhase.STARTING -> "ПУСК"
-                        ExpertPhase.STOPPING -> "СТОП"
-                        ExpertPhase.APPLYING -> "ПРИМЕНЕНИЕ"
-                        ExpertPhase.FAILED -> "СБОЙ"
-                    }
-                },
+                stateLabel = app.lernet.engine.policy.ExpertPult.lever(pult),
                 reducedMotion = state.reducedMotion,
             )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -136,15 +148,22 @@ private fun TunControl(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, c
                 Text("Постоянный туннель", style = MaterialTheme.typography.titleLarge)
                 Text(
                     when {
-                        state.networkReason != null -> "Включено · ${state.networkReason}"
-                        state.phase == ExpertPhase.STOPPED && state.protection.systemGuardEnforced ->
+                        pult == app.lernet.engine.policy.PultStatus.OFF && state.protection.systemGuardEnforced ->
                             "Выключено · защита Windows блокирует обычный выход"
-                        running && (state.hasDraftChanges || state.hasUnappliedChanges) -> "Работает · есть неприменённые изменения"
-                        running -> "Работает · соединения идут по вашей схеме"
-                        state.phase == ExpertPhase.STOPPED -> "Выключено"
-                        else -> phaseName(state.phase)
+                        pult == app.lernet.engine.policy.PultStatus.WORKING -> "Работает · соединения идут по твоей схеме"
+                        else -> app.lernet.engine.policy.ExpertPult.headline(pult)
                     },
                     color = accent, style = MaterialTheme.typography.bodyMedium
+                )
+                // A network note goes under the headline, never instead of the state.
+                state.networkReason?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = ExpertColors.amber) }
+                Text(
+                    app.lernet.engine.policy.ExpertPult.schemaLine(
+                        pult, unsavedDraft = state.hasDraftChanges,
+                        unapplied = state.appliedRevision != null && state.hasUnappliedChanges,
+                        applied = state.appliedRevision != null,
+                    ),
+                    style = MaterialTheme.typography.bodySmall, color = ExpertColors.muted,
                 )
                 val policy = state.applied.takeIf { running } ?: state.saved
                 Text(
@@ -557,7 +576,7 @@ private fun FlowContent(inspection: FlowInspection?, network: String?, protocol:
 /** «Без перерыва» counter; hidden unless the core confirmed a running TUN. */
 internal fun expertUptimeLabel(state: ExpertUiState, nowEpochMs: Long): String? {
     val since = state.runningSinceEpochMs ?: return null
-    if (state.phase != ExpertPhase.RUNNING && state.phase != ExpertPhase.APPLYING) return null
+    if (!app.lernet.engine.policy.ExpertPult.showsUptime(state.pultStatus)) return null
     return app.lernet.engine.policy.ExpertUptime.format((nowEpochMs - since).coerceAtLeast(0))
 }
 

@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="expert_platform_notification_title">LerNET · управление сетью</string>
-    <string name="expert_platform_notification_text">TUN работает. Правила управляют выходом приложений в сеть.</string>
-    <string name="expert_platform_notification_starting">Подготавливаем TUN и правила сети.</string>
+    <string name="expert_platform_notification_text">Туннель работает. Правила управляют выходом приложений в сеть.</string>
+    <string name="expert_platform_notification_starting">Подготавливаем туннель и правила сети.</string>
     <string name="expert_platform_simple_conflict">Сетью управляет Expert. Сначала остановите этот режим.</string>
     <string name="expert_platform_missing_permission">Android не разрешил создать VPN. Подтвердите системный запрос.</string>
     <string name="expert_platform_other_vpn">Другой VPN уже управляет сетью. Отключите его перед запуском Expert.</string>
-    <string name="expert_platform_native_missing">Встроенное ядро не поддерживает постоянный Expert TUN. Нужна сборка с Expert API.</string>
+    <string name="expert_platform_native_missing">Встроенное ядро не поддерживает постоянный туннель Эксперта. Нужна сборка с Expert API.</string>
     <string name="expert_platform_tunnel_lost">Android остановил Expert VPN. Активные правила больше не применяются.</string>
     <string name="expert_platform_package_protection_unavailable">Для защиты и блокировки по приложениям нужен Android 10 или новее. На старой системе приложение нельзя определить достаточно надёжно.</string>
     <string name="expert_platform_start_failed">Не удалось запустить Expert. Причина записана в журнале ядра.</string>

@@ -50,7 +50,7 @@ class ExpertChromeTest {
         rule.setContent {
             LerNetTheme {
                 ExpertScreen(
-                    ExpertUiState(ExpertRuntimeState(saved = NetworkPolicy(), phase = ExpertSessionPhase.RUNNING, desiredEnabled = true, runningSinceEpochMs = System.currentTimeMillis() - ((14 * 24 + 6) * 60 + 5) * 60_000L), bundle),
+                    ExpertUiState(ExpertRuntimeState(saved = NetworkPolicy(), phase = ExpertSessionPhase.RUNNING, desiredEnabled = true, runningSinceEpochMs = System.currentTimeMillis() - ((14 * 24 + 6) * 60 + 5) * 60_000L, tun = app.lernet.engine.policy.TunIdentity("tun"), appliedRevision = 0), bundle),
                     remember { SnackbarHostState() }, {}, {}, {}, {}, {}, false,
                     selectedSection = section, onSectionChange = { section = it },
                     onSettings = { settings++ },

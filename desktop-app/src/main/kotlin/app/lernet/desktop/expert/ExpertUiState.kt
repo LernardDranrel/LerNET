@@ -54,6 +54,19 @@ data class ExpertUiState(
     val directNetwork: ExpertDirectNetworkFacts? = null,
 ) {
     val hasDraftChanges: Boolean get() = draft != saved
+    /** The same pult status as on Android: lever word, headline, counter and schema line agree. */
+    val pultStatus: app.lernet.engine.policy.PultStatus
+        get() = app.lernet.engine.policy.ExpertPult.status(
+            when (phase) {
+                ExpertPhase.STOPPED -> app.lernet.engine.policy.PultPhase.STOPPED
+                ExpertPhase.STARTING -> app.lernet.engine.policy.PultPhase.STARTING
+                ExpertPhase.RUNNING -> app.lernet.engine.policy.PultPhase.RUNNING
+                ExpertPhase.APPLYING -> app.lernet.engine.policy.PultPhase.APPLYING
+                ExpertPhase.STOPPING -> app.lernet.engine.policy.PultPhase.STOPPING
+                ExpertPhase.FAILED -> app.lernet.engine.policy.PultPhase.FAILED
+            },
+            tunnelHealth,
+        )
     val hasUnappliedChanges: Boolean get() = appliedRevision != saved.revision
     val inventory: PolicyInventory
         get() = PolicyInventory(
@@ -160,7 +173,7 @@ data class ExpertProtection(
     val ipv6Covered: Boolean = false,
     val systemGuardEnforced: Boolean = false,
     val explanation: String =
-        "Системная защита от обхода TUN не подтверждена. Правила внутри работающего TUN не заменяют защиту при его остановке.",
+        "Системная защита от обхода туннеля не подтверждена. Правила внутри работающего туннеля не заменяют защиту при его остановке.",
 )
 
 sealed interface ExpertIntent {

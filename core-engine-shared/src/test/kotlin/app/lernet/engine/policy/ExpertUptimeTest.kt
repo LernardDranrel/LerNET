@@ -18,7 +18,10 @@ class ExpertUptimeTest {
         val base = ExpertRuntimeState(saved = NetworkPolicy())
         assertThat(ExpertUptime.label(base.copy(phase = ExpertSessionPhase.RUNNING), 1_000)).isNull()
         assertThat(ExpertUptime.label(base.copy(phase = ExpertSessionPhase.STOPPED, runningSinceEpochMs = 0), 1_000)).isNull()
-        assertThat(ExpertUptime.label(base.copy(phase = ExpertSessionPhase.RUNNING, runningSinceEpochMs = 0), 120_000)).isEqualTo("2 мин")
-        assertThat(ExpertUptime.label(base.copy(phase = ExpertSessionPhase.RUNNING, runningSinceEpochMs = 5_000), 1_000)).isEqualTo("меньше минуты")
+        // Still checking the link: no counter next to «проверяем связь».
+        assertThat(ExpertUptime.label(base.copy(phase = ExpertSessionPhase.RUNNING, runningSinceEpochMs = 0), 120_000)).isNull()
+        val confirmed = base.copy(phase = ExpertSessionPhase.RUNNING, tun = TunIdentity("tun"), appliedRevision = 1)
+        assertThat(ExpertUptime.label(confirmed.copy(runningSinceEpochMs = 0), 120_000)).isEqualTo("2 мин")
+        assertThat(ExpertUptime.label(confirmed.copy(runningSinceEpochMs = 5_000), 1_000)).isEqualTo("меньше минуты")
     }
 }

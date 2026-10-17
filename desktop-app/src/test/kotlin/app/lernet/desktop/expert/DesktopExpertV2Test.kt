@@ -32,10 +32,12 @@ class DesktopExpertV2Test {
 
     @Test
     fun `uptime is shown only for a confirmed running tunnel`() {
-        val running = ExpertUiState(NetworkPolicy(), phase = ExpertPhase.RUNNING, runningSinceEpochMs = 0)
+        val running = ExpertUiState(NetworkPolicy(), phase = ExpertPhase.RUNNING, runningSinceEpochMs = 0, tunnelHealth = app.lernet.engine.policy.ExpertTunnelHealth.HEALTHY)
         assertThat(expertUptimeLabel(running, ((14 * 24 + 6) * 60 + 12) * 60_000L)).isEqualTo("14 дн 06 ч")
         assertThat(expertUptimeLabel(running.copy(runningSinceEpochMs = null), 1_000)).isNull()
         assertThat(expertUptimeLabel(running.copy(phase = ExpertPhase.STOPPED), 1_000)).isNull()
+        // Still checking the link: no counter next to «проверяем связь».
+        assertThat(expertUptimeLabel(running.copy(tunnelHealth = app.lernet.engine.policy.ExpertTunnelHealth.PENDING), 120_000)).isNull()
         assertThat(expertUptimeLabel(running.copy(phase = ExpertPhase.APPLYING), 120_000)).isEqualTo("2 мин")
     }
 
@@ -55,6 +57,7 @@ class DesktopExpertV2Test {
         val state = ExpertUiState(
             NetworkPolicy(), administrator = true, reducedMotion = true,
             phase = ExpertPhase.RUNNING, desiredEnabled = true,
+            tunnelHealth = app.lernet.engine.policy.ExpertTunnelHealth.HEALTHY, appliedRevision = 0,
             runningSinceEpochMs = System.currentTimeMillis() - ((14 * 24 + 6) * 60 + 12) * 60_000L,
         )
         val scene = ImageComposeScene(1440, 900, Density(1f)) {
@@ -92,6 +95,68 @@ class DesktopExpertV2Test {
         try {
             screenshot(scene, "windows-expert-v2-splash")
             assertThat(nodes(scene).any { "Эксперт" in texts(it) }).isTrue()
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
+    fun `configs page is one table with state, latency and the next action`() {
+        val exits = listOf(
+            ExpertExit("a", "Amsterdam", "Европа · постоянный", app.lernet.engine.policy.ExitPhase.READY, latencyMs = 42, activeFlows = 14, canSleep = true),
+            ExpertExit("o", "Офис (WireGuard)", "Работа · холодный", app.lernet.engine.policy.ExitPhase.READY, latencyMs = 18, activeFlows = 3,
+                coldStart = true, reason = "Проснулся для mail.corp.example · уснёт после 30 мин тишины", canSleep = true),
+            ExpertExit("t", "Tokyo", "Работа · холодный", app.lernet.engine.policy.ExitPhase.SLEEPING, coldStart = true,
+                reason = "Уснул 21:12 · 30 мин без трафика", canWake = true),
+            ExpertExit("h", "Helsinki", "Европа · постоянный", app.lernet.engine.policy.ExitPhase.FAILED,
+                reason = "Не отвечает с 20:41 · TLS: время ожидания истекло · проверяем раз в 5 мин"),
+        )
+        val state = ExpertUiState(
+            NetworkPolicy(), administrator = true, reducedMotion = true, phase = ExpertPhase.RUNNING, desiredEnabled = true,
+            tunnelHealth = app.lernet.engine.policy.ExpertTunnelHealth.HEALTHY, appliedRevision = 0, exits = exits,
+        )
+        val scene = ImageComposeScene(1440, 900, Density(1f)) {
+            MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
+                androidx.compose.material3.Surface(color = desktopColors.background, contentColor = desktopColors.onBackground) {
+                    DesktopExpert(state, {}, frameAnimateIn = false)
+                }
+            }
+        }
+        try {
+            val tab = nodes(scene).last { "Конфиги" in texts(it) && it.config.getOrNull(SemanticsActions.OnClick) != null }
+            tab.config[SemanticsActions.OnClick].action!!.invoke()
+            screenshot(scene, "windows-expert-v2-configs-table")
+            listOf("КОНФИГ", "СОСТОЯНИЕ", "ЗАДЕРЖКА", "Amsterdam", "42 мс", "Разбудить", "Усыпить").forEach { word ->
+                assertThat(nodes(scene).any { word in texts(it) }).isTrue()
+            }
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
+    fun `failover report says which configs were tried and that traffic does not leak`() {
+        val now = System.currentTimeMillis()
+        val report = app.lernet.desktop.FailoverReport(
+            "Европа",
+            listOf(
+                app.lernet.desktop.FailoverAttempt("Amsterdam", "сервер не отвечает", now - 120_000),
+                app.lernet.desktop.FailoverAttempt("Frankfurt", "сервер отвечает, но трафик через него не идёт", now - 60_000),
+                app.lernet.desktop.FailoverAttempt("Helsinki", "TLS: время ожидания истекло", now),
+            ),
+            "1 мин 10 с",
+        )
+        val scene = ImageComposeScene(760, 260, Density(1f)) {
+            MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
+                androidx.compose.material3.Surface(color = desktopColors.background, contentColor = desktopColors.onBackground) {
+                    Box(Modifier.fillMaxSize()) { app.lernet.desktop.FailoverReportCard(report) }
+                }
+            }
+        }
+        try {
+            screenshot(scene, "windows-basic-all-configs-down")
+            assertThat(nodes(scene).any { texts(it).any { t -> "трафик не уходит в обход" in t } }).isTrue()
+            assertThat(nodes(scene).any { "Frankfurt" in texts(it) }).isTrue()
         } finally {
             scene.close()
         }

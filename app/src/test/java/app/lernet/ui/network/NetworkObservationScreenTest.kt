@@ -8,6 +8,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -58,7 +59,7 @@ class NetworkObservationScreenTest {
         rule.setContent { LerNetTheme { NetworkObservationScreen(NetworkObservationUiState(snapshot = odd), {}, {}, {}, {}) } }
         rule.onNodeWithText("Необычных значений: 2").assertIsDisplayed()
         capture("android-network-unusual.png")
-        rule.onNodeWithText("Скопировать всё").performClick()
+        rule.onNodeWithContentDescription("Скопировать всё").performClick()
         rule.runOnIdle {
             val clip = rule.activity.getSystemService(android.content.ClipboardManager::class.java).primaryClip
             val text = clip?.getItemAt(0)?.text?.toString().orEmpty()

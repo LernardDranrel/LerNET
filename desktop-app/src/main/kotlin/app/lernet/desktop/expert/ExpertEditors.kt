@@ -327,7 +327,7 @@ internal fun ExpertTargetEditor(
     }
     if (target == PolicyTarget.Direct) Text(
         if (protected) "Прямой выход противоречит запрету этой ветки. Выберите VPN/прокси или блокировку."
-        else "Трафик проходит через TUN и выходит через обычную сеть устройства, без выбранного VPN/прокси.",
+        else "Трафик проходит через туннель и выходит через обычную сеть устройства, без выбранного VPN/прокси.",
         color = if (protected) ExpertColors.red else ExpertColors.muted, fontSize = 12.sp,
     )
     if (protected && target == PolicyTarget.Block) Text(

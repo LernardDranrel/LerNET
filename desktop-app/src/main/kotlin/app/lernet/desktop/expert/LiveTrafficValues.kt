@@ -47,10 +47,10 @@ internal fun flowErrorMeaning(code: String): String = when (code) {
     "name_not_found" -> "DNS сообщил, что такого имени нет"
     "resolution_failed" -> "Не удалось получить адрес назначения через DNS"
     "network_error" -> "Сетевая операция завершилась ошибкой"
-    "system_route_unavailable" -> "Windows не нашла прямой путь к этому адресу вне нашего TUN"
-    "system_route_ipv4_unavailable" -> "Вне TUN нет доступного маршрута IPv4 к этому адресу"
-    "system_route_ipv6_unavailable" -> "Вне TUN нет доступного маршрута IPv6 к этому адресу; IPv6 через VPN проверяется отдельно"
-    "system_route_manager_unavailable" -> "Системный обработчик маршрутов недоступен"
+    "system_route_unavailable" -> "Windows не нашла прямой путь к этому адресу вне нашего туннеля"
+    "system_route_ipv4_unavailable" -> "Вне туннеля нет доступного маршрута IPv4 к этому адресу"
+    "system_route_ipv6_unavailable" -> "Вне туннеля нет доступного маршрута IPv6 к этому адресу; IPv6 через VPN проверяется отдельно"
+    "system_route_manager_unavailable" -> "Система сейчас не даёт управлять маршрутами"
     "system_route_snapshot_failed" -> "Не удалось прочитать актуальную таблицу маршрутов Windows"
     "system_route_bind_failed" -> "Windows не разрешила привязать соединение к выбранному адаптеру"
     "ingress_not_ready" -> "Туннель ещё не подтвердил готовность своего адаптера"
@@ -60,7 +60,7 @@ internal fun flowErrorMeaning(code: String): String = when (code) {
     "interface_binding_invalid" -> "В настройках выхода некорректно указан адаптер"
     "interface_binding_unavailable" -> "Нужный адаптер сейчас недоступен"
     "interface_binding_identity_changed" -> "Адаптер больше не соответствует сохранённой привязке"
-    "interface_binding_owned_ingress" -> "Выход указывает на наш собственный TUN; это создало бы петлю"
+    "interface_binding_owned_ingress" -> "Выход указывает на наш собственный туннель; это создало бы петлю"
     else -> "Ядро сообщило причину: $code"
 }
 

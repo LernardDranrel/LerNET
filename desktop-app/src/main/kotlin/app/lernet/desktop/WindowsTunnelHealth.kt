@@ -44,7 +44,7 @@ internal object WindowsRouteInspector {
     /** Local route-table inspection only; it sends no packets and performs no DNS lookup. */
     fun checkExpert(interfaceIdentity: String): String? = runCatching {
         val index = interfaceIdentity.split(':').getOrNull(1)?.toIntOrNull()
-        check(index != null && index > 0) { "Ядро не передало индекс общего TUN" }
+        check(index != null && index > 0) { "Ядро не передало индекс общего туннеля" }
         val luid = interfaceLuid(index)
         val samples = mutableListOf(
             InetAddress.getByAddress(byteArrayOf(1, 1, 1, 1)),
@@ -69,7 +69,7 @@ internal object WindowsRouteInspector {
     ): String? = destinations.firstNotNullOfOrNull { address ->
         val actual = indexFor(address)
         if (actual == expectedIndex && luidFor(actual) == expectedLuid) null
-        else "Windows выбрала для ${address.hostAddress} интерфейс «${aliasFor(actual)}», а не общий TUN LerNET. Возможен конфликт маршрутов с другим VPN."
+        else "Windows выбрала для ${address.hostAddress} интерфейс «${aliasFor(actual)}», а не туннель LerNET. Возможен конфликт маршрутов с другим VPN."
     }
 
     /** Bounded numeric samples include IPv4 /31 peers and IPv6 global/ULA neighbours. */

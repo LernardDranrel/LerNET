@@ -364,7 +364,7 @@
     <string name="settings_xmux_default">XMUX · параллельные потоки</string>
     <string name="settings_xmux_default_help">Подставляется только если серверный конфиг не задаёт xmux.</string>
     <string name="settings_mtu_help">Наибольший размер пакета в VPN. Меняйте, только если сайты открываются частично.</string>
-    <string name="settings_fixed_stack">Стек TUN: gvisor. Другие варианты пока не предлагаются: в этой сборке они нарушали TCP.</string>
+    <string name="settings_fixed_stack">Сетевой стек: gvisor. Другие варианты пока не предлагаются: в этой сборке они нарушали TCP.</string>
     <string name="import_guess_vless">ссылка VLESS</string>
     <string name="import_guess_json">JSON sing-box</string>
     <string name="import_guess_json_url">адрес JSON</string>

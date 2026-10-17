@@ -42,12 +42,15 @@ data class ExpertFrameSpec(
     val glowLength: Dp,
 ) {
     companion object {
-        val Phone = ExpertFrameSpec(ExpertFrameStyle.LINE_ROUND, inset = 4.dp, chamfer = 20.dp, lampRadius = 2.6.dp, glowLength = 110.dp)
-        val Windows = ExpertFrameSpec(ExpertFrameStyle.DOUBLE_SLOT, inset = 6.dp, chamfer = 18.dp, lampRadius = 2.2.dp, glowLength = 140.dp)
+        // Same small inset as before (no layout space), but deeper 45° cuts and bigger recessed lamps.
+        val Phone = ExpertFrameSpec(ExpertFrameStyle.LINE_ROUND, inset = 4.dp, chamfer = 24.dp, lampRadius = 3.6.dp, glowLength = 120.dp)
+        val Windows = ExpertFrameSpec(ExpertFrameStyle.DOUBLE_SLOT, inset = 6.dp, chamfer = 26.dp, lampRadius = 3.0.dp, glowLength = 160.dp)
     }
 }
 
-private val Graphite = Color(0xFF2E3548)
+private val Graphite = Color(0xFF4A5368)
+private val BevelPlate = Color(0xFF0A0C12)
+private val BevelEdge = Color(0xFF6B5A3E)
 private val Amber = Color(0xFFF5C16C)
 private val AmberDeep = Color(0xFFD79C70)
 private val LampCore = Color(0xFFFFF1CF)
@@ -109,12 +112,36 @@ fun DrawScope.drawExpertFrame(spec: ExpertFrameSpec, lit: Float) {
     val path = chamferPath(size, i, c)
     val corners = listOf(Offset(i, i), Offset(size.width - i, i), Offset(size.width - i, size.height - i), Offset(i, size.height - i))
     val reach = c + spec.glowLength.toPx() * lit.coerceAtLeast(0.05f)
-    drawPath(path, Graphite.copy(alpha = 0.85f), style = Stroke(width = 1.dp.toPx()))
+    // Bevel plates: the cut-off corner reads as a dark sloped surface, so the 45° cut is visible
+    // even with the lamps off.
+    val w = size.width
+    val h = size.height
+    listOf(
+        listOf(Offset(i, i), Offset(i + c, i), Offset(i, i + c)),
+        listOf(Offset(w - i, i), Offset(w - i, i + c), Offset(w - i - c, i)),
+        listOf(Offset(w - i, h - i), Offset(w - i - c, h - i), Offset(w - i, h - i - c)),
+        listOf(Offset(i, h - i), Offset(i, h - i - c), Offset(i + c, h - i)),
+    ).forEach { pts ->
+        val plate = Path().apply { moveTo(pts[0].x, pts[0].y); lineTo(pts[1].x, pts[1].y); lineTo(pts[2].x, pts[2].y); close() }
+        drawPath(plate, BevelPlate)
+    }
+    drawPath(path, Graphite, style = Stroke(width = 1.2.dp.toPx()))
+    // The cut edges themselves: a warm metal line, brighter when the lamps are lit.
+    val edges = listOf(
+        Offset(i + c, i) to Offset(i, i + c),
+        Offset(w - i - c, i) to Offset(w - i, i + c),
+        Offset(w - i, h - i - c) to Offset(w - i - c, h - i),
+        Offset(i, h - i - c) to Offset(i + c, h - i),
+    )
+    edges.forEach { (a, b) ->
+        drawLine(BevelEdge, a, b, strokeWidth = 1.6.dp.toPx())
+        drawLine(Amber.copy(alpha = 0.85f * lit), a, b, strokeWidth = 1.6.dp.toPx())
+    }
     corners.forEach { corner ->
         drawPath(
             path,
             Brush.radialGradient(
-                0f to Amber.copy(alpha = 0.75f * lit),
+                0f to Amber.copy(alpha = 0.9f * lit),
                 0.35f to AmberDeep.copy(alpha = 0.35f * lit),
                 1f to AmberDeep.copy(alpha = 0f),
                 center = corner, radius = reach,

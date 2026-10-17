@@ -64,8 +64,8 @@ internal fun ExpertExits(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit,
     val exits = state.exits.filter { !sleepingOnly || it.phase == ExitPhase.SLEEPING }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Независимые выходы", Modifier.weight(1f), color = ExpertColors.text, fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
-            FilterChip(sleepingOnly, { sleepingOnly = !sleepingOnly }, label = { Text("Спящие") })
+            androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+            FilterChip(sleepingOnly, { sleepingOnly = !sleepingOnly }, label = { Text("Только спящие") })
             OutlinedButton(
                 onClick = {
                     editingExternal = null
@@ -76,57 +76,32 @@ internal fun ExpertExits(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit,
             OutlinedButton(onClick = { onIntent(ExpertIntent.Refresh) }, enabled = !state.busy) { Text("Обновить") }
         }
         Text(
-            "Сбой выхода не означает остановку общего TUN. Проверки состояния не пробуждают холодные выходы.",
+            "Сбой одного конфига не выключает туннель. Проверки не будят спящие конфиги.",
             color = ExpertColors.muted, fontSize = 13.sp
         )
-        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (exits.isNotEmpty()) ExpertExitTableHeader()
+        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             if (exits.isEmpty()) {
                 item {
                     ExpertEmpty(
-                        if (state.exits.isEmpty()) "Выходы пока не созданы" else "Нет спящих выходов",
-                        if (state.phase == ExpertPhase.RUNNING) {
-                            "Настройте цель в схеме. Здесь появятся подтверждённые состояния обработчика."
+                        if (state.exits.isEmpty()) "Конфигов пока нет" else "Спящих конфигов нет",
+                        if (state.exits.isNotEmpty()) {
+                            "Все конфиги сейчас на связи или ждут проверки. Сними фильтр, чтобы увидеть весь список."
                         } else {
-                            "Состояния появятся после запуска Экспертного режима."
+                            "Эксперт берёт те же конфиги, что и режим VPN. Добавь их там — ссылкой, QR-кодом или файлом, — " +
+                                "и они появятся здесь, когда схема направит в них трафик. " +
+                                "Выход через другое приложение или интерфейс можно добавить кнопкой выше."
                         }
                     )
                 }
             }
             items(exits, key = { it.id }) { exit ->
-                ExpertPanel(
-                    exit.name, Modifier.fillMaxWidth().clickable { selected = exit.id }, reducedMotion = state.reducedMotion,
-                    trailing = { ExpertTag(exitDisplayName(exit, state), exitDisplayColor(exit, state)) }
-                ) {
-                    Text(exit.targetDescription, color = ExpertColors.muted, fontSize = 13.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("${exit.activeFlows} соединений", color = ExpertColors.text)
-                        if (exit.pendingFlows > 0) ExpertTag("${exit.pendingFlows} ожидают", ExpertColors.amber)
-                        Text(
-                            exit.latencyMs?.let { "$it мс через выход" } ?: "Задержка не измерена",
-                            color =
-                            ExpertColors.muted,
-                            fontSize = 12.sp
-                        )
-                        if (exit.coldStart) ExpertTag("Холодный старт", ExpertColors.muted)
-                    }
-                    exit.reason?.let { Text(it, color = ExpertColors.muted, fontSize = 13.sp) }
-                    ExitTransportQualification(exit, state)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { selected = exit.id }) { Text("Подробнее") }
-                        if (exit.canWake) {
-                            OutlinedButton(
-                                onClick = { onIntent(ExpertIntent.WakeExit(exit.id)) },
-                                enabled = !state.busy
-                            ) { Text("Разбудить") }
-                        }
-                        if (exit.canSleep) {
-                            OutlinedButton(
-                                onClick = { onIntent(ExpertIntent.SleepExit(exit.id)) },
-                                enabled = !state.busy
-                            ) { Text("Усыпить") }
-                        }
-                    }
-                }
+                ExpertExitTableRow(
+                    exit, state,
+                    onOpen = { selected = exit.id },
+                    onWake = { onIntent(ExpertIntent.WakeExit(exit.id)) },
+                    onSleep = { onIntent(ExpertIntent.SleepExit(exit.id)) },
+                )
             }
             externalProfileDefinitions(
                 state, { externalDetails = it }, {
@@ -196,7 +171,7 @@ internal fun ExpertExits(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit,
                     "Выход поддерживается активным"
                 }
             )
-            ExpertMessage("Почему такое состояние", exit.reason ?: "Обработчик ещё не передал подробную причину.")
+            ExpertMessage("Почему такое состояние", exit.reason ?: "Ядро ещё не передало подробную причину.")
             ExitTransportQualification(exit, state)
             val channel = exit.channelId?.let { id -> state.draft.channels.firstOrNull { it.id == id } }
             when {
@@ -247,14 +222,30 @@ internal fun ExpertExits(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit,
 }
 
 @Composable
-internal fun ExpertEvents(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, modifier: Modifier) {
+internal fun ExpertEvents(
+    state: ExpertUiState,
+    onIntent: (ExpertIntent) -> Unit,
+    modifier: Modifier,
+    simulate: (ExpertConnection) -> Unit = {},
+    showPath: (ExpertConnection) -> Unit = {},
+) {
+    // «События»: connections (search, filters, history) moved here from the pult, plus what LerNET did.
+    var tab by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            androidx.compose.material3.FilterChip(tab == 0, { tab = 0 }, label = { Text("Соединения") })
+            androidx.compose.material3.FilterChip(tab == 1, { tab = 1 }, label = { Text("Что делает LerNET · ${state.events.size}") })
+        }
+        if (tab == 0) {
+            ExpertLiveStreams(state, Modifier.weight(1f), simulate, showPath)
+            return@Column
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Что делает LerNET", Modifier.weight(1f), color = ExpertColors.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
             OutlinedButton(onClick = { onIntent(ExpertIntent.Refresh) }, enabled = !state.busy) { Text("Обновить") }
         }
         Text(
-            "Применение схемы, пробуждение, отказ и смена выхода. Каждое событие сохраняет объяснение обработчика.",
+            "Применение схемы, пробуждение, отказ и смена выхода. Каждое событие сохраняет объяснение ядра.",
             color = ExpertColors.muted, fontSize = 13.sp
         )
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -281,5 +272,73 @@ private fun ReadingRow(label: String, value: String) {
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(label, color = ExpertColors.muted, fontSize = 12.sp)
         Text(value, color = ExpertColors.text, fontSize = 14.sp)
+    }
+}
+
+
+private val exitColumns = listOf(0.34f, 0.18f, 0.14f, 0.14f, 0.20f)
+
+@Composable
+private fun ExpertExitTableHeader() {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        listOf("Конфиг", "Состояние", "Задержка", "Соединений", "").forEachIndexed { index, title ->
+            Text(
+                title.uppercase(), Modifier.weight(exitColumns[index]),
+                color = ExpertColors.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExpertExitTableRow(
+    exit: ExpertExit,
+    state: ExpertUiState,
+    onOpen: () -> Unit,
+    onWake: () -> Unit,
+    onSleep: () -> Unit,
+) {
+    androidx.compose.material3.Surface(
+        color = ExpertColors.panel,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(exitColumns[0])) {
+                Text(exit.name, color = ExpertColors.text, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                Text(
+                    exit.reason ?: exit.targetDescription, color = ExpertColors.muted, fontSize = 12.sp, maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+            }
+            Row(Modifier.weight(exitColumns[1]), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ExpertTag(exitDisplayName(exit, state), exitDisplayColor(exit, state))
+            }
+            Text(
+                exit.latencyMs?.let { "$it мс" } ?: "—", Modifier.weight(exitColumns[2]),
+                color = if (exit.latencyMs != null) ExpertColors.text else ExpertColors.muted, fontSize = 13.sp,
+            )
+            Text(
+                buildString {
+                    append(exit.activeFlows)
+                    if (exit.pendingFlows > 0) append(" · ждут ${exit.pendingFlows}")
+                },
+                Modifier.weight(exitColumns[3]), color = ExpertColors.text, fontSize = 13.sp,
+            )
+            Row(Modifier.weight(exitColumns[4]), horizontalArrangement = Arrangement.End) {
+                when {
+                    exit.canWake -> TextButton(onClick = onWake, enabled = !state.busy) { Text("Разбудить") }
+                    exit.canSleep -> TextButton(onClick = onSleep, enabled = !state.busy) { Text("Усыпить") }
+                    else -> TextButton(onClick = onOpen) { Text("Подробнее") }
+                }
+            }
+        }
     }
 }

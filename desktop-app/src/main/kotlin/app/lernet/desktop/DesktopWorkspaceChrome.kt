@@ -110,7 +110,7 @@ internal fun DesktopWorkspaceSidebar(onOpenNetwork: () -> Unit, content: @Compos
         Spacer(Modifier.height(35.dp))
         content()
         Spacer(Modifier.weight(1f))
-        OutlinedButton(onClick = onOpenNetwork, modifier = Modifier.fillMaxWidth()) { Text("Сеть устройства ↗", fontSize = 12.sp) }
+        OutlinedButton(onClick = onOpenNetwork, modifier = Modifier.fillMaxWidth()) { Text("Анализ сети ↗", fontSize = 12.sp) }
         Spacer(Modifier.height(12.dp))
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Spacer(Modifier.height(12.dp))

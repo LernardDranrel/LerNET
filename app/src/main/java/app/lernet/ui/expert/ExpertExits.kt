@@ -23,6 +23,7 @@ import kotlinx.coroutines.launch
 import app.lernet.routing.policy.NetworkPolicy
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.lernet.R
@@ -73,6 +74,16 @@ internal fun ExpertExits(
     }
     val policy = runtime.draft
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        if (bundle.profiles.isEmpty()) {
+            // An empty tab opens with plain words, not with service text and a disabled button.
+            PanelCard(Modifier.testTag("expert_exits_empty")) {
+                Text(stringResource(R.string.expert_exits_empty_title), style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.expert_exits_empty_body), style = MaterialTheme.typography.bodyMedium)
+                if (onSaveExternal != null) {
+                    Text(stringResource(R.string.expert_exits_empty_external), style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
         ExpertDraftActions(runtime, onIntent)
         if (onSaveExternal != null) {
             Button(onClick = {

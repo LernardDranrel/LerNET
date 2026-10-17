@@ -40,7 +40,7 @@ internal object WindowsAdapterInventory {
                 ?: return@mapNotNull null
             val status = text("status").orEmpty()
             val reason = when {
-                index == excludedIndex -> "Это общий TUN LerNET: направлять выход обратно в него нельзя"
+                index == excludedIndex -> "Это туннель LerNET: направлять выход обратно в него нельзя"
                 !status.equals("Up", true) -> "Интерфейс сейчас отключён; подключите корпоративный VPN и обновите список"
                 else -> null
             }

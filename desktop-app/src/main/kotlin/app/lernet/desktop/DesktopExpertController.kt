@@ -494,7 +494,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
             null
         } else {
             capturedLease ?: requireNotNull(backend.processLease()) {
-                "Собственное ядро не подтвердило идентичность процесса для разрешения TUN"
+                "Собственное ядро не подтвердило идентичность процесса для разрешения туннеля"
             }
         }
         protection.arm(plan, lease).getOrThrow()

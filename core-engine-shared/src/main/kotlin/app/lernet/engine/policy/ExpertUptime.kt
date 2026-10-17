@@ -5,7 +5,7 @@ object ExpertUptime {
     /** Null when the tunnel is not running or the start time is unknown — nothing is invented. */
     fun label(runtime: ExpertRuntimeState, nowEpochMs: Long): String? {
         val since = runtime.runningSinceEpochMs ?: return null
-        if (runtime.phase != ExpertSessionPhase.RUNNING) return null
+        if (!ExpertPult.showsUptime(ExpertPult.status(runtime))) return null
         return format((nowEpochMs - since).coerceAtLeast(0))
     }
 

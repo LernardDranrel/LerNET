@@ -103,7 +103,13 @@ data class DesktopUiState(
     val guardProblem: String? = null,
     /** Proxy mode: login and password the running local proxy requires. */
     val localProxy: LocalProxyAccess? = null,
+    /** Honest failover report: which configs were tried, why they failed and when the next attempt is. */
+    val tried: FailoverReport? = null,
 )
+
+data class FailoverAttempt(val name: String, val reason: String, val atMs: Long)
+
+data class FailoverReport(val groupName: String, val attempts: List<FailoverAttempt>, val nextRetry: String)
 
 class DesktopController(
     private val store: DesktopStore = DesktopStore(),
@@ -243,7 +249,7 @@ class DesktopController(
                             } else if (health.latencyMs != null) {
                                 failedChecks = 0
                                 mutable.update { it.copy(healthMessage = "VPN отвечает · ${health.latencyMs} мс", healthFailures = 0,
-                                    healthVerified = true, tunnelLatencyMs = health.latencyMs) }
+                                    healthVerified = true, tunnelLatencyMs = health.latencyMs, tried = null) }
                             } else {
                                 val nodeAlive = runCatching { coreApi.delay(tag, saved.healthUrl, 4_000) }.isSuccess
                                 if (ticket == connectGeneration.get() && tunnel.state.value.status == TunnelStatus.RUNNING) {
@@ -295,7 +301,7 @@ class DesktopController(
                 }
             }
             if (status == TunnelStatus.STOPPED && lastStatus != TunnelStatus.STOPPED) {
-                mutable.update { it.copy(healthMessage = "", healthFailures = 0, healthVerified = null, tunnelLatencyMs = null) }
+                mutable.update { it.copy(healthMessage = "", healthFailures = 0, healthVerified = null, tunnelLatencyMs = null, tried = null) }
             }
             lastStatus = status
             updateAppTraffic()
@@ -1024,9 +1030,15 @@ class DesktopController(
         // Backups verified by the background checks go first: the switch takes seconds.
         val order = BackupHealth.order(unordered.map { it.id }, backupHealth, System.currentTimeMillis())
         val candidates = order.mapNotNull { id -> unordered.firstOrNull { it.id == id } }
+        val attempts = mutableListOf(
+            FailoverAttempt(failed.name, state.value.probes[failed.id]?.let(::attemptReason) ?: "нет ответа", System.currentTimeMillis()),
+        )
         if (candidates.isEmpty()) {
             val wait = failedRecheck.arm(System.currentTimeMillis())
-            mutable.update { it.copy(message = "В папке «${group.name}» нет доступной замены · перепроверка через ${RecheckJitter.label(wait)}") }
+            mutable.update { it.copy(
+                message = "В папке «${group.name}» нет доступной замены · перепроверка через ${RecheckJitter.label(wait)}",
+                tried = FailoverReport(group.name, mergeAttempts(it.tried, group.name, attempts), RecheckJitter.label(wait)),
+            ) }
             return false
         }
         // Keep current ingress while searching. An offline/failed folder probe
@@ -1051,10 +1063,26 @@ class DesktopController(
                 return true
             }
             synchronized(failedInGroup) { failedInGroup += candidate.id }
+            attempts += FailoverAttempt(candidate.name, attemptReason(probe), System.currentTimeMillis())
         }
         val wait = failedRecheck.arm(System.currentTimeMillis())
-        mutable.update { it.copy(message = "В папке «${group.name}» нет доступной замены · перепроверка через ${RecheckJitter.label(wait)}") }
+        mutable.update { it.copy(
+            message = "В папке «${group.name}» нет доступной замены · перепроверка через ${RecheckJitter.label(wait)}",
+            tried = FailoverReport(group.name, mergeAttempts(it.tried, group.name, attempts), RecheckJitter.label(wait)),
+        ) }
         return false
+    }
+
+    private fun attemptReason(probe: ProbeResult): String = when {
+        probe.latencyMs == null -> probe.message.ifBlank { "сервер не отвечает" }
+        else -> probe.tunnelMessage.ifBlank { "сервер отвечает, но трафик через него не идёт" }
+    }
+
+    /** Latest result per config, so a repeated pass updates rows instead of growing the list. */
+    private fun mergeAttempts(previous: FailoverReport?, group: String, fresh: List<FailoverAttempt>): List<FailoverAttempt> {
+        val old = previous?.takeIf { it.groupName == group }?.attempts.orEmpty()
+        val names = fresh.map { it.name }.toSet()
+        return (old.filter { it.name !in names } + fresh).takeLast(8)
     }
 
     private fun prepareRuleSets() {
@@ -1087,7 +1115,7 @@ class DesktopController(
             activeAppProxy = null
             updateAppTraffic()
         }
-        mutable.update { it.copy(message = "Отключено") }
+        mutable.update { it.copy(message = "Отключено", tried = null) }
     }
 
     /** Report only a running VPN whose profile/settings still match the applied launch. */

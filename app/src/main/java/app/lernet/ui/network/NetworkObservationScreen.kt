@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -91,12 +92,15 @@ internal fun NetworkObservationScreen(
     val clipboard = LocalClipboardManager.current
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("Анализ сети") }, navigationIcon = {
+            // One line on any phone width: the copy action is an icon, not a word that pushes the title.
+            TopAppBar(title = { Text("Анализ сети", maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }, navigationIcon = {
                 IconButton(onClick = onBack) { Icon(LerNetSymbols.arrowBack(), "Назад") }
             }, actions = {
-                TextButton(onClick = {
+                IconButton(onClick = {
                     snapshot?.let { clipboard.setText(AnnotatedString(NetworkTable.copyText(it, table, "Анализ сети · Android · снимок ${time(it.finishedAt)}"))) }
-                }, enabled = snapshot != null, modifier = Modifier.testTag("network_copy_all")) { Text("Скопировать всё") }
+                }, enabled = snapshot != null, modifier = Modifier.testTag("network_copy_all")) {
+                    Icon(androidx.compose.material.icons.Icons.Outlined.ContentCopy, "Скопировать всё")
+                }
                 IconButton(onClick = onRefresh, enabled = !state.collecting) { Icon(LerNetSymbols.probe(), "Обновить локальный снимок") }
                 IconButton(onClick = onExport, enabled = snapshot != null && !state.collecting) { Icon(LerNetSymbols.download(), "Сохранить снимок в файл") }
             })

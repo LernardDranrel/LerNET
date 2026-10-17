@@ -131,7 +131,7 @@ internal class ExpertControlClient(
 internal fun captureRouteFailureDetails(body: JsonObject): String {
     if ((body["error"] as? JsonPrimitive)?.contentOrNull != "expert_capture_route_update_failed") return ""
     val stage = when ((body["route_update_stage"] as? JsonPrimitive)?.contentOrNull) {
-        "configuration" -> "настройки TUN"
+        "configuration" -> "настройки туннеля"
         "previous_ranges" -> "предыдущие маршруты"
         "next_ranges" -> "новые маршруты"
         "existing_metric" -> "приоритет существующего маршрута"

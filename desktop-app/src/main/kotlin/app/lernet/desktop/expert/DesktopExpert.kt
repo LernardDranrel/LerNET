@@ -127,25 +127,14 @@ fun DesktopExpert(
             if (state.busy) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                    Text("Ожидаем подтверждение обработчика…", color = ExpertColors.muted)
+                    Text("Ждём ответа ядра…", color = ExpertColors.muted)
                 }
             }
             pageStates.SaveableStateProvider(page.name) {
                 when (page) {
                     ExpertPage.OVERVIEW -> ExpertLiveOverview(
                         state, onIntent, Modifier.weight(1f), { confirmation = it },
-                        {
-                            recordedFlow = it
-                            recordedPathOnly = false
-                            previewRequest++
-                            page = ExpertPage.PREVIEW
-                        },
-                        {
-                            recordedFlow = it
-                            recordedPathOnly = true
-                            previewRequest++
-                            page = ExpertPage.PREVIEW
-                        },
+                        openEvents = { page = ExpertPage.EVENTS },
                     )
                     ExpertPage.ROUTES -> ExpertRoutes(state, onIntent, Modifier.weight(1f))
                     ExpertPage.PREVIEW -> ExpertRoutePreview(
@@ -153,11 +142,25 @@ fun DesktopExpert(
                         showRecordedPath = recordedPathOnly, requestToken = previewRequest,
                     )
                     ExpertPage.EXITS -> ExpertExits(state, onIntent, Modifier.weight(1f)) { page = ExpertPage.ROUTES }
-                    ExpertPage.EVENTS -> ExpertEvents(state, onIntent, Modifier.weight(1f))
+                    ExpertPage.EVENTS -> ExpertEvents(
+                        state, onIntent, Modifier.weight(1f),
+                        simulate = {
+                            recordedFlow = it
+                            recordedPathOnly = false
+                            previewRequest++
+                            page = ExpertPage.PREVIEW
+                        },
+                        showPath = {
+                            recordedFlow = it
+                            recordedPathOnly = true
+                            previewRequest++
+                            page = ExpertPage.PREVIEW
+                        },
+                    )
                     ExpertPage.PROTECTION -> ExpertProtectionPage(state, onIntent, Modifier.weight(1f)) { confirmation = it }
                 }
             }
-            if (state.hasDraftChanges || (state.phase == ExpertPhase.RUNNING && state.hasUnappliedChanges)) {
+            if (state.hasDraftChanges || (state.phase == ExpertPhase.RUNNING && state.appliedRevision != null && state.hasUnappliedChanges)) {
                 DraftActions(state, validation, onIntent) { confirmation = it }
             }
         }
@@ -168,12 +171,12 @@ fun DesktopExpert(
     when (confirmation) {
         ExpertIntent.Stop -> ExpertConfirm(
             "Остановить управление сетью?",
-            "TUN будет остановлен. Правила внутри него перестанут действовать. " +
+            "Туннель будет выключен. Правила внутри него перестанут действовать. " +
                 if (state.protection.systemGuardEnforced) {
                     "Системная защита останется включённой и заблокирует Интернет. " +
                         "Чтобы вернуть обычную сеть, отдельно отключите защиту."
                 } else {
-                    "Защита вне TUN не подтверждена: после остановки трафик может идти напрямую. " +
+                    "Защита вне туннеля не подтверждена: после остановки трафик может идти напрямую. " +
                         "Системные ограничения, если они остались, снимаются отдельно."
                 },
             "Остановить", {
@@ -190,9 +193,9 @@ fun DesktopExpert(
         )
         ExpertIntent.ApplySaved -> ExpertConfirm(
             "Применить сохранённую схему?",
-            "После подтверждения новые соединения будут использовать сохранённую схему на том же TUN. " +
-                "Если ответ обработчика потеряется, состояние правил нельзя считать известным: " +
-                "приложение покажет ошибку и проверит состояние либо остановит TUN.",
+            "После подтверждения новые соединения будут использовать сохранённую схему без перезапуска туннеля. " +
+                "Если ответ ядра потеряется, состояние правил нельзя считать известным: " +
+                "приложение покажет ошибку и проверит состояние либо выключит туннель.",
             "Применить", {
                 confirmation = null
                 onIntent(ExpertIntent.ApplySaved)
@@ -201,7 +204,7 @@ fun DesktopExpert(
         ExpertIntent.RestoreAppliedToDraft -> ExpertConfirm(
             "Вернуть применённую схему в редактор?",
             "Текущий черновик будет заменён схемой, которая сейчас применяется к сети. " +
-                "Сохранённая версия и работающий TUN не изменятся. Затем схему можно отредактировать или сохранить.",
+                "Сохранённая версия и работающий туннель не изменятся. Затем схему можно отредактировать или сохранить.",
             "Вернуть в черновик", {
                 confirmation = null
                 onIntent(ExpertIntent.RestoreAppliedToDraft)
@@ -209,7 +212,7 @@ fun DesktopExpert(
         )
         ExpertIntent.DisableSystemGuard -> ExpertConfirm(
             "Отключить системную защиту?",
-            "Защита больше не сможет блокировать обход после остановки TUN. Защищённые ветки внутри работающего TUN " +
+            "Защита больше не сможет блокировать обход после выключения туннеля. Защищённые ветки внутри работающего туннеля " +
                 "останутся настроенными.",
             "Отключить защиту", {
                 confirmation = null
@@ -301,20 +304,20 @@ private fun DraftActions(
                             state.capabilities.atomicRules &&
                             state.capabilities.preservesTun &&
                             state.capabilities.independentExits,
-                    ) { Text("Применить к работающему TUN") }
+                    ) { Text("Применить сейчас") }
                 }
-                val schemaStatus = when {
-                    state.hasDraftChanges || (state.appliedRevision != null && state.hasUnappliedChanges) -> "Есть неприменённые изменения"
-                    state.appliedRevision != null -> "Схема применена"
-                    else -> "Схема сохранена · туннель выключен"
-                }
+                val schemaStatus = app.lernet.engine.policy.ExpertPult.schemaLine(
+                    state.pultStatus, unsavedDraft = state.hasDraftChanges,
+                    unapplied = state.appliedRevision != null && state.hasUnappliedChanges,
+                    applied = state.appliedRevision != null,
+                )
                 Text(schemaStatus, color = ExpertColors.muted, fontSize = 12.sp)
             }
             if (!state.hasDraftChanges &&
                 state.phase == ExpertPhase.RUNNING &&
                 (!state.capabilities.atomicRules || !state.capabilities.preservesTun || !state.capabilities.independentExits)
             ) {
-                Text("Обработчик не подтвердил безопасную смену схемы на работающем TUN.", color = ExpertColors.amber, fontSize = 12.sp)
+                Text("На ходу эту схему не сменить. Выключи и включи — применится.", color = ExpertColors.amber, fontSize = 12.sp)
             }
             if (state.appliedRevision != null) {
                 TextButton(
@@ -353,7 +356,7 @@ private fun ExpertProtectionPage(
             )
             ProtectionRow("IPv4 и IPv6", state.protection.ipv6Covered, "Правила должны действовать для обоих семейств адресов.")
             ProtectionRow(
-                "Остановился TUN", state.protection.systemGuardEnforced,
+                "Туннель выключился", state.protection.systemGuardEnforced,
                 "Требуется независимая защита Windows, которая переживает процесс LerNET."
             )
             ExpertMessage("Границы гарантии", state.protection.explanation, warning = !state.protection.systemGuardEnforced)
@@ -378,9 +381,9 @@ private fun ExpertProtectionPage(
         ExpertModal("Границы системной защиты", { details = false }, { details = false }, true, "Понятно", showCancel = false) {
             ExpertMessage(
                 "Когда Windows меняет путь",
-                "Правила схемы действуют на трафик, захваченный TUN. Чужой VPN может добавить более приоритетный маршрут. " +
-                    "Без системной защиты часть трафика успеет пройти мимо TUN до проверки маршрутов раз в две секунды. " +
-                    "Включите системную защиту всего устройства, если обход TUN должен блокироваться сразу.",
+                "Правила схемы действуют на трафик, который идёт через туннель. Чужой VPN может добавить более приоритетный маршрут. " +
+                    "Без системной защиты часть трафика успеет пройти мимо туннеля до проверки маршрутов раз в две секунды. " +
+                    "Включите системную защиту всего устройства, если обход туннеля должен блокироваться сразу.",
                 warning = !state.protection.systemGuardEnforced,
             )
             ExpertMessage(
@@ -388,7 +391,7 @@ private fun ExpertProtectionPage(
                 "Защита всего устройства может заблокировать внешние соединения другого VPN-клиента. " +
                     "Тогда его корпоративный адаптер останется в списке, но доступ через него пропадёт. " +
                     "Совместный доступ через уже подключённый VPN проверяйте без этой дополнительной защиты; " +
-                    "защищённые ветки внутри TUN продолжают запрещать прямой запасной путь.",
+                    "защищённые ветки внутри туннеля продолжают запрещать прямой запасной путь.",
                 warning = true,
             )
             ExpertMessage(

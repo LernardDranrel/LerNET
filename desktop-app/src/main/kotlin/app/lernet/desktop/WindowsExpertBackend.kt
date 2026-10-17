@@ -132,11 +132,11 @@ internal class WindowsExpertBackend(
     override suspend fun start(program: PolicyProgram): ExpertTunnelAck = withContext(Dispatchers.IO) {
         val ticket = requireNotNull(negotiatedEpoch) { "Запуск управления отменён; повторите включение" }
         check(ticket == epoch.get()) { "Запуск был отменён" }
-        check(elevated()) { "Экспертному режиму нужны права администратора для общего TUN" }
+        check(elevated()) { "Экспертному режиму нужны права администратора для общего туннеля" }
         val owner = ensureControl(ticket)
         val local = owner.client
         check(capabilities.preservesTun && capabilities.atomicRules && capabilities.independentExits) {
-            "Комплектное ядро не подтвердило постоянный TUN и независимые выходы"
+            "Комплектное ядро не подтвердило постоянный туннель и независимые выходы"
         }
         val config = assemble(program)
         check(config.isValid) { config.errors.joinToString("\n") }
@@ -151,7 +151,7 @@ internal class WindowsExpertBackend(
             val tunName = (ingress["inbounds"] as? JsonArray)?.filterIsInstance<JsonObject>()
                 ?.firstOrNull { it.nativeString("type") == "tun" }
                 ?.nativeString("interface_name", 256)
-                ?: error("В конфигурации отсутствует имя общего TUN")
+                ?: error("В конфигурации отсутствует имя общего туннеля")
             val guardedAdapter = prepareIngress(requireNotNull(corePath), tunName) { leaseFor(owner.process) }
             synchronized(lifecycleLock) { check(isCurrent(owner)) { "Запуск был отменён" } }
             val response = local.request(
@@ -205,7 +205,7 @@ internal class WindowsExpertBackend(
             // A lost response can occur after native publication. Only status can prove which plan is active.
             val actual = runCatching {
                 val body = local.request("status", timeoutMs = 4_000)
-                check(body.nativeBoolean("running") == true) { "Ядро не подтвердило работающий TUN" }
+                check(body.nativeBoolean("running") == true) { "Ядро не подтвердило работающий туннель" }
                 local.acknowledgement(body)
             }.getOrNull()
             when {
@@ -221,7 +221,7 @@ internal class WindowsExpertBackend(
         }
         if (ack.identity() != expected || ack.revision != program.revision) {
             shutdownOwnedProcess(before.owner)
-            throw ExpertStateUncertainException("Идентификатор TUN или версия схемы изменились без подтверждения")
+            throw ExpertStateUncertainException("Идентификатор туннеля или версия схемы изменились без подтверждения")
         }
         synchronized(lifecycleLock) {
             check(applied === before && isCurrent(before.owner)) { "Применение было отменено" }
@@ -234,7 +234,7 @@ internal class WindowsExpertBackend(
 
     override suspend fun stop(expected: TunIdentity?) = withContext(Dispatchers.IO) {
         val before = applied
-        check(expected == null || before == null || before.ack.identity() == expected) { "Нельзя остановить другой TUN" }
+        check(expected == null || before == null || before.ack.identity() == expected) { "Нельзя остановить другой туннель" }
         // Killing only our owned process also cancels native preparation and blocking outbound probes.
         shutdownOwnedProcess()
     }
@@ -294,7 +294,7 @@ internal class WindowsExpertBackend(
     private fun ensureControl(ticket: Long): OwnedControl = synchronized(lifecycleLock) {
         check(ticket == epoch.get()) { "Запуск управления отменён" }
         if (revocationPending) {
-            throw ExpertStateUncertainException("Windows не подтвердила отзыв разрешения TUN; повторите «Остановить»")
+            throw ExpertStateUncertainException("Windows не подтвердила отзыв разрешения туннеля; повторите «Остановить»")
         }
         val existing = process
         client?.takeIf { existing?.isAlive == true }?.let {
@@ -399,7 +399,7 @@ internal class WindowsExpertBackend(
                     if (++failed >= 3) {
                         mutableEvents.emit(ExpertBackendEvent.NetworkStatus(
                             snapshot.ack.identity(), snapshot.ack.revision,
-                            "Нет ответа от ядра. TUN не отключаем; повторяем проверку.",
+                            "Нет ответа от ядра. Туннель не выключаем; повторяем проверку.",
                         ))
                     }
                 }
@@ -411,10 +411,10 @@ internal class WindowsExpertBackend(
     private suspend fun receiveStatus(body: JsonObject, snapshot: Applied): Boolean {
         if (applied !== snapshot) return true
         val actual = snapshot.owner.client.acknowledgement(body)
-        check(actual == snapshot.ack) { "Ядро сообщило другую идентичность или версию TUN" }
+        check(actual == snapshot.ack) { "Ядро сообщило другую идентичность или версию туннеля" }
         if (body.nativeBoolean("running") != true) {
             val code = body.nativeString("stop_reason", 256)
-            val reason = code?.let(::nativeReason) ?: "Ядро не подтвердило работающий TUN"
+            val reason = code?.let(::nativeReason) ?: "Ядро не подтвердило работающий туннель"
             mutableEvents.emit(ExpertBackendEvent.TunnelLost(actual.identity(), reason))
             return false
         }
@@ -541,8 +541,8 @@ internal class WindowsExpertBackend(
     }
 
     private fun requireApplied(expected: TunIdentity? = null): Applied {
-        val current = requireNotNull(applied) { "Экспертный TUN не запущен" }
-        check(expected == null || current.ack.identity() == expected) { "Операция относится к другому TUN" }
+        val current = requireNotNull(applied) { "Туннель Эксперта не запущен" }
+        check(expected == null || current.ack.identity() == expected) { "Операция относится к другому туннелю" }
         return current
     }
 
@@ -592,7 +592,7 @@ internal class WindowsExpertBackend(
             }
             if (revocationFailure != null) {
                 throw ExpertStateUncertainException(
-                    "Ядро остановлено, но Windows не подтвердила отзыв разрешения TUN. Системная защита сохранена.",
+                    "Ядро остановлено, но Windows не подтвердила отзыв разрешения туннеля. Системная защита сохранена.",
                     revocationFailure,
                 )
             }

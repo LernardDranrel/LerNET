@@ -4,7 +4,7 @@
     <string name="expert_tab_expert">Эксперт</string>
     <string name="expert_active_on_simple">Сетью управляет экспертная схема · открыть</string>
     <string name="expert_title">Управление сетью</string>
-    <string name="expert_subtitle">Один TUN для устройства. Соединения получают путь по вашей схеме.</string>
+    <string name="expert_subtitle">Один туннель на всё устройство. Соединения получают путь по вашей схеме.</string>
     <string name="expert_section_overview">Пульт</string>
     <string name="expert_section_schema">Схема</string>
     <string name="expert_section_exits">Конфиги</string>
@@ -20,7 +20,7 @@
     <string name="expert_stop">Остановить</string>
     <string name="expert_switch_title">Перейти в экспертный режим?</string>
     <string name="expert_switch_body">Текущее VPN-подключение будет остановлено. Экспертный режим направит трафик по сохранённой схеме; по умолчанию — напрямую.</string>
-    <string name="expert_permission_denied">Android не разрешил создание VPN. Схема сохранена; TUN не включён.</string>
+    <string name="expert_permission_denied">Android не разрешил создание VPN. Схема сохранена; туннель не включён.</string>
     <string name="expert_loading">Читаем настройки и профили…</string>
     <string name="expert_direct_hint">Путь «Напрямую» — обычный интернет через выбранную сеть. Для отдельных запросов вы можете задать другой путь или запрет.</string>
     <string name="expert_overview_default">Для остальных запросов: %1$s</string>
@@ -32,7 +32,7 @@
     <string name="expert_discard">Вернуть сохранённую</string>
     <string name="expert_apply">Применить схему</string>
     <string name="expert_applying">Применяем…</string>
-    <string name="expert_hot_unavailable">Это ядро не подтвердило применение без смены TUN. Сохранение доступно; активная схема остаётся прежней.</string>
+    <string name="expert_hot_unavailable">На ходу эту схему не сменить. Выключи и включи — применится. Сохранять можно как обычно.</string>
     <string name="expert_device_scope">Всё устройство</string>
     <string name="expert_profile_scope">Профиль: %1$s</string>
     <string name="expert_folder_scope">Папка: %1$s</string>
@@ -52,7 +52,7 @@
     <string name="expert_fallback_locked">Если подключение недоступно, трафик будет заблокирован.</string>
     <string name="expert_fallback_conflict">Сохранённый прямой запасной путь противоречит запрету этой ветки. Выберите блокировку перед сохранением.</string>
     <string name="expert_fix_fallback">Заменить прямой запасной путь блокировкой</string>
-    <string name="expert_direct_route_hint">Трафик проходит через TUN и выходит через обычную сеть устройства, без выбранного VPN/прокси.</string>
+    <string name="expert_direct_route_hint">Трафик проходит через туннель и выходит через обычную сеть устройства, без выбранного VPN/прокси.</string>
     <string name="expert_direct_forbidden">Прямой выход противоречит запрету этой ветки. Выберите VPN/прокси или блокировку.</string>
     <string name="expert_protected_block_target">Сейчас выбран запрет всего трафика этой ветки. Чтобы разрешить соединения, выберите профиль, папку или канал с VPN/прокси.</string>
     <string name="expert_fallback_direct_hint">При отказе подключения трафик пойдёт через обычную сеть устройства, без выбранного VPN/прокси.</string>
@@ -126,10 +126,10 @@
     <string name="expert_unknown_app">Приложение не определено Android</string>
     <string name="expert_observation_rule">Веток в пути: %1$d</string>
     <string name="expert_safety_title">Правила защиты</string>
-    <string name="expert_safety_body">Защита действует внутри работающего TUN. Для блокировки при остановке самого VPN включите системные «Постоянный VPN» и «Блокировать соединения без VPN». Эти настройки задаёт Android.</string>
+    <string name="expert_safety_body">Защита действует внутри работающего туннеля. Для блокировки при остановке самого VPN включите системные «Постоянный VPN» и «Блокировать соединения без VPN». Эти настройки задаёт Android.</string>
     <string name="expert_android_settings">Настройки VPN Android</string>
     <string name="expert_lockdown_verified">Android подтверждает системную блокировку соединений без VPN.</string>
-    <string name="expert_lockdown_unverified">Блокировка после остановки TUN не подтверждена. Откройте настройки Android и проверьте постоянный VPN и блокировку соединений без него.</string>
+    <string name="expert_lockdown_unverified">Блокировка после выключения туннеля не подтверждена. Откройте настройки Android и проверьте постоянный VPN и блокировку соединений без него.</string>
     <string name="expert_package_limit">На этой версии Android ядро не может надёжно определить владельца каждого запроса. Правила приложений могут быть недоступны; проверяйте назначения в журнале.</string>
     <string name="expert_archive_actions">Действия с архивом схемы</string>
     <string name="expert_protected_count">Правил с запретом прямого выхода: %1$d</string>
@@ -147,7 +147,7 @@
     <string name="expert_channel_incoming">Подключённые ветки</string>
     <string name="expert_channel_remove">Удалить неиспользуемый канал</string>
     <string name="expert_restore_applied">Вернуть действующую схему в черновик</string>
-    <string name="expert_restore_applied_body">Текущий черновик будет заменён схемой, которую ядро действительно применило. Сохранённая версия и работающий TUN не изменятся.</string>
+    <string name="expert_restore_applied_body">Текущий черновик будет заменён схемой, которую ядро действительно применило. Сохранённая версия и работающий туннель не изменятся.</string>
     <string name="expert_section_simulation">Правила</string>
     <string name="expert_simulation_hint">Выберите соединение из истории и посмотрите его путь. Для своего примера откройте ручной редактор. Это локальный разбор правил: запрос не отправляется, соединение не проверяется.</string>
     <string name="expert_simulation_source">Какую схему проверяем</string>
@@ -206,7 +206,7 @@
     <string name="expert_external_tls">TLS до HTTP-прокси</string>
     <string name="expert_external_hint">Выход становится обычным профилем. Выберите его в ветке схемы, общей папке или канале. Сервер должен уже предоставлять прокси: эта форма не запускает SSTP и не создаёт корпоративный VPN.</string>
     <string name="expert_external_http_hint">HTTP-прокси передаёт TCP-соединения через CONNECT. UDP и обычные DNS-запросы через него не поддерживаются.</string>
-    <string name="expert_external_saved_hint">Сохранение меняет профиль на этом устройстве. Если схема уже работает, проверьте изменения и примените сохранённую версию; действующий TUN не перезапускается.</string>
+    <string name="expert_external_saved_hint">Сохранение меняет профиль на этом устройстве. Если схема уже работает, проверьте изменения и примените сохранённую версию; туннель при этом не перезапускается.</string>
     <string name="expert_external_corporate_unavailable">Выход привязан к интерфейсу Windows. Настройки сохранены для переноса; на Android эта ветка блокируется, остальные пути продолжают работать.</string>
     <string name="expert_external_no_auth">Без учётных данных</string>
     <string name="expert_external_has_auth">Учётные данные сохранены в приватном хранилище</string>

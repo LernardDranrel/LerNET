@@ -44,6 +44,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import androidx.compose.ui.platform.testTag
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -367,12 +368,12 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
                         text = { Text(when (action) {
                             ExpertIntent.Export -> "Архив содержит настройки подключения и секреты профилей. Передавайте его только доверенным людям."
                             ExpertIntent.EnableSystemGuard -> "При остановке LerNET Windows будет блокировать обычный выход " +
-                                "в сеть для всего устройства. Разрешённые ветки внутри работающего TUN смогут выходить напрямую. " +
+                                "в сеть для всего устройства. Разрешённые ветки внутри работающего туннеля смогут выходить напрямую. " +
                                 "Внешние соединения другого VPN-клиента тоже могут быть заблокированы, " +
                                 "включая его доступ к корпоративной сети. Обычные связи программ с localhost тоже блокируются. " +
                                 "Для возврата обычной сети отдельно отключите " +
                                 "системную защиту в разделе «Защита»."
-                            else -> "Будут удалены только системные фильтры LerNET. После остановки TUN приложения смогут использовать обычную сеть."
+                            else -> "Будут удалены только системные фильтры LerNET. После выключения туннеля приложения смогут использовать обычную сеть."
                         }) },
                         confirmButton = { Button(onClick = {
                             expertConfirm = null
@@ -389,7 +390,7 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
                         title = { Text(if (expertReplaceConfirm) "Заменить всю рабочую область?" else "Импорт рабочей области") },
                         text = { Text(if (expertReplaceConfirm)
                             "Текущие профили, папки и сохранённая схема будут заменены содержимым «${archive.fileName}». Активные правила не изменятся до вашего отдельного применения."
-                        else "${archive.fileName}\nПрофилей: ${archive.profiles} · папок: ${archive.folders}.\nДобавление создаёт копии с новыми идентификаторами. Замена переносит всю рабочую область, включая основной путь по умолчанию. Импорт не включает новые правила в работающем TUN.") },
+                        else "${archive.fileName}\nПрофилей: ${archive.profiles} · папок: ${archive.folders}.\nДобавление создаёт копии с новыми идентификаторами. Замена переносит всю рабочую область, включая основной путь по умолчанию. Импорт не включает новые правила в работающем туннеле.") },
                         confirmButton = { Button(onClick = {
                             expert?.importArchive(archive.raw, replace = expertReplaceConfirm)
                             expertImport = null
@@ -424,12 +425,12 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
 }
 
 private enum class Tab(val label: String) {
-    PROFILES("Профили"), ROUTES("Маршруты"), DIAGNOSTICS("Диагностика"), SETTINGS("Настройки")
+    PROFILES("Главная"), ROUTES("Правила"), DIAGNOSTICS("Журнал запросов"), SETTINGS("Настройки")
 }
 private data class ExportSelection(val groupId: String?, val suggestedName: String)
 
 @Composable
-private fun DesktopScreen(controller: DesktopController, onRequestElevation: () -> Unit, onOpenNetwork: () -> Unit) {
+internal fun DesktopScreen(controller: DesktopController, onRequestElevation: () -> Unit, onOpenNetwork: () -> Unit) {
     val ui by controller.state.collectAsState()
     val tunnel by controller.tunnel.state.collectAsState()
     val diagnostics by controller.diagnostics.collectAsState()
@@ -445,14 +446,15 @@ private fun DesktopScreen(controller: DesktopController, onRequestElevation: () 
     var traceDetailsRequest by remember { mutableIntStateOf(0) }
     var exportRequest by remember { mutableStateOf<ExportSelection?>(null) }
     Row(Modifier.fillMaxSize().background(background)) {
+        // Mockup 03: the sidebar is not a menu any more; rules, journal and settings open from the top-right buttons.
         DesktopWorkspaceSidebar(onOpenNetwork) {
-            Tab.entries.forEach { item ->
-                WorkspaceNavigationItem(item.label, tab == item,
-                    { if (item == Tab.ROUTES) routeOwnerId = null; tab = item }) { NavSymbol(item, tab == item) }
+            if (tab != Tab.PROFILES) {
+                WorkspaceNavigationItem("← Главная", false, { tab = Tab.PROFILES }) { NavSymbol(Tab.PROFILES, false) }
             }
         }
         Column(Modifier.weight(1f).fillMaxHeight().padding(22.dp)) {
-            val statusLine = (if (tunnel.status == TunnelStatus.RUNNING) ui.healthMessage else tunnel.message)
+            val holding = ui.tried != null && tunnel.status != TunnelStatus.STOPPED
+            val statusLine = if (holding) "Нет связи · VPN держим" else (if (tunnel.status == TunnelStatus.RUNNING) ui.healthMessage else tunnel.message)
                 .ifBlank { "Готово к подключению" }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -465,7 +467,23 @@ private fun DesktopScreen(controller: DesktopController, onRequestElevation: () 
                             else -> statusColor(tunnel.status)
                         })
                 }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    listOf(Tab.ROUTES, Tab.DIAGNOSTICS, Tab.SETTINGS).forEach { item ->
+                        val chosen = tab == item
+                        OutlinedButton(
+                            onClick = { if (item == Tab.ROUTES) routeOwnerId = null; tab = if (chosen) Tab.PROFILES else item },
+                            colors = if (chosen) ButtonDefaults.outlinedButtonColors(containerColor = desktopColors.secondaryContainer)
+                                else ButtonDefaults.outlinedButtonColors(),
+                            modifier = Modifier.testTag("top_${item.name.lowercase()}"),
+                        ) {
+                            NavSymbol(item, chosen)
+                            Spacer(Modifier.width(6.dp))
+                            Text(item.label)
+                        }
+                    }
+                }
                 if (tab == Tab.PROFILES) {
+                    Spacer(Modifier.width(8.dp))
                     Box {
                         Button(onClick = { createMenu = true }) { Text("+ Добавить") }
                         DropdownMenu(createMenu, onDismissRequest = { createMenu = false }) {
@@ -488,6 +506,7 @@ private fun DesktopScreen(controller: DesktopController, onRequestElevation: () 
                 if (ui.networkWarning.isNotBlank()) Text(ui.networkWarning, color = Color(0xFFF1CC80), fontSize = 12.sp, maxLines = 3)
             ui.guardProblem?.let { Text(it, color = desktopColors.error, fontSize = 12.sp, maxLines = 3) }
             Spacer(Modifier.height(18.dp))
+            if (tab == Tab.PROFILES && holding) ui.tried?.let { FailoverReportCard(it) }
             when (tab) {
                 Tab.PROFILES -> Profiles(ui.saved, tunnel, ui.busy, ui.probes, ui.tunnelLatencyMs, trace, controller,
                     onRequestElevation = onRequestElevation,
@@ -1585,6 +1604,7 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
     val maximum = xmuxMax.toIntOrNull()
     val xmuxValid = minimum != null && maximum != null && minimum > 0 && maximum >= minimum
     val dnsValid = EngineDefaults.validIpv4(directDns.trim())
+    var advanced by remember { mutableStateOf(false) }
     val defaultsChanged = mtu != saved.tunMtu.toString() || "$xmuxMin-$xmuxMax" != saved.xmuxConcurrency ||
         directDns.trim() != saved.directDnsServer || dnsPolicy != saved.defaultDnsPolicy || logLevel != saved.logLevel
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
@@ -1634,7 +1654,29 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
             else if (dnsPolicy == "TUNNEL") "По умолчанию. Адрес выше спрашивается внутри туннеля (TCP и DNS-over-HTTPS), поэтому сеть не видит, какие сайты ты открываешь. Напрямую идёт только запрос адреса самого VPN-сервера. Если на каком-то сервере DNS через VPN не отвечает (бывает, когда хостинг сервера режет DNS), выбери для этого профиля «DNS сети»."
             else "Для DNS используется адрес, заданный здесь, через прямое подключение мимо VPN: сеть и провайдер видят имена сайтов. Несколько DNS можно задать в JSON профиля и выбрать «Из профиля».",
                 color = muted, fontSize = 12.sp, lineHeight = 18.sp)
-            HorizontalDivider(Modifier.padding(vertical = 5.dp), color = desktopColors.outlineVariant)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Button(onClick = {
+                    controller.setDefaultDnsPolicy(DnsPolicy.valueOf(dnsPolicy))
+                    controller.setDefaults(mtu.toInt(), "$xmuxMin-$xmuxMax", directDns.trim(), logLevel)
+                }, enabled = defaultsChanged && mtuValid && xmuxValid && dnsValid) { Text("Сохранить параметры") }
+                Text(if (defaultsChanged) "Есть несохранённые изменения" else "Параметры сохранены", color = muted, fontSize = 12.sp)
+            }
+        }
+        // Same as on Android: rarely needed knobs are folded into «Дополнительно», closed by default.
+        Panel {
+            Row(
+                Modifier.fillMaxWidth().clickable { advanced = !advanced }.testTag("settings_advanced"),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Дополнительно", style = MaterialTheme.typography.titleLarge)
+                    Text("MTU, XMUX, журнал, рукопожатие TLS, адрес проверки связи, путь к ядру",
+                        color = muted, fontSize = 12.sp)
+                }
+                FolderChevron(advanced)
+            }
+        }
+        if (advanced) Panel {
             SettingHeading("MTU", "Размер пакета VPN",
                 "Максимальный размер IP-пакета в виртуальном сетевом адаптере, в байтах. Влияет только на режим VPN.")
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1688,7 +1730,7 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
                 Text(if (defaultsChanged) "Есть несохранённые изменения" else "Параметры сохранены", color = muted, fontSize = 12.sp)
             }
         }
-        Panel {
+        if (advanced) Panel {
             SettingHeading("TLS", "Рукопожатие TLS",
                 "Для сетей, где фильтр режет или теряет первое сообщение защищённого соединения. Действует для узлов VLESS, VMess, Trojan с TLS или Reality. Значения из самого профиля важнее. Вступит в силу при следующем подключении.")
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1709,7 +1751,7 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
             Text("«Короткий» убирает большой постквантовый ключ из приветствия — оно меньше и реже теряется. Работает только с серверами Xray старше 26.9.8; с новыми серверами связь не установится.",
                 color = muted, fontSize = 12.sp, lineHeight = 18.sp)
         }
-        Panel {
+        if (advanced) Panel {
             SettingHeading("HTTPS", "Проверка работоспособности",
                 "Через этот адрес проверяется интернет через выбранный профиль: перед подключением и во время работы VPN.")
             OutlinedTextField(healthUrl, { healthUrl = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Адрес проверки") },
@@ -1718,7 +1760,7 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
                 color = muted, fontSize = 12.sp, lineHeight = 18.sp)
             Button(onClick = { controller.setHealthUrl(healthUrl) }, enabled = healthUrl.startsWith("https://") && healthUrl != saved.healthUrl) { Text("Сохранить адрес") }
         }
-        Panel {
+        if (advanced) Panel {
             SettingHeading("ЛОГИ", "Хранение журнала", "Логи хранятся в папке данных LerNET. Указанный объём делится между двумя файлами журнала.")
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(journalMb, { journalMb = it.filter(Char::isDigit).take(3) }, modifier = Modifier.width(160.dp),
@@ -1728,7 +1770,7 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
                     enabled = journalMb.toIntOrNull()?.let { it in 1..500 && it != saved.journalMaxMb } == true) { Text("Сохранить") }
             }
         }
-        Panel {
+        if (advanced) Panel {
             SettingHeading("ЯДРО", "sing-box-lx " + WindowsBoxProcess.PINNED_CORE_VERSION,
                 "Встроенное ядро поддерживает Android-профили и XHTTP. Пустое поле использует комплектную версию.")
             OutlinedTextField(path, { path = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Свой путь к sing-box.exe") }, singleLine = true)
@@ -1894,4 +1936,37 @@ private fun chooseTransferFile(save: Boolean, suggestedName: String = ""): Path?
     val result = dialog.file?.let { Path.of(dialog.directory, it) }
     dialog.dispose()
     return result
+}
+
+
+/** Mockup 10 E: which configs were tried, why, and when the next attempt is. Traffic does not leak meanwhile. */
+@Composable
+internal fun FailoverReportCard(report: FailoverReport) {
+    val time = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
+    Surface(
+        color = Color(0xFF1A1F2B), shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Color(0xFF3A3324)),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp).testTag("failover_report"),
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Все конфиги папки «${report.groupName}» недоступны", fontWeight = FontWeight.SemiBold)
+            Text("Что пробовали", color = muted, fontSize = 12.sp)
+            report.attempts.forEach { attempt ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(7.dp).background(desktopColors.error, CircleShape))
+                    Spacer(Modifier.width(8.dp))
+                    Text(attempt.name, Modifier.weight(0.35f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(attempt.reason, Modifier.weight(0.5f), color = muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        java.time.Instant.ofEpochMilli(attempt.atMs).atZone(java.time.ZoneId.systemDefault()).format(time),
+                        Modifier.weight(0.15f), color = muted, fontSize = 12.sp,
+                    )
+                }
+            }
+            Text(
+                "Следующая попытка через ${report.nextRetry}. Маршруты VPN остаются на месте — трафик не уходит в обход.",
+                color = muted, fontSize = 12.sp,
+            )
+        }
+    }
 }
