@@ -196,12 +196,13 @@ internal fun ExpertConfirm(
 }
 
 internal fun phaseName(phase: ExpertPhase): String = when (phase) {
-    ExpertPhase.STOPPED -> "Выключен"
-    ExpertPhase.STARTING -> "Создаём TUN"
-    ExpertPhase.RUNNING -> "TUN работает"
-    ExpertPhase.APPLYING -> "Применяем схему"
-    ExpertPhase.STOPPING -> "Останавливаем"
-    ExpertPhase.FAILED -> "Нужна проверка"
+    // Same words as on Android (expert_stopped/starting/running/applying/stopping/failed).
+    ExpertPhase.STOPPED -> "Выключено"
+    ExpertPhase.STARTING -> "Включаем…"
+    ExpertPhase.RUNNING -> "Работает"
+    ExpertPhase.APPLYING -> "Применяем…"
+    ExpertPhase.STOPPING -> "Выключаем…"
+    ExpertPhase.FAILED -> "Ошибка"
 }
 
 internal fun exitPhaseName(phase: ExitPhase): String = when (phase) {

@@ -112,10 +112,10 @@ private fun TunControl(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, c
                     ExpertTunnelHealth.ERROR -> NetworkLeverLamp.ERROR
                 },
                 lampDescription = when (state.tunnelHealth) {
-                    ExpertTunnelHealth.OFF -> "Лампа погашена: туннель выключен"
-                    ExpertTunnelHealth.PENDING -> "Жёлтая лампа: операция ещё не завершена"
-                    ExpertTunnelHealth.HEALTHY -> "Зелёная лампа: туннель работает, текущих сбоев каналов нет"
-                    ExpertTunnelHealth.ERROR -> "Красная лампа: сбой туннеля или одного из наших каналов"
+                    ExpertTunnelHealth.OFF -> "Выключено"
+                    ExpertTunnelHealth.PENDING -> "Проверяем связь…"
+                    ExpertTunnelHealth.HEALTHY -> "Работает"
+                    ExpertTunnelHealth.ERROR -> "Сбой туннеля или одного из выходов"
                 },
                 stateLabel = if (state.tunnelHealth == ExpertTunnelHealth.ERROR) {
                     "СБОЙ"
@@ -135,11 +135,12 @@ private fun TunControl(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, c
                 Text("Постоянный туннель", style = MaterialTheme.typography.titleLarge)
                 Text(
                     when {
-                        state.networkReason != null -> "Включён · ${state.networkReason}"
+                        state.networkReason != null -> "Включено · ${state.networkReason}"
                         state.phase == ExpertPhase.STOPPED && state.protection.systemGuardEnforced ->
-                            "Выключен · защита Windows продолжает блокировать обычный выход"
-                        running -> if (state.hasDraftChanges || state.hasUnappliedChanges) "Сеть работает · есть неприменённые изменения" else "Соединения следуют схеме · схема применена"
-                        state.phase == ExpertPhase.STOPPED -> "Выключен · включите, чтобы наблюдать и управлять соединениями"
+                            "Выключено · защита Windows блокирует обычный выход"
+                        running && (state.hasDraftChanges || state.hasUnappliedChanges) -> "Работает · есть неприменённые изменения"
+                        running -> "Работает · соединения идут по вашей схеме"
+                        state.phase == ExpertPhase.STOPPED -> "Выключено"
                         else -> phaseName(state.phase)
                     },
                     color = accent, style = MaterialTheme.typography.bodyMedium
