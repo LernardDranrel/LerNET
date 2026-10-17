@@ -68,4 +68,21 @@ class SimpleRecoveryTest {
         assertThat(waits.all { it in 45_000L..300_000L && it % 1_000 == 0L }).isTrue()
         assertThat(waits.toSet().size).isGreaterThan(60)
     }
+
+    @Test
+    fun failoverSearchDoesNotBlockTheCallerAndRunsOneAtATime() {
+        val gate = java.util.concurrent.CountDownLatch(1)
+        val done = java.util.concurrent.CountDownLatch(1)
+        val runner = FailoverRunner()
+        val started = System.nanoTime()
+        assertThat(runner.launch { gate.await(); done.countDown() }).isTrue()
+        assertThat((System.nanoTime() - started) / 1_000_000).isLessThan(500L)
+        assertThat(runner.isRunning).isTrue()
+        assertThat(runner.launch { error("must not run") }).isFalse()
+        gate.countDown()
+        assertThat(done.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue()
+        repeat(50) { if (runner.isRunning) Thread.sleep(10) }
+        assertThat(runner.isRunning).isFalse()
+        assertThat(runner.launch { }).isTrue()
+    }
 }

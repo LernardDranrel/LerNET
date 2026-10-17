@@ -71,3 +71,25 @@ internal class UnavailableRecheck(private val draw: () -> Long = { RecheckJitter
     @Synchronized
     fun reset() { dueAt = 0L }
 }
+
+/**
+ * Runs the folder search off the diagnostics loop: probing a silent neighbour can take up to a
+ * minute, and the loop must keep polling the core and checking health meanwhile.
+ * One search at a time; a second request while one runs is dropped.
+ */
+internal class FailoverRunner(private val start: (Runnable) -> Unit = { Thread(it, "lernet-failover").apply { isDaemon = true }.start() }) {
+    private val running = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    val isRunning: Boolean get() = running.get()
+
+    fun launch(block: () -> Unit): Boolean {
+        if (!running.compareAndSet(false, true)) return false
+        try {
+            start(Runnable { try { block() } finally { running.set(false) } })
+        } catch (error: Throwable) {
+            running.set(false)
+            throw error
+        }
+        return true
+    }
+}

@@ -136,6 +136,7 @@ class DesktopController(
     private val failedInGroup = mutableSetOf<String>()
     /** Failed folder configs are looked at again after a random 45 s – 5 min pause. */
     private val failedRecheck = UnavailableRecheck()
+    private val failoverRunner = FailoverRunner()
     @Volatile private var desiredConnection = false
     private val expertReserved = AtomicBoolean(false)
     private var activeSimpleConnection: WindowsSimpleConnection? = null
@@ -167,6 +168,9 @@ class DesktopController(
                         if (signature != lastNetwork) {
                             lastNetwork = signature
                             networkChangedAt = now
+                            // A new network may revive configs that failed on the old one.
+                            synchronized(failedInGroup) { failedInGroup.clear() }
+                            failedRecheck.reset()
                             mutable.update { it.copy(healthMessage = "Сеть изменилась · проверяем VPN", healthVerified = null) }
                         }
                     }
@@ -197,11 +201,16 @@ class DesktopController(
                                     mutable.update { it.copy(healthMessage = "$reason · ${health.error}",
                                         healthFailures = failedChecks, healthVerified = false, tunnelLatencyMs = null) }
                                     if (failedChecks >= 2 && desiredConnection) {
-                                        val swapped = runCatching { WindowsPhysicalNetwork.select() }.isSuccess && tryFailover(profile.id)
-                                        if (!swapped && desiredConnection) {
-                                            // A failed probe is not evidence that ingress is dead.
-                                            // Keep the existing TUN/routes; later probes recover in place.
-                                            mutable.update { it.copy(healthMessage = "VPN включён · ждём восстановления сети · ${health.error}") }
+                                        val failedId = profile.id
+                                        val error = health.error
+                                        // Off the loop: a silent neighbour can take up to a minute to probe.
+                                        failoverRunner.launch {
+                                            val swapped = runCatching { WindowsPhysicalNetwork.select() }.isSuccess && tryFailover(failedId)
+                                            if (!swapped && desiredConnection) {
+                                                // A failed probe is not evidence that ingress is dead.
+                                                // Keep the existing TUN/routes; later probes recover in place.
+                                                mutable.update { it.copy(healthMessage = "VPN включён · ждём восстановления сети · $error") }
+                                            }
                                         }
                                         failedChecks = 0
                                     }
@@ -220,10 +229,18 @@ class DesktopController(
             if (status == TunnelStatus.FAILED && lastStatus != TunnelStatus.FAILED) {
                 val permissionFailure = tunnel.state.value.failure == TunnelFailure.TUN_PERMISSION
                 if (permissionFailure) desiredConnection = false
-                val swapped = !permissionFailure && state.value.saved.selectedProfileId?.let(::tryFailover) == true
-                // The old code waited for a "попытки исчерпаны" message nobody produced: a failed tunnel stayed off.
-                if (SimpleRecovery.retries(desiredConnection, tunnel.state.value.failure, swapped)) {
-                    scheduleRecovery(tunnel.state.value.message)
+                val failure = tunnel.state.value.failure
+                val failMessage = tunnel.state.value.message
+                val search = {
+                    val swapped = !permissionFailure && state.value.saved.selectedProfileId?.let(::tryFailover) == true
+                    // The old code waited for a "попытки исчерпаны" message nobody produced: a failed tunnel stayed off.
+                    if (SimpleRecovery.retries(desiredConnection, failure, swapped)) {
+                        scheduleRecovery(failMessage)
+                    }
+                }
+                // Off the loop; if a search is already running, it owns the outcome.
+                if (!failoverRunner.launch(search) && SimpleRecovery.retries(desiredConnection, failure, swapped = false)) {
+                    scheduleRecovery(failMessage)
                 }
             }
             if (status == TunnelStatus.STOPPED && lastStatus != TunnelStatus.STOPPED) {
