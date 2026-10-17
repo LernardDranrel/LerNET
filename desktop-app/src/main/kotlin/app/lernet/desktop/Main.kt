@@ -1949,7 +1949,7 @@ internal fun FailoverReportCard(report: FailoverReport) {
         modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp).testTag("failover_report"),
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Все конфиги папки «${report.groupName}» недоступны", fontWeight = FontWeight.SemiBold)
+            Text(report.groupName?.let { "Все конфиги папки «$it» недоступны" } ?: "Все конфиги папки недоступны", fontWeight = FontWeight.SemiBold)
             Text("Что пробовали", color = muted, fontSize = 12.sp)
             report.attempts.forEach { attempt ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1964,7 +1964,7 @@ internal fun FailoverReportCard(report: FailoverReport) {
                 }
             }
             Text(
-                "Следующая попытка через ${report.nextRetry}. Маршруты VPN остаются на месте — трафик не уходит в обход.",
+                (report.nextRetry?.let { "Следующая попытка через $it. " } ?: "Пробуем снова автоматически. ") + "Маршруты VPN остаются на месте — трафик не уходит в обход.",
                 color = muted, fontSize = 12.sp,
             )
         }

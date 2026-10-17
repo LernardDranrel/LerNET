@@ -107,9 +107,8 @@ data class DesktopUiState(
     val tried: FailoverReport? = null,
 )
 
-data class FailoverAttempt(val name: String, val reason: String, val atMs: Long)
-
-data class FailoverReport(val groupName: String, val attempts: List<FailoverAttempt>, val nextRetry: String)
+typealias FailoverAttempt = app.lernet.engine.policy.FailoverAttempt
+typealias FailoverReport = app.lernet.engine.policy.FailoverReport
 
 class DesktopController(
     private val store: DesktopStore = DesktopStore(),
@@ -1037,7 +1036,7 @@ class DesktopController(
             val wait = failedRecheck.arm(System.currentTimeMillis())
             mutable.update { it.copy(
                 message = "В папке «${group.name}» нет доступной замены · перепроверка через ${RecheckJitter.label(wait)}",
-                tried = FailoverReport(group.name, mergeAttempts(it.tried, group.name, attempts), RecheckJitter.label(wait)),
+                tried = FailoverReport.merge(it.tried, group.name, attempts, RecheckJitter.label(wait)),
             ) }
             return false
         }
@@ -1068,7 +1067,7 @@ class DesktopController(
         val wait = failedRecheck.arm(System.currentTimeMillis())
         mutable.update { it.copy(
             message = "В папке «${group.name}» нет доступной замены · перепроверка через ${RecheckJitter.label(wait)}",
-            tried = FailoverReport(group.name, mergeAttempts(it.tried, group.name, attempts), RecheckJitter.label(wait)),
+            tried = FailoverReport.merge(it.tried, group.name, attempts, RecheckJitter.label(wait)),
         ) }
         return false
     }
@@ -1078,12 +1077,6 @@ class DesktopController(
         else -> probe.tunnelMessage.ifBlank { "сервер отвечает, но трафик через него не идёт" }
     }
 
-    /** Latest result per config, so a repeated pass updates rows instead of growing the list. */
-    private fun mergeAttempts(previous: FailoverReport?, group: String, fresh: List<FailoverAttempt>): List<FailoverAttempt> {
-        val old = previous?.takeIf { it.groupName == group }?.attempts.orEmpty()
-        val names = fresh.map { it.name }.toSet()
-        return (old.filter { it.name !in names } + fresh).takeLast(8)
-    }
 
     private fun prepareRuleSets() {
         val saved = state.value.saved

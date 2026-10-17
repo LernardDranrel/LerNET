@@ -521,6 +521,45 @@ class ConnectionControllerTest {
     }
 
     @Test
+    fun whenEveryBackupIsDownTheSnapshotListsWhatWasTried() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine()
+        val first = sampleProfile()
+        fun backup(n: Int) = first.copy(id = "p$n", name = "резерв $n", selectedOutboundId = "out-$n",
+            outbounds = first.outbounds.map { it.copy(id = "out-$n", singBoxJson = it.singBoxJson.replace("example.com", "b$n.example.com")) })
+        val controller = controller(this, engine, hardStopTimeoutMs = 2_500,
+            reconnect = ReconnectSettings(maxAttempts = 5, watchdogTimeoutMs = 600_000),
+            dialer = OutboundDialer { target, _ ->
+                if (target.host.startsWith("b")) Result.failure(java.net.SocketTimeoutException("timeout")) else Result.success(Unit)
+            })
+        controller.setFailoverHandlers(
+            resolve = { id -> when (id) {
+                "out-2" -> backup(2) to catchAllNodes().map { it.copy(profileId = "p2") }
+                "out-3" -> backup(3) to catchAllNodes().map { it.copy(profileId = "p3") }
+                else -> null
+            } },
+            onSelected = {},
+        )
+        controller.updateSettings(ReconnectSettings(maxAttempts = 5, watchdogTimeoutMs = 600_000), failoverEnabled = true,
+            group = ManualFailoverGroup("g", "Резерв", listOf("out-1", "out-2", "out-3")))
+        controller.connect(first, catchAllNodes(), RunMode.FULL_VPN)
+        runCurrent()
+        engine.emit(EngineEvent.DnsAlive(answers = 1))
+        runCurrent()
+        controller.onEngineSignal(ConnectionCause.TunnelHealthFailed("HTTP 504"))
+        testScheduler.advanceTimeBy(5_000)
+        runCurrent()
+        val tried = controller.snapshot.value.tried
+        assertThat(tried).isNotNull()
+        assertThat(tried!!.attempts.map { it.name }).containsAtLeast("резерв 2", "резерв 3")
+        assertThat(tried.attempts.first().reason).isEqualTo("нет ответа · время истекло")
+        assertThat(controller.snapshot.value.state).isNotEqualTo(ConnectionState.DISCONNECTED)
+        // Traffic through the tunnel again: the report goes away.
+        engine.emit(EngineEvent.DnsAlive(answers = 1))
+        runCurrent()
+        assertThat(controller.snapshot.value.tried).isNull()
+    }
+
+    @Test
     fun noNetworkHoldsTheConfigAndSaysSo() = runTest(dispatcher) {
         val engine = RecordingBoxEngine()
         var online = true

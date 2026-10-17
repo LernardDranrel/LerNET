@@ -575,6 +575,13 @@ class ConnectionController(
         val hops = _snapshot.value
         _snapshot.value = next.snapshot.copy(
             waitingForNetwork = hops.waitingForNetwork && !underlayAvailable(),
+            // Cleared only by real evidence that traffic flows again, or by the user's stop: an engine
+            // restart on the same dead config is not a recovery.
+            tried = hops.tried.takeIf {
+                next.snapshot.state != ConnectionState.DISCONNECTED &&
+                    effective != PolicyEvent.TunnelVerified && effective != PolicyEvent.DnsPathOk &&
+                    next.snapshot.activeProfileId == hops.activeProfileId
+            },
             serverTcpMs = if (next.snapshot.activeProfileId == hops.activeProfileId &&
                 next.snapshot.state != ConnectionState.DISCONNECTED &&
                 next.snapshot.state != ConnectionState.FAILED
@@ -712,6 +719,7 @@ class ConnectionController(
                 groupProbeJob = scope.launch {
                     val resolve = resolveFailoverProfile
                     var winner: String? = null
+                    val attempts = mutableListOf<app.lernet.engine.policy.FailoverAttempt>()
                     if (resolve != null) {
                         // Backups verified by the background checks go first: the switch takes seconds.
                         val ordered = app.lernet.engine.policy.BackupHealth.order(command.outboundIds, backupHealth, System.currentTimeMillis())
@@ -726,20 +734,36 @@ class ConnectionController(
                             } ?: continue
                             val json = profile.selectedOutbound()?.singBoxJson ?: continue
                             val endpoint = OutboundEndpoint.parse(json) ?: continue
-                            val alive = try {
-                                outboundDialer.dial(endpoint, probeTimeoutMs).isSuccess
+                            val dial = try {
+                                outboundDialer.dial(endpoint, probeTimeoutMs)
                             } catch (error: Exception) {
                                 if (error is CancellationException) throw error
                                 LerNetLog.w(TAG, "failover candidate probe failed: ${error.message}", error)
-                                false
+                                Result.failure(error)
                             }
-                            if (alive) {
+                            if (dial.isSuccess) {
                                 winner = outboundId
                                 break
                             }
+                            attempts += app.lernet.engine.policy.FailoverAttempt(
+                                profile.name,
+                                when (dial.exceptionOrNull()) {
+                                    is java.net.SocketTimeoutException -> "нет ответа · время истекло"
+                                    is java.net.UnknownHostException -> "адрес сервера не найден"
+                                    is java.net.ConnectException -> "сервер отклонил соединение"
+                                    else -> "сервер не отвечает"
+                                },
+                                System.currentTimeMillis(),
+                            )
                         }
                     }
                     onProbeResult(winner?.let(::setOf) ?: emptySet())
+                    if (winner == null && attempts.isNotEmpty()) mutex.withLock {
+                        val wait = pendingRecheck?.delayMs?.let(RecheckJitter::label)
+                        _snapshot.value = _snapshot.value.copy(
+                            tried = app.lernet.engine.policy.FailoverReport.merge(_snapshot.value.tried, null, attempts, wait),
+                        )
+                    }
                 }
             }
             is PolicyCommand.ShowBanner -> Unit

@@ -55,6 +55,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -176,7 +177,11 @@ private fun HomeBody(
         }
         ConnectionHero(
             connection = snapshot.state,
-            status = if (snapshot.waitingForNetwork) stringResource(R.string.state_waiting_network) else phaseLabel(snapshot.state),
+            status = when {
+                snapshot.waitingForNetwork -> stringResource(R.string.state_waiting_network)
+                snapshot.tried != null -> stringResource(R.string.state_holding_no_config)
+                else -> phaseLabel(snapshot.state)
+            },
             enabled = state.activeProfile != null || isSessionActive(snapshot.state),
             onToggle = { onIntent(HomeIntent.ToggleConnect) },
             onOpenRoutes = homeRouteOwnerId(state)?.let { ownerId -> { onOpenRoutes(ownerId) } },
@@ -198,6 +203,12 @@ private fun HomeBody(
             )
         }
         FailoverBannerCard(state, onIntent)
+        snapshot.tried?.let { report ->
+            FailoverReportCard(
+                report,
+                groupName = report.groupName ?: state.groups.firstOrNull { state.activeProfile?.id in it.profileIds }?.name,
+            )
+        }
         if (state.showLockdownHint) {
             LockdownHintCard(
                 onOpenSettings = { openVpnSettings(context) },
@@ -806,4 +817,36 @@ private fun haptic(view: View, type: Int) {
             HapticFeedbackConstants.KEYBOARD_TAP
         }
     view.performHapticFeedback(resolved)
+}
+
+
+/** Mockup 10 A: which configs were tried, why, and that traffic does not leak meanwhile. Same as on Windows. */
+@Composable
+private fun FailoverReportCard(report: app.lernet.engine.policy.FailoverReport, groupName: String?) {
+    val time = remember { java.time.format.DateTimeFormatter.ofPattern("HH:mm") }
+    PanelCard(modifier = Modifier.testTag("failover_report")) {
+        Text(
+            groupName?.let { stringResource(R.string.failover_report_title_named, it) } ?: stringResource(R.string.failover_report_title),
+            style = MaterialTheme.typography.titleSmall,
+        )
+        Text(stringResource(R.string.failover_report_tried), style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        report.attempts.forEach { attempt ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(attempt.name, Modifier.weight(0.4f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium)
+                Text(attempt.reason, Modifier.weight(0.45f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    java.time.Instant.ofEpochMilli(attempt.atMs).atZone(java.time.ZoneId.systemDefault()).format(time),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Text(
+            (report.nextRetry?.let { stringResource(R.string.failover_report_next, it) } ?: stringResource(R.string.failover_report_auto)) +
+                " " + stringResource(R.string.failover_report_no_leak),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }

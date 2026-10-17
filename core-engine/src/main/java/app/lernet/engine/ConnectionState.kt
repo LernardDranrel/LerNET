@@ -43,6 +43,8 @@ data class ConnectionSnapshot(
     val serverTcpMs: Long? = null,
     /** No underlying network: the VPN is held and nothing is blamed on the config ([app.lernet.engine.policy.LinkJudge]). */
     val waitingForNetwork: Boolean = false,
+    /** Mockup 10: configs tried while the folder had no working backup; null once a config works. */
+    val tried: app.lernet.engine.policy.FailoverReport? = null,
 ) {
     companion object {
         fun idle(mode: RunMode = RunMode.FULL_VPN): ConnectionSnapshot =

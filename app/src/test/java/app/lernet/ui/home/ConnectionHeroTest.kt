@@ -135,6 +135,50 @@ class ConnectionHeroTest {
     }
 
     @Test
+    fun allConfigsDownShowsWhatWasTriedAndThatVpnIsHeld() {
+        val profile = Profile(
+            id = "selected", name = "Amsterdam", createdAtEpochMs = 0, updatedAtEpochMs = 0,
+            source = ProfileSource.VLESS, selectedOutboundId = "main", outbounds = emptyList(),
+            subscriptionUrl = null, lastRefreshEpochMs = null,
+        )
+        val now = System.currentTimeMillis()
+        val report = app.lernet.engine.policy.FailoverReport(
+            "Европа",
+            listOf(
+                app.lernet.engine.policy.FailoverAttempt("Frankfurt", "нет ответа · время истекло", now - 60_000),
+                app.lernet.engine.policy.FailoverAttempt("Helsinki", "сервер отклонил соединение", now),
+            ),
+            "1 мин 10 с",
+        )
+        rule.setContent {
+            LerNetTheme {
+                HomeScreen(
+                    state = HomeUiState(
+                        snapshot = ConnectionSnapshot.idle().copy(
+                            state = ConnectionState.RECONNECTING, activeProfileId = profile.id, tried = report,
+                        ),
+                        activeProfile = profile, profiles = listOf(profile), engineAvailable = true,
+                    ),
+                    onIntent = {}, onOpenDrawer = {}, onOpenSettings = {}, onOpenDiag = {},
+                    onOpenRoutes = {}, onRefreshHop = {},
+                )
+            }
+        }
+        rule.onNodeWithText("Нет связи · VPN держим").assertExists()
+        rule.onNodeWithText("Все конфиги папки «Европа» недоступны").assertExists()
+        rule.onNodeWithText("Helsinki").assertExists()
+        val screenshot = File("build/reports/ui/mobile-home-all-configs-down.png")
+        screenshot.parentFile?.mkdirs()
+        rule.runOnIdle {
+            val view = rule.activity.window.decorView
+            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            view.draw(Canvas(bitmap))
+            screenshot.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            bitmap.recycle()
+        }
+    }
+
+    @Test
     fun routeShortcutOpensRunningProfilesGroupAndStandaloneProfile() {
         val selected = Profile(
             id = "selected",

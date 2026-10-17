@@ -20,4 +20,11 @@
     <string name="expert_exits_empty_title">Конфигов пока нет</string>
     <string name="expert_exits_empty_body">Эксперт берёт те же конфиги, что и вкладка VPN. Добавь их там — ссылкой, QR-кодом или файлом, — и они сами появятся здесь. Потом их можно сложить в папки и выбрать, как папка ищет замену.</string>
     <string name="expert_exits_empty_external">Выход через другое приложение или интерфейс можно добавить кнопкой ниже.</string>
+    <string name="state_holding_no_config">Нет связи · VPN держим</string>
+    <string name="failover_report_title">Все конфиги папки недоступны</string>
+    <string name="failover_report_title_named">Все конфиги папки «%1$s» недоступны</string>
+    <string name="failover_report_tried">Что пробовали</string>
+    <string name="failover_report_next">Следующая попытка через %1$s.</string>
+    <string name="failover_report_auto">Пробуем снова автоматически.</string>
+    <string name="failover_report_no_leak">Маршруты VPN остаются на месте — трафик не уходит в обход.</string>
 </resources>
