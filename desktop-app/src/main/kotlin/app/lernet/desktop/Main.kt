@@ -10,6 +10,10 @@ import kotlinx.serialization.json.jsonPrimitive
 
 import androidx.compose.animation.Crossfade
 import androidx.compose.runtime.saveable.rememberSaveable
+import app.lernet.desktop.expert.DesktopExpertSplash
+import app.lernet.desktop.expert.rememberDesktopExpertSplash
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
@@ -241,7 +245,9 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
                         animationSpec = tween(if (expertUi?.reducedMotion == true) 0 else 180), label = "workspace") { showExpert ->
                         modeStates.SaveableStateProvider(showExpert) {
                             if (showExpert && expert != null && expertUi != null) {
-                                DesktopExpert(expertUi, onIntent = { intent ->
+                                val splash = rememberDesktopExpertSplash()
+                                Box(Modifier.fillMaxSize()) {
+                                DesktopExpert(expertUi, frameAnimateIn = !splash.firstEntry, onIntent = { intent ->
                                     when (intent) {
                                         ExpertIntent.OpenNetworkObservation -> networkWindowOpen = true
                                         ExpertIntent.Import -> chooseTransferFile(false)?.let { file ->
@@ -273,6 +279,8 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
                                         else -> expert.dispatch(intent)
                                     }
                                 })
+                                if (splash.visible) DesktopExpertSplash()
+                                }
                             } else DesktopScreen(controller, onOpenNetwork = { networkWindowOpen = true }, onRequestElevation = {
                                 WindowsElevation.relaunchAsAdministrator()
                                     .onSuccess { expert?.close(); controller.close(); exitApplication() }
@@ -427,7 +435,8 @@ private fun DesktopScreen(controller: DesktopController, onRequestElevation: () 
     val diagnostics by controller.diagnostics.collectAsState()
     val connectionHistory by controller.connectionHistory.collectAsState()
     val trace by controller.tracer.state.collectAsState()
-    var tab by rememberSaveable { mutableStateOf(Tab.PROFILES) }
+    // v2: launch and every mode change open the basic home, not the last page.
+    var tab by remember { mutableStateOf(Tab.PROFILES) }
     var importOpen by remember { mutableStateOf(false) }
     var importGroupId by remember { mutableStateOf<String?>(null) }
     var newGroupOpen by remember { mutableStateOf(false) }

@@ -20,6 +20,8 @@ data class ExpertUiState(
     val folders: List<ExpertFolder> = emptyList(),
     val selectedScope: PolicyScope = PolicyScope.Device,
     val phase: ExpertPhase = ExpertPhase.STOPPED,
+    /** When the core confirmed the shared TUN; drives «Без перерыва». */
+    val runningSinceEpochMs: Long? = null,
     val desiredEnabled: Boolean = false,
     val networkReason: String? = null,
     val tunnelHealth: ExpertTunnelHealth = ExpertTunnelHealth.OFF,

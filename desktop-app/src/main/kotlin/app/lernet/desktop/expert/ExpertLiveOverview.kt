@@ -132,6 +132,7 @@ private fun TunControl(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, c
                 reducedMotion = state.reducedMotion,
             )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                ExpertUptimeBlock(state)
                 Text("Постоянный туннель", style = MaterialTheme.typography.titleLarge)
                 Text(
                     when {
@@ -551,4 +552,25 @@ private fun FlowContent(inspection: FlowInspection?, network: String?, protocol:
             Text(formatTraffic(transfer.bytes), fontSize = 12.sp)
         }
     }
+}
+
+/** «Без перерыва» counter; hidden unless the core confirmed a running TUN. */
+internal fun expertUptimeLabel(state: ExpertUiState, nowEpochMs: Long): String? {
+    val since = state.runningSinceEpochMs ?: return null
+    if (state.phase != ExpertPhase.RUNNING && state.phase != ExpertPhase.APPLYING) return null
+    return app.lernet.engine.policy.ExpertUptime.format((nowEpochMs - since).coerceAtLeast(0))
+}
+
+@Composable
+private fun ExpertUptimeBlock(state: ExpertUiState) {
+    var now by androidx.compose.runtime.remember { androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis()) }
+    androidx.compose.runtime.LaunchedEffect(state.runningSinceEpochMs, state.phase) {
+        while (true) {
+            now = System.currentTimeMillis()
+            kotlinx.coroutines.delay(30_000)
+        }
+    }
+    val label = expertUptimeLabel(state, now) ?: return
+    Text("БЕЗ ПЕРЕРЫВА", style = MaterialTheme.typography.labelSmall, color = ExpertColors.amber)
+    Text(label, style = MaterialTheme.typography.headlineMedium)
 }

@@ -49,19 +49,28 @@ import androidx.compose.ui.unit.sp
 import app.lernet.desktop.DesktopWorkspaceSidebar
 import app.lernet.desktop.WorkspaceNavigationItem
 
-private enum class ExpertPage(val title: String) {
-    OVERVIEW("Обзор"),
+internal enum class ExpertPage(val title: String) {
+    OVERVIEW("Пульт"),
     ROUTES("Схема"),
-    PREVIEW("Симулятор"),
-    EXITS("Наши подключения"),
+    EXITS("Конфиги"),
+    PREVIEW("Правила"),
     EVENTS("События"),
-    PROTECTION("Настройки Expert")
+    PROTECTION("Настройки Эксперта")
 }
+
+/** Expert's own bottom menu (v2); Expert safety settings stay in the left column. */
+internal val ExpertBottomPages = listOf(ExpertPage.OVERVIEW, ExpertPage.ROUTES, ExpertPage.EXITS, ExpertPage.PREVIEW, ExpertPage.EVENTS)
 
 /** The controller alone starts networking and acknowledges applied revisions. */
 @Composable
-fun DesktopExpert(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, modifier: Modifier = Modifier) {
-    var page by rememberSaveable { mutableStateOf(ExpertPage.OVERVIEW) }
+fun DesktopExpert(
+    state: ExpertUiState,
+    onIntent: (ExpertIntent) -> Unit,
+    modifier: Modifier = Modifier,
+    frameAnimateIn: Boolean = true,
+) {
+    // v2: entering Expert (launch or mode change) always opens the pult.
+    var page by remember { mutableStateOf(ExpertPage.OVERVIEW) }
     val pageStates = rememberSaveableStateHolder()
     var confirmation by remember { mutableStateOf<ExpertIntent?>(null) }
     var recordedFlow by remember { mutableStateOf<ExpertConnection?>(null) }
@@ -85,9 +94,16 @@ fun DesktopExpert(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, modifi
         },
     ) {
         DesktopWorkspaceSidebar({ onIntent(ExpertIntent.OpenNetworkObservation) }) {
-            ExpertPage.entries.forEach { item -> WorkspaceNavigationItem(item.title, page == item, { page = item }) }
+            WorkspaceNavigationItem(ExpertPage.PROTECTION.title, page == ExpertPage.PROTECTION, { page = ExpertPage.PROTECTION })
         }
-        Column(Modifier.weight(1f).fillMaxHeight().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(Modifier.weight(1f).fillMaxHeight()) {
+        app.lernet.ui.controls.ExpertFramedBox(
+            app.lernet.ui.controls.ExpertFrameSpec.Windows,
+            Modifier.weight(1f).fillMaxWidth(),
+            lit = if (state.phase == ExpertPhase.RUNNING) 1f else 0.35f,
+            animateIn = frameAnimateIn && !state.reducedMotion,
+        ) {
+        Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -98,7 +114,7 @@ fun DesktopExpert(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, modifi
                         if (page == ExpertPage.ROUTES) {
                             "Правила устройства, профилей и папок"
                         } else {
-                            "Экспертный режим · ваши правила для каждого соединения"
+                            "Экспертный режим · твои правила для каждого соединения"
                         },
                         color = ExpertColors.muted
                     )
@@ -144,6 +160,9 @@ fun DesktopExpert(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, modifi
             if (state.hasDraftChanges || (state.phase == ExpertPhase.RUNNING && state.hasUnappliedChanges)) {
                 DraftActions(state, validation, onIntent) { confirmation = it }
             }
+        }
+        }
+        ExpertBottomBar(page) { page = it }
         }
     }
     when (confirmation) {
@@ -394,4 +413,24 @@ private fun ProtectionRow(title: String, enforced: Boolean, explanation: String)
         ExpertTag(if (enforced) "Подтверждено" else "Не подтверждено", if (enforced) ExpertColors.green else ExpertColors.amber)
     }
     Spacer(Modifier.height(2.dp))
+}
+
+@Composable
+private fun ExpertBottomBar(page: ExpertPage, onPage: (ExpertPage) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().background(ExpertColors.background).padding(horizontal = 24.dp, vertical = 8.dp)
+            .semantics { contentDescription = "Разделы Эксперта" },
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+    ) {
+        ExpertBottomPages.forEach { item ->
+            val selected = page == item
+            androidx.compose.material3.TextButton(
+                onClick = { onPage(item) },
+                colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                    containerColor = if (selected) ExpertColors.amber.copy(alpha = 0.16f) else androidx.compose.ui.graphics.Color.Transparent,
+                    contentColor = if (selected) ExpertColors.amber else ExpertColors.muted,
+                ),
+            ) { Text(item.title, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal) }
+        }
+    }
 }

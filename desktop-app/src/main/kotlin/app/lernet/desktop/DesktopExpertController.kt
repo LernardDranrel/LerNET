@@ -645,6 +645,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                 capabilities = snapshot.capabilities,
                 phase = if (snapshot.applying) ExpertPhase.APPLYING else ExpertPhase.valueOf(snapshot.phase.name),
                 desiredEnabled = snapshot.desiredEnabled,
+                runningSinceEpochMs = snapshot.runningSinceEpochMs,
                 networkReason = snapshot.networkReason,
                 tunnelHealth = snapshot.tunnelHealth,
                 busy = snapshot.applying,
