@@ -97,6 +97,8 @@ data class StoredState(
     val healthUrl: String = "https://www.gstatic.com/generate_204",
     val defaultDnsPolicy: String = "UNDERLAY",
     val journalMaxMb: Int = 100,
+    /** VPN mode: Windows keeps traffic closed outside LerNET while the core restarts. */
+    val crashGuard: Boolean = true,
 )
 
 class DesktopStore(private val directory: Path = defaultDirectory()) {

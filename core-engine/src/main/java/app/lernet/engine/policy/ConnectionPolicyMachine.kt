@@ -236,12 +236,21 @@ class ConnectionPolicyMachine {
         val outboundId = state.snapshot.activeOutboundId
         val failures = state.consecutiveFailures + 1
         return when {
-            !cause.isRetryable() -> failNow(state, cause)
+            !keepsSession(state, cause) -> failNow(state, cause)
             outboundId == null -> failNow(state, cause)
             failures < context.reconnect.maxAttempts -> retrySame(state, outboundId, failures, cause, context)
             else -> afterReconnectBudget(state, context, outboundId, failures, cause)
         }
     }
+
+    /**
+     * A first start that cannot even launch the core ends the attempt. Once the session has been
+     * up (or is already recovering), an unexpected core failure is retried instead: the VPN stays
+     * closed while it restarts, so traffic never falls back to the open network behind the user's back.
+     */
+    private fun keepsSession(state: MachineState, cause: ConnectionCause): Boolean =
+        cause.isRetryable() ||
+            (cause is ConnectionCause.EngineStartFailed && state.snapshot.state != ConnectionState.CONNECTING)
 
     private fun retrySame(
         state: MachineState,

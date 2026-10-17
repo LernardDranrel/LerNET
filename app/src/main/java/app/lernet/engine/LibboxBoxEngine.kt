@@ -15,6 +15,7 @@ import app.lernet.vpn.LibboxStatusClient
 import app.lernet.vpn.VpnRuntime
 import app.lernet.vpn.expert.ExpertVpnSession
 import app.lernet.vpn.expert.ExpertVpnToken
+import app.lernet.engine.policy.TunHoldPolicy
 import app.lernet.engine.policy.TunIdentity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.nekohasekai.libbox.CommandClient
@@ -64,7 +65,7 @@ class LibboxBoxEngine @Inject constructor(
                 val message = error.message ?: error.toString()
                 LerNetLog.e(TAG, "start escaped: $message", error)
                 CrashTrail.recordFailure("engine.start", error)
-                runCatching { abort() }
+                runCatching { releaseOrHold(mode, stopRequested = false) }
                 emitFailed(EngineErrorMapper.map(message))
             }
     }
@@ -93,7 +94,7 @@ class LibboxBoxEngine @Inject constructor(
             }.onFailure { error ->
                 closeStatusClient()
                 closeServerLocked()
-                abort()
+                releaseOrHold(mode, stopRequested = generation.get() != gen)
                 val message = error.message ?: error.toString()
                 LerNetLog.e(TAG, "libbox start failed: $message", error)
                 CrashTrail.recordFailure("engine.startLocked", error)
@@ -129,6 +130,21 @@ class LibboxBoxEngine @Inject constructor(
 
     override fun abort() {
         if (!ExpertVpnSession.isOwned) host.stop()
+    }
+
+    /**
+     * A failed VPN start keeps the already established interface: with no reader behind it, apps
+     * cannot leak around the tunnel while the controller retries. The controller still removes it
+     * through [stop] on user stop, revoke or a final failure.
+     */
+    private fun releaseOrHold(mode: RunMode, stopRequested: Boolean) {
+        val vpnUp = VpnRuntime.current() != null
+        if (TunHoldPolicy.holdOnStartFailure(mode, stopRequested, vpnUp)) {
+            LerNetLog.w(TAG, "start failed; VPN interface kept closed until retry or stop")
+            CrashTrail.mark("start failed: tun held closed")
+            return
+        }
+        abort()
     }
 
     /** Serializes the handover with every simple-mode start and drains the previous service first. */

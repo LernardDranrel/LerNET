@@ -16,4 +16,5 @@ data class AppSettings(
     val journalMaxMb: Int = 100,
     val engineDefaults: EngineDefaults = EngineDefaults(),
     val defaultDnsPolicy: DnsPolicy = DnsPolicy.UNDERLAY,
+    val lockdownHintDismissed: Boolean = false,
 )

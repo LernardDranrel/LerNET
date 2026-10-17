@@ -26,6 +26,11 @@ data class TunnelSnapshot(
     val failure: TunnelFailure? = null,
 )
 
+interface TunnelLifecycle {
+    fun coreRunning()
+    fun tunnelFailed()
+}
+
 /** Exact launch inputs stay in memory; default identity-based toString never exposes the configuration. */
 internal class WindowsLaunchSnapshot(val executable: Path, val config: String)
 
@@ -54,6 +59,9 @@ class WindowsBoxProcess internal constructor(
     private var runningLaunch: WindowsLaunchSnapshot? = null
 
     @Volatile var journalMaxMb: Int = 100
+
+    /** Told when a core (re)start is up and when the tunnel gives up for good. */
+    @Volatile var lifecycle: TunnelLifecycle? = null
     private val journalLock = Any()
 
     fun start(executable: Path, config: String) {
@@ -121,6 +129,7 @@ class WindowsBoxProcess internal constructor(
                             mutable.update {
                                 it.copy(status = TunnelStatus.RUNNING, message = "Ядро запущено", reconnectAttempt = attempt)
                             }
+                            lifecycle?.let { listener -> runCatching { listener.coreRunning() } }
                         }
                     }
                     val code = running.waitFor()
@@ -138,6 +147,7 @@ class WindowsBoxProcess internal constructor(
                                 )
                             }
                             desired = false
+                            lifecycle?.let { listener -> runCatching { listener.tunnelFailed() } }
                             return@thread
                         }
                         attempt++
@@ -159,6 +169,7 @@ class WindowsBoxProcess internal constructor(
                                 message = SecretRedactor.redact(error.message ?: error.javaClass.simpleName)
                             )
                         }
+                        lifecycle?.let { listener -> runCatching { listener.tunnelFailed() } }
                     }
                 }
             } finally {

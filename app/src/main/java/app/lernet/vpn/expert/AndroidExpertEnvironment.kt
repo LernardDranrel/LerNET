@@ -13,7 +13,21 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
-enum class AndroidVpnLockdown { ENABLED, DISABLED, UNKNOWN }
+enum class AndroidVpnLockdown {
+    ENABLED, DISABLED, UNKNOWN;
+
+    companion object {
+        /** Android reports always-on lockdown only to the running VPN service (Android 10+). */
+        fun read(): AndroidVpnLockdown {
+            val service = VpnRuntime.current()
+            return when {
+                service == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q -> UNKNOWN
+                service.isLockdownEnabled -> ENABLED
+                else -> DISABLED
+            }
+        }
+    }
+}
 
 data class AndroidExpertEnvironmentState(
     val permissionIntent: Intent?,
@@ -45,11 +59,7 @@ class AndroidExpertEnvironment @Inject constructor(@ApplicationContext private v
             if (owned) ownVpnVisible = true
             name ?: "VPN"
         }.distinct()
-        val lockdown = when {
-            service == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q -> AndroidVpnLockdown.UNKNOWN
-            service.isLockdownEnabled -> AndroidVpnLockdown.ENABLED
-            else -> AndroidVpnLockdown.DISABLED
-        }
+        val lockdown = AndroidVpnLockdown.read()
         return AndroidExpertEnvironmentState(
             permissionIntent = VpnService.prepare(context),
             visibleVpnInterfaces = vpnNames,

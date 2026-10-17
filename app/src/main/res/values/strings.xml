@@ -40,6 +40,8 @@
     <string name="copy_proxy">Адрес прокси</string>
     <string name="proxy_addr">127.0.0.1:2080</string>
     <string name="dismiss">Скрыть</string>
+    <string name="lockdown_hint_body">Если LerNET внезапно закроется, Android может пустить трафик мимо VPN. Чтобы этого не было, включите для LerNET «Постоянный VPN» и «Блокировать соединения без VPN».</string>
+    <string name="lockdown_hint_open">Открыть настройки</string>
     <string name="failover_banner">Переключение %1$s → %2$s (группа %3$s)</string>
     <string name="cd_configs">Конфиги</string>
     <string name="cd_settings">Настройки</string>

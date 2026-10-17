@@ -30,6 +30,7 @@ import app.lernet.engine.redact.LerNetLog
 import app.lernet.settings.AppSettings
 import app.lernet.settings.SettingsStore
 import app.lernet.vpn.AndroidProtectedDialer
+import app.lernet.vpn.expert.AndroidVpnLockdown
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -66,6 +67,7 @@ data class HomeUiState(
     val pendingMode: RunMode? = null,
     val offerLastLogs: Boolean = false,
     val probes: Map<String, ProfileProbe> = emptyMap(),
+    val showLockdownHint: Boolean = false,
 ) {
     val effectiveMode: RunMode get() = RunMode.resolve(activeProfile?.modeOverride, settings.mode)
 }
@@ -126,6 +128,8 @@ sealed class HomeIntent {
 
     data object DismissLastLogs : HomeIntent()
 
+    data object DismissLockdownHint : HomeIntent()
+
     data object SimulatePipeSilent : HomeIntent()
 }
 
@@ -143,6 +147,8 @@ private data class HomeOverlay(
     val profileAwaitingVpn: String? = null,
     val offerLastLogs: Boolean = false,
     val probes: Map<String, ProfileProbe> = emptyMap(),
+    /** Null until the running VPN service has been asked. */
+    val lockdown: AndroidVpnLockdown? = null,
 )
 
 private data class DeletedSnapshot(
@@ -222,6 +228,9 @@ class HomeViewModel @Inject constructor(
                 .map { it.state to it.activeProfileId }
                 .distinctUntilChanged()
                 .collectLatest { (connectionState, profileId) ->
+                    if (connectionState == ConnectionState.CONNECTED) {
+                        overlay.update { it.copy(lockdown = AndroidVpnLockdown.read()) }
+                    }
                     if (connectionState == ConnectionState.CONNECTED && profileId != null) {
                         probeProfiles(listOf(profileId))
                     }
@@ -270,6 +279,7 @@ class HomeViewModel @Inject constructor(
             pendingMode = extra.pendingMode,
             offerLastLogs = extra.offerLastLogs,
             probes = extra.probes,
+            showLockdownHint = LockdownHint.visible(snapshot, settings.lockdownHintDismissed, extra.lockdown),
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
@@ -397,6 +407,7 @@ class HomeViewModel @Inject constructor(
                     overlay.update { it.copy(offerLastLogs = false) }
                 }
                 HomeIntent.SimulatePipeSilent -> controller.simulatePipeSilent()
+                HomeIntent.DismissLockdownHint -> settingsStore.dismissLockdownHint()
             }
         }
     }

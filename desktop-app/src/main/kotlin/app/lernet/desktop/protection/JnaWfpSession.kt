@@ -55,6 +55,99 @@ internal object WfpAbi {
         return UUID(high, low).toString()
     }
 
+    const val SESSION_FLAGS_OFFSET = 32L
+    const val SESSION_FLAG_DYNAMIC = 0x1
+    const val MATCH_EQUAL = 0
+    const val MATCH_FLAGS_ALL_SET = 6
+    const val MATCH_NOT_EQUAL = 10
+    const val TYPE_UINT8 = 1
+    const val TYPE_UINT16 = 2
+    const val TYPE_UINT32 = 3
+    const val TYPE_UINT64 = 4
+    const val TYPE_BYTE_ARRAY16 = 11
+    const val TYPE_V4_ADDR_MASK = 0x100
+    const val TYPE_V6_ADDR_MASK = 0x101
+    const val CONDITION_FLAGS = "632ce23b-5167-435c-86d7-e903684aa80c"
+    const val CONDITION_REMOTE_ADDRESS = "b235ae9a-1d64-49b8-a44c-5ff3d9095045"
+    const val CONDITION_REMOTE_PORT = "c35a604d-d22b-4e1a-91b4-68f674ee674b"
+    const val CONDITION_LOCAL_PORT = "0c1ba1af-5765-453f-af22-a8f791ac775b"
+    const val CONDITION_PROTOCOL = "3971ef2b-623e-4f9a-8cb1-6e79b806b9a7"
+    const val CONDITION_NEXT_HOP_INTERFACE = "93ae8f5b-7f6f-4719-98c8-14e97429ef04"
+    const val CONDITION_ARRIVAL_INTERFACE = "618a9b6d-386b-4136-ad6e-b51587cfb1cd"
+    const val FLAG_IS_LOOPBACK = 0x1
+
+    /** Dynamic session: Windows removes everything it added when the handle closes or the GUI process dies. */
+    fun dynamicSession(): Memory = managementSession().also { it.setInt(SESSION_FLAGS_OFFSET, SESSION_FLAG_DYNAMIC) }
+
+    /**
+     * FWPM_FILTER_CONDITION0 for every condition that needs no Windows call (all but Application).
+     * Layout: GUID fieldKey @0, FWP_MATCH_TYPE @16, FWP_CONDITION_VALUE0 { type @24, union @32 }.
+     */
+    fun writeCondition(value: Pointer, condition: ProtectionCondition, memory: (Long) -> Memory) {
+        fun key(guid: String, type: Int, match: Int = MATCH_EQUAL) {
+            writeGuid(value, 0, guid)
+            value.setInt(16, match)
+            value.setInt(24, type)
+        }
+        when (condition) {
+            is ProtectionCondition.Application -> error("Application id needs FwpmGetAppIdFromFileName0")
+            is ProtectionCondition.Interface -> {
+                key(if (condition.nextHop) CONDITION_NEXT_HOP_INTERFACE else CONDITION_ARRIVAL_INTERFACE, TYPE_UINT64)
+                value.setPointer(32, memory(8).also { it.setLong(0, condition.luid) })
+            }
+            is ProtectionCondition.Protocol -> {
+                key(CONDITION_PROTOCOL, TYPE_UINT8)
+                value.setByte(32, condition.number.toByte())
+            }
+            is ProtectionCondition.Port -> {
+                key(if (condition.local) CONDITION_LOCAL_PORT else CONDITION_REMOTE_PORT, TYPE_UINT16)
+                value.setShort(32, condition.number.toShort())
+            }
+            is ProtectionCondition.RemotePortNot -> {
+                key(CONDITION_REMOTE_PORT, TYPE_UINT16, MATCH_NOT_EQUAL)
+                value.setShort(32, condition.number.toShort())
+            }
+            is ProtectionCondition.Address -> {
+                if (condition.numeric == "::1") {
+                    key(CONDITION_REMOTE_ADDRESS, TYPE_BYTE_ARRAY16)
+                    value.setPointer(32, memory(16).also { it.setByte(15, 1) })
+                } else {
+                    key(CONDITION_REMOTE_ADDRESS, TYPE_UINT32)
+                    value.setInt(32, ipv4(condition.numeric))
+                }
+            }
+            is ProtectionCondition.Loopback -> {
+                key(CONDITION_FLAGS, TYPE_UINT32, MATCH_FLAGS_ALL_SET)
+                value.setInt(32, FLAG_IS_LOOPBACK)
+            }
+            is ProtectionCondition.RemoteSubnet -> {
+                val bytes = numericAddress(condition.address)
+                if (bytes.size == 4) {
+                    require(condition.prefix in 0..32)
+                    key(CONDITION_REMOTE_ADDRESS, TYPE_V4_ADDR_MASK)
+                    val mask = if (condition.prefix == 0) 0 else (-1 shl (32 - condition.prefix))
+                    value.setPointer(32, memory(8).also {
+                        it.setInt(0, ipv4(condition.address) and mask)
+                        it.setInt(4, mask)
+                    })
+                } else {
+                    require(condition.prefix in 0..128)
+                    key(CONDITION_REMOTE_ADDRESS, TYPE_V6_ADDR_MASK)
+                    value.setPointer(32, memory(17).also {
+                        it.write(0, bytes, 0, 16)
+                        it.setByte(16, condition.prefix.toByte())
+                    })
+                }
+            }
+        }
+    }
+
+    /** Numeric literals only: never resolves a name. */
+    fun numericAddress(value: String): ByteArray {
+        require(value.isNotBlank() && value.all { it.isDigit() || it in "abcdefABCDEF.:" }) { "Нужен числовой адрес: $value" }
+        return java.net.InetAddress.getByName(value).address
+    }
+
     /** IPv4 UINT32 and ports are host-order values, not byte-swapped network-order storage. */
     fun ipv4(value: String): Int {
         val parts = value.split('.').map { it.toInt() }
@@ -82,21 +175,46 @@ internal interface Fwpuclnt : StdCallLibrary {
     fun FwpmFreeMemory0(memory: PointerByReference)
 }
 
-internal class JnaWfpSession private constructor(private val api: Fwpuclnt, private val handle: Pointer) : WfpSession {
+/** Which provider/sublayer a session may read and write. */
+internal data class WfpScope(val providerKey: String?, val sublayerKey: String) {
     companion object {
+        val EXPERT = WfpScope(ProtectionPlan.PROVIDER_KEY, ProtectionPlan.SUBLAYER_KEY)
+        val SIMPLE = WfpScope(null, SimpleGuardPlan.SUBLAYER_KEY)
+    }
+}
+
+internal class JnaWfpSession private constructor(
+    private val api: Fwpuclnt,
+    private val handle: Pointer,
+    private val scope: WfpScope = WfpScope.EXPERT,
+) : WfpSession {
+    companion object {
+        /**
+         * Simple-mode guard session. Everything it adds is dynamic: closing the session, or the GUI
+         * process ending for any reason, removes it, so a stuck block cannot outlive LerNET.
+         */
+        fun openDynamic(): JnaWfpSession {
+            val (api, handle) = openEngine(WfpAbi.dynamicSession())
+            return JnaWfpSession(api, handle, WfpScope.SIMPLE)
+        }
+
         fun open(): JnaWfpSession {
+            val (api, handle) = openEngine(WfpAbi.managementSession())
+            return JnaWfpSession(api, handle)
+        }
+
+        private fun openEngine(session: Memory): Pair<Fwpuclnt, Pointer> {
             check(System.getProperty("os.name").startsWith("Windows") && Native.POINTER_SIZE == 8) {
                 "Защита WFP доступна в 64-разрядной Windows"
             }
             val api = Native.load("fwpuclnt", Fwpuclnt::class.java)
             val handle = PointerByReference()
-            val session = WfpAbi.managementSession()
             try {
                 checked(api.FwpmEngineOpen0(null, 10, null, session, handle), "FwpmEngineOpen0")
             } finally {
                 Reference.reachabilityFence(session)
             }
-            return JnaWfpSession(api, checkNotNull(handle.value))
+            return api to checkNotNull(handle.value)
         }
 
         private fun checked(code: Int, operation: String) {
@@ -105,6 +223,7 @@ internal class JnaWfpSession private constructor(private val api: Fwpuclnt, priv
     }
 
     override fun ensureOwnership() {
+        if (scope == WfpScope.SIMPLE) return ensureSimpleSublayer()
         val arena = Arena()
         try {
             val provider = arena.memory(WfpAbi.PROVIDER_SIZE)
@@ -157,6 +276,22 @@ internal class JnaWfpSession private constructor(private val api: Fwpuclnt, priv
         }
     }
 
+    /** A sublayer without provider, created inside the dynamic session and removed with it. */
+    private fun ensureSimpleSublayer() {
+        val arena = Arena()
+        try {
+            val sublayer = arena.memory(WfpAbi.SUBLAYER_SIZE)
+            WfpAbi.writeGuid(sublayer, 0, SimpleGuardPlan.SUBLAYER_KEY)
+            sublayer.setPointer(16, arena.text("LerNET simple guard"))
+            sublayer.setShort(64, 0xffff.toShort())
+            val code = api.FwpmSubLayerAdd0(handle, sublayer, null)
+            // Already present in this session after a previous transaction: reuse it.
+            if (code != 0x80320009.toInt()) checked(code, "FwpmSubLayerAdd0")
+        } finally {
+            Reference.reachabilityFence(arena)
+        }
+    }
+
     override fun filters(): List<ProtectionFilter> {
         val enumeration = PointerByReference()
         checked(api.FwpmFilterCreateEnumHandle0(handle, null, enumeration), "FwpmFilterCreateEnumHandle0")
@@ -175,7 +310,7 @@ internal class JnaWfpSession private constructor(private val api: Fwpuclnt, priv
                         val provider = value.getPointer(WfpAbi.FILTER_PROVIDER_OFFSET)?.let(WfpAbi::readGuid)
                         val sublayer = WfpAbi.readGuid(value, WfpAbi.FILTER_SUBLAYER_OFFSET)
                         // Never trust a display name, file-local id list, or a provider key alone.
-                        if (provider == ProtectionPlan.PROVIDER_KEY && sublayer == ProtectionPlan.SUBLAYER_KEY) {
+                        if (provider == scope.providerKey && sublayer == scope.sublayerKey) {
                             val layerKey = WfpAbi.readGuid(value, WfpAbi.FILTER_LAYER_OFFSET)
                             val layer = ProtectionLayer.entries.firstOrNull { it.key == layerKey }
                             val action = value.getInt(WfpAbi.FILTER_ACTION_OFFSET)
@@ -183,6 +318,8 @@ internal class JnaWfpSession private constructor(private val api: Fwpuclnt, priv
                                 WfpAbi.readGuid(value), layer ?: ProtectionLayer.CONNECT_V4,
                                 if (action == 0x1001) ProtectionAction.BLOCK else ProtectionAction.PERMIT,
                                 0, readSingleInterfaceCondition(value), disabled = value.getInt(32) and 0x20 != 0,
+                                providerKey = scope.providerKey ?: "",
+                                sublayerKey = scope.sublayerKey,
                                 persistent = value.getInt(32) and 1 != 0,
                                 compatible = layer != null && action in setOf(0x1001, 0x1002),
                             )
@@ -213,7 +350,8 @@ internal class JnaWfpSession private constructor(private val api: Fwpuclnt, priv
     }
 
     override fun add(filter: ProtectionFilter) {
-        require(filter.providerKey == ProtectionPlan.PROVIDER_KEY && filter.sublayerKey == ProtectionPlan.SUBLAYER_KEY)
+        require((filter.providerKey.ifEmpty { null }) == scope.providerKey && filter.sublayerKey == scope.sublayerKey)
+        require(scope != WfpScope.SIMPLE || !filter.persistent) { "Простая защита не оставляет постоянных фильтров" }
         val arena = Arena()
         val appIds = mutableListOf<PointerByReference>()
         try {
@@ -222,9 +360,9 @@ internal class JnaWfpSession private constructor(private val api: Fwpuclnt, priv
             memory.setPointer(16, arena.text("LerNET ${filter.action.name.lowercase()}"))
             memory.setInt(32, if (filter.persistent) 1 else 0) // Production TUN permits are added by the guardian's dynamic session.
             // Permits remain soft; blocks use the default hard action.
-            memory.setPointer(WfpAbi.FILTER_PROVIDER_OFFSET, arena.guid(ProtectionPlan.PROVIDER_KEY))
+            memory.setPointer(WfpAbi.FILTER_PROVIDER_OFFSET, scope.providerKey?.let(arena::guid))
             WfpAbi.writeGuid(memory, WfpAbi.FILTER_LAYER_OFFSET, filter.layer.key)
-            WfpAbi.writeGuid(memory, WfpAbi.FILTER_SUBLAYER_OFFSET, ProtectionPlan.SUBLAYER_KEY)
+            WfpAbi.writeGuid(memory, WfpAbi.FILTER_SUBLAYER_OFFSET, scope.sublayerKey)
             memory.setInt(WfpAbi.FILTER_WEIGHT_OFFSET, 4) // FWP_UINT64 contains a pointer, not an inline number.
             memory.setPointer(WfpAbi.FILTER_WEIGHT_OFFSET + 8, arena.long(filter.weight))
             memory.setInt(WfpAbi.FILTER_CONDITION_COUNT_OFFSET, filter.conditions.size)
@@ -244,40 +382,14 @@ internal class JnaWfpSession private constructor(private val api: Fwpuclnt, priv
     }
 
     private fun writeCondition(value: Pointer, condition: ProtectionCondition, arena: Arena, appIds: MutableList<PointerByReference>) {
-        fun key(guid: String, type: Int) {
-            WfpAbi.writeGuid(value, 0, guid)
-            value.setInt(24, type)
-        }
-        when (condition) {
-            is ProtectionCondition.Application -> {
-                val result = PointerByReference()
-                checked(api.FwpmGetAppIdFromFileName0(WString(condition.path), result), "FwpmGetAppIdFromFileName0")
-                appIds += result
-                key("d78e1e87-8644-4ea5-9437-d809ecefc971", 12)
-                value.setPointer(32, checkNotNull(result.value))
-            }
-            is ProtectionCondition.Interface -> {
-                key(if (condition.nextHop) "93ae8f5b-7f6f-4719-98c8-14e97429ef04" else "618a9b6d-386b-4136-ad6e-b51587cfb1cd", 4)
-                value.setPointer(32, arena.long(condition.luid))
-            }
-            is ProtectionCondition.Protocol -> {
-                key("3971ef2b-623e-4f9a-8cb1-6e79b806b9a7", 1)
-                value.setByte(32, condition.number.toByte())
-            }
-            is ProtectionCondition.Port -> {
-                key(if (condition.local) "0c1ba1af-5765-453f-af22-a8f791ac775b" else "c35a604d-d22b-4e1a-91b4-68f674ee674b", 2)
-                value.setShort(32, condition.number.toShort())
-            }
-            is ProtectionCondition.Address -> {
-                if (condition.numeric == "::1") {
-                    key("b235ae9a-1d64-49b8-a44c-5ff3d9095045", 11)
-                    value.setPointer(32, arena.memory(16).also { it.setByte(15, 1) })
-                } else {
-                    key("b235ae9a-1d64-49b8-a44c-5ff3d9095045", 3)
-                    value.setInt(32, WfpAbi.ipv4(condition.numeric))
-                }
-            }
-        }
+        if (condition !is ProtectionCondition.Application) return WfpAbi.writeCondition(value, condition, arena::memory)
+        val result = PointerByReference()
+        checked(api.FwpmGetAppIdFromFileName0(WString(condition.path), result), "FwpmGetAppIdFromFileName0")
+        appIds += result
+        WfpAbi.writeGuid(value, 0, "d78e1e87-8644-4ea5-9437-d809ecefc971")
+        value.setInt(16, WfpAbi.MATCH_EQUAL)
+        value.setInt(24, 12)
+        value.setPointer(32, checkNotNull(result.value))
     }
 
     override fun delete(key: String) {

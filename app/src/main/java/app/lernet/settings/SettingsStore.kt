@@ -53,6 +53,8 @@ class SettingsStore(private val context: Context) {
 
     suspend fun dismissBanner(key: String) = edit { it[BANNER] = key }
 
+    suspend fun dismissLockdownHint() = edit { it[LOCKDOWN_HINT_DISMISSED] = true }
+
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         context.dataStore.edit(block)
     }
@@ -80,6 +82,7 @@ class SettingsStore(private val context: Context) {
                 directDnsServer = this[DIRECT_DNS_SERVER]?.takeIf { EngineDefaults.validIpv4(it) } ?: "1.1.1.1",
             ),
             defaultDnsPolicy = DnsPolicy.fromStorage(this[DEFAULT_DNS_POLICY] ?: DnsPolicy.UNDERLAY.name),
+            lockdownHintDismissed = this[LOCKDOWN_HINT_DISMISSED] ?: false,
         )
     }
 
@@ -99,5 +102,6 @@ class SettingsStore(private val context: Context) {
         val XMUX_CONCURRENCY = stringPreferencesKey("xmux_concurrency")
         val DEFAULT_DNS_POLICY = stringPreferencesKey("default_dns_policy")
         val DIRECT_DNS_SERVER = stringPreferencesKey("direct_dns_server")
+        val LOCKDOWN_HINT_DISMISSED = booleanPreferencesKey("lockdown_hint_dismissed")
     }
 }

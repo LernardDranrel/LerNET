@@ -1,5 +1,8 @@
 package app.lernet.desktop
 
+import app.lernet.desktop.protection.SimpleGuardStatus
+import app.lernet.desktop.protection.SimpleTunnelGuard
+
 import app.lernet.config.net.OkHttpTextFetcher
 import app.lernet.config.model.DnsPolicy
 import app.lernet.config.transfer.TransferBundle
@@ -80,10 +83,13 @@ data class DesktopUiState(
     val healthVerified: Boolean? = null,
     /** HTTP response time measured by sing-box through the selected outbound. */
     val tunnelLatencyMs: Long? = null,
+    /** Shown only when the VPN-mode guard could not close Windows outside LerNET. */
+    val guardProblem: String? = null,
 )
 
 class DesktopController(
     private val store: DesktopStore = DesktopStore(),
+    private val simpleGuard: SimpleTunnelGuard = SimpleTunnelGuard(),
 ) : AutoCloseable {
     @Volatile internal var simpleModeRestriction: (() -> String?)? = null
 
@@ -101,7 +107,16 @@ class DesktopController(
         ),
     )
     val state: StateFlow<DesktopUiState> = mutable
-    val tunnel = WindowsBoxProcess(store.workDirectory())
+    val tunnel = WindowsBoxProcess(store.workDirectory()).also { process ->
+        process.lifecycle = object : TunnelLifecycle {
+            override fun coreRunning() {
+                if (!simpleGuard.isEngaged()) return
+                thread(name = "lernet-windows-guard", isDaemon = true) { showGuard(simpleGuard.permitAdapter()) }
+            }
+
+            override fun tunnelFailed() = releaseGuard()
+        }
+    }
     val tracer = WindowsTracer()
     private val coreApi = LocalCoreApi()
     private val mutableDiagnostics = MutableStateFlow(CoreDiagnostics())
@@ -421,6 +436,7 @@ class DesktopController(
                 connectInternal(resetFailover = true)
             } catch (error: Exception) {
                 desiredConnection = false
+                releaseGuard()
                 reportConnectionError(error.message ?: "Не удалось переключить подключение")
             } finally {
                 switchBusy.set(false)
@@ -503,6 +519,9 @@ class DesktopController(
     fun showMessage(message: String) { mutable.update { it.copy(message = message) } }
     fun dismissConnectionError() { mutable.update { it.copy(connectionError = null) } }
     fun setHealthUrl(url: String) = change { it.copy(healthUrl = url.trim()) }
+    fun setCrashGuard(enabled: Boolean) {
+        if (change { it.copy(crashGuard = enabled) } && !enabled) synchronized(connectLock) { releaseGuard() }
+    }
     fun setDefaultDnsPolicy(policy: DnsPolicy) = change { it.copy(defaultDnsPolicy = policy.name) }
     fun setJournalMaxMb(value: Int) = change { it.copy(journalMaxMb = value.coerceIn(1, 500)) }
     fun setDefaults(mtu: Int, xmux: String, dnsServer: String, logLevel: String) = change {
@@ -720,9 +739,14 @@ class DesktopController(
                         check(tunnel.stop(waitForExit = true)) { "Не удалось остановить предыдущее подключение" }
                         val launch = WindowsLaunchSnapshot(path, assembled.json)
                         val profile = checkNotNull(profileAtStart)
-                        activeSimpleConnection = WindowsSimpleConnection(launch, profile.id,
-                            DesktopRunMode.effective(profile.modeOverride ?: savedAtStart.mode, WindowsElevation.isElevated),
-                            savedAtStart, ticket)
+                        val runMode = DesktopRunMode.effective(profile.modeOverride ?: savedAtStart.mode, WindowsElevation.isElevated)
+                        activeSimpleConnection = WindowsSimpleConnection(launch, profile.id, runMode, savedAtStart, ticket)
+                        // Close Windows outside LerNET before the core exists, and keep it closed across restarts.
+                        if (runMode == RunMode.FULL_VPN && savedAtStart.crashGuard) {
+                            showGuard(simpleGuard.engage(path.toAbsolutePath().toString()))
+                        } else {
+                            releaseGuard()
+                        }
                         tunnel.start(launch)
                     }
                 }
@@ -730,6 +754,7 @@ class DesktopController(
             } catch (error: Exception) {
                 if (connectGeneration.get() == ticket) {
                     desiredConnection = false
+                    releaseGuard()
                     reportConnectionError(error.message ?: "Не удалось запустить ядро", routeErrorOwner)
                 }
             } finally {
@@ -737,6 +762,17 @@ class DesktopController(
                 mutable.update { it.copy(busy = false) }
             }
         }
+    }
+
+    private fun releaseGuard() {
+        simpleGuard.release()
+        mutable.update { it.copy(guardProblem = null) }
+    }
+
+    private fun showGuard(status: SimpleGuardStatus) {
+        val problem = (status as? SimpleGuardStatus.Unavailable)?.let { SecurityTexts.GUARD_PROBLEM_PREFIX + it.reason }
+        if (problem != null) tunnel.logDiagnostic(problem)
+        mutable.update { it.copy(guardProblem = problem) }
     }
 
     private fun reportConnectionError(message: String, routeOwnerId: String? = null) {
@@ -801,6 +837,8 @@ class DesktopController(
             desiredConnection = false
             connectGeneration.incrementAndGet()
             tunnel.stop()
+            // Stop means normal connectivity right away, with nothing left blocked.
+            releaseGuard()
         }
         mutable.update { it.copy(message = "Отключено") }
     }
@@ -828,6 +866,7 @@ class DesktopController(
                 check(tunnel.stop(waitForExit = true)) {
                     "Предыдущее подключение ещё работает. Экспертный туннель не запущен."
                 }
+                releaseGuard()
             } catch (error: Exception) {
                 simpleRestoreLease = null
                 expertReserved.set(false)
@@ -906,6 +945,7 @@ class DesktopController(
             desiredConnection = false
             connectGeneration.incrementAndGet()
             tunnel.stop(waitForExit = true)
+            releaseGuard()
         }
         monitorOpen = false
         monitorThread.interrupt()

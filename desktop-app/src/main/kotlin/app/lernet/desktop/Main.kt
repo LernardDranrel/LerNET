@@ -473,6 +473,7 @@ private fun DesktopScreen(controller: DesktopController, onRequestElevation: () 
             if (ui.message.isNotBlank() && ui.message != statusLine)
                 Text(ui.message, color = if (ui.connectionError != null) desktopColors.error else muted, maxLines = 2)
                 if (ui.networkWarning.isNotBlank()) Text(ui.networkWarning, color = Color(0xFFF1CC80), fontSize = 12.sp, maxLines = 3)
+            ui.guardProblem?.let { Text(it, color = desktopColors.error, fontSize = 12.sp, maxLines = 2) }
             Spacer(Modifier.height(18.dp))
             when (tab) {
                 Tab.PROFILES -> Profiles(ui.saved, tunnel, ui.busy, ui.probes, ui.tunnelLatencyMs, trace, controller,
@@ -1592,6 +1593,10 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
             )
         }
         Panel {
+            SettingHeading(SecurityTexts.PANEL_TAG, SecurityTexts.PANEL_TITLE, SecurityTexts.PANEL_BODY)
+            SecurityToggle(SecurityTexts.CRASH_GUARD, SecurityTexts.CRASH_GUARD_HINT, saved.crashGuard, controller::setCrashGuard)
+        }
+        Panel {
             Text("Параметры подключения", style = MaterialTheme.typography.titleLarge)
             Text("Общие значения для профилей. Если профиль содержит собственную настройку, она имеет приоритет. Изменения вступят в силу при следующем подключении.",
                 color = muted, style = MaterialTheme.typography.bodyMedium)
@@ -1687,6 +1692,17 @@ private fun Settings(saved: StoredState, controller: DesktopController, onReques
                 "Встроенное ядро поддерживает Android-профили и XHTTP. Пустое поле использует комплектную версию.")
             OutlinedTextField(path, { path = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Свой путь к sing-box.exe") }, singleLine = true)
             Button(onClick = { controller.setCorePath(path) }, enabled = path != saved.corePath) { Text("Сохранить путь") }
+        }
+    }
+}
+
+@Composable
+private fun SecurityToggle(title: String, hint: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Checkbox(checked = checked, onCheckedChange = onChange)
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.SemiBold)
+            Text(hint, color = muted, fontSize = 12.sp, lineHeight = 18.sp)
         }
     }
 }

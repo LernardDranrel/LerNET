@@ -203,6 +203,15 @@ sealed interface ProtectionCondition {
     data class Protocol(val number: Int) : ProtectionCondition
     data class Port(val number: Int, val local: Boolean) : ProtectionCondition
     data class Address(val numeric: String) : ProtectionCondition
+
+    /** Traffic that never leaves the machine (127.0.0.0/8, ::1 and local addresses over loopback). */
+    data object Loopback : ProtectionCondition
+
+    /** Remote IPv4/IPv6 network, written numerically, e.g. 192.168.0.0/16. */
+    data class RemoteSubnet(val address: String, val prefix: Int) : ProtectionCondition
+
+    /** Remote port is anything except this one. */
+    data class RemotePortNot(val number: Int) : ProtectionCondition
 }
 
 data class ProtectionFilter(

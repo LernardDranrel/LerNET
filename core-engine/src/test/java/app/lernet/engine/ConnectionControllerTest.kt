@@ -667,7 +667,7 @@ class ConnectionControllerTest {
     }
 
     @Test
-    fun retryStartThrowableBecomesFailedWithoutFurtherReconnect() = runTest(dispatcher) {
+    fun retryStartThrowableKeepsSessionWithoutStoppingEngine() = runTest(dispatcher) {
         val engine = RecordingBoxEngine(
             failOnStartNumber = 2,
             startError = UnsatisfiedLinkError("dlopen failed"),
@@ -689,12 +689,19 @@ class ConnectionControllerTest {
 
         testScheduler.advanceTimeBy(1_000)
         runCurrent()
-        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.FAILED)
+        // A failed restart is not a reason to drop the VPN: the session keeps recovering.
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.RECONNECTING)
         assertThat(controller.snapshot.value.cause).isInstanceOf(ConnectionCause.EngineStartFailed::class.java)
         assertThat(engine.startCount).isEqualTo(2)
+        assertThat(engine.stopCount).isEqualTo(0)
         testScheduler.advanceTimeBy(15_000)
         runCurrent()
-        assertThat(engine.startCount).isEqualTo(2)
+        assertThat(engine.startCount).isAtLeast(3)
+        assertThat(engine.stopCount).isEqualTo(0)
+
+        controller.disconnect()
+        runCurrent()
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.DISCONNECTED)
         assertThat(engine.stopCount).isEqualTo(1)
     }
 

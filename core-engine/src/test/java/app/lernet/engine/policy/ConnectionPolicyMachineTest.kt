@@ -200,14 +200,53 @@ class ConnectionPolicyMachineTest {
     }
 
     @Test
-    fun engineStartFailedIsNotRetried() {
+    fun firstStartFailureIsNotRetried() {
+        val starting = machine.reduce(MachineState.idle(), ctx(), startEvent()).first
         val (next, commands) = machine.reduce(
-            connected(),
+            starting,
             ctx(),
             PolicyEvent.EngineFailed(ConnectionCause.EngineStartFailed("setup exploded")),
         )
         assertThat(next.snapshot.state).isEqualTo(ConnectionState.FAILED)
         assertThat(commands.filterIsInstance<PolicyCommand.ScheduleRetry>()).isEmpty()
+        assertThat(commands.filterIsInstance<PolicyCommand.StopEngine>()).isNotEmpty()
+    }
+
+    @Test
+    fun coreFailureAfterConnectKeepsSessionAndRetries() {
+        val (next, commands) = machine.reduce(
+            connected(),
+            ctx(),
+            PolicyEvent.EngineFailed(ConnectionCause.EngineStartFailed("setup exploded")),
+        )
+        assertThat(next.snapshot.state).isEqualTo(ConnectionState.RECONNECTING)
+        assertThat(commands.filterIsInstance<PolicyCommand.ScheduleRetry>()).isNotEmpty()
+        assertThat(commands.filterIsInstance<PolicyCommand.StopEngine>()).isEmpty()
+    }
+
+    @Test
+    fun failedCoreRestartKeepsRetryingWithoutStoppingTheTunnel() {
+        var state = connected()
+        repeat(6) {
+            val (next, commands) = machine.reduce(
+                state,
+                ctx(),
+                PolicyEvent.EngineFailed(ConnectionCause.EngineStartFailed("restart exploded")),
+            )
+            assertThat(next.snapshot.state).isEqualTo(ConnectionState.RECONNECTING)
+            assertThat(commands.filterIsInstance<PolicyCommand.StopEngine>()).isEmpty()
+            assertThat(commands.filterIsInstance<PolicyCommand.ScheduleRetry>()).isNotEmpty()
+            state = next
+        }
+    }
+
+    @Test
+    fun revokeAndPermissionLossStillEndTheSession() {
+        listOf(ConnectionCause.ServiceRevoked, ConnectionCause.VpnPermissionDenied).forEach { cause ->
+            val (next, commands) = machine.reduce(connected(), ctx(), PolicyEvent.EngineFailed(cause))
+            assertThat(next.snapshot.state).isEqualTo(ConnectionState.FAILED)
+            assertThat(commands.filterIsInstance<PolicyCommand.StopEngine>()).isNotEmpty()
+        }
     }
 
     @Test

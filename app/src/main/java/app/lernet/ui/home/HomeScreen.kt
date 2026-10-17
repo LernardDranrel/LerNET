@@ -194,6 +194,12 @@ private fun HomeBody(
             )
         }
         FailoverBannerCard(state, onIntent)
+        if (state.showLockdownHint) {
+            LockdownHintCard(
+                onOpenSettings = { openVpnSettings(context) },
+                onDismiss = { onIntent(HomeIntent.DismissLockdownHint) },
+            )
+        }
         if (snapshot.state == ConnectionState.CONNECTED && isTunnelSilence(snapshot.channel)) {
             PipeSilentBanner(snapshot)
         }
@@ -572,6 +578,25 @@ private fun FailoverBannerCard(state: HomeUiState, onIntent: (HomeIntent) -> Uni
             Text(stringResource(R.string.dismiss))
         }
     }
+}
+
+@Composable
+private fun LockdownHintCard(onOpenSettings: () -> Unit, onDismiss: () -> Unit) {
+    PanelCard {
+        Text(stringResource(R.string.lockdown_hint_body), style = MaterialTheme.typography.bodyMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap)) {
+            TextButton(onClick = onOpenSettings, modifier = Modifier.lernetButton()) {
+                Text(stringResource(R.string.lockdown_hint_open))
+            }
+            TextButton(onClick = onDismiss, modifier = Modifier.lernetButton()) {
+                Text(stringResource(R.string.dismiss))
+            }
+        }
+    }
+}
+
+private fun openVpnSettings(context: android.content.Context) {
+    runCatching { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_VPN_SETTINGS)) }
 }
 
 @Composable
