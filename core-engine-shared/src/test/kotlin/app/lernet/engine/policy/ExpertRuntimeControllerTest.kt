@@ -140,6 +140,19 @@ class ExpertRuntimeControllerTest {
         assertEquals(1L, controller.state.value.directNetwork?.networkEpoch)
     }
 
+    @Test fun `confirmed tunnel start records the wall clock for the uptime counter`() = runTest {
+        val backend = FakeBackend()
+        val controller = ExpertRuntimeController(
+            NetworkPolicy(), inventory, RoutePlatform.WINDOWS, backend, ExpertPolicyPersistence { _, _ -> }, backgroundScope,
+            clockMs = { testScheduler.currentTime }, maintenanceIntervalMs = null, nextProbeIntervalMs = { 3_000 },
+            wallClockMs = { 1_700_000_000_000 },
+        )
+        assertEquals(null, controller.state.value.runningSinceEpochMs)
+        controller.handle(ExpertIntent.Start)
+        assertEquals(ExpertSessionPhase.RUNNING, controller.state.value.phase)
+        assertEquals(1_700_000_000_000, controller.state.value.runningSinceEpochMs)
+    }
+
     @Test fun `confirmed simple VPN handover persists a profile route before any tunnel acquisition`() = runTest {
         val initial = NetworkPolicy(trees = listOf(PolicyTree(PolicyScope.Profile("a"), defaultTarget = PolicyTarget.CurrentExit)))
         val writes = mutableListOf<NetworkPolicy>()

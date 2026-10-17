@@ -52,6 +52,7 @@ class ExpertRuntimeController(
     /** Pause before an unavailable exit is looked at again; argument is the folder cooldown. */
     private val nextRecheckMs: (Long) -> Long = { atLeast -> RecheckJitter.nextMs(atLeastMs = atLeast) },
     private val maintenanceIntervalMs: Long? = 1_000,
+    private val wallClockMs: () -> Long = { System.currentTimeMillis() },
 ) {
     private val mutex = Mutex()
     private val session = PolicyApplySession(initial, platform).also { it.edit(initialDraft) }
@@ -313,6 +314,7 @@ class ExpertRuntimeController(
                     mutableState.value = mutableState.value.copy(
                         phase = ExpertSessionPhase.RUNNING,
                         tun = ack.identity,
+                        runningSinceEpochMs = wallClockMs(),
                         connections = emptyList(),
                         connectionHistoryLimit = MAX_CONNECTIONS,
                         connectionHistoryTruncated = false,

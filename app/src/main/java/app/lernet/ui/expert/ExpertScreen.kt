@@ -9,6 +9,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import app.lernet.ui.controls.ExpertFrameSpec
+import app.lernet.ui.controls.ExpertFramedBox
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -49,6 +51,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -93,12 +96,14 @@ internal fun ExpertRoute(
     onVpn: () -> Unit, simpleActive: Boolean,
     section: ExpertSection, onSectionChange: (ExpertSection) -> Unit,
     onOpenDrawer: () -> Unit,
+    onSettings: () -> Unit = {},
 ) {
     val viewModel: ExpertViewModel = hiltViewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val snackbar = remember { SnackbarHostState() }
+    val splash = rememberExpertSplash(context)
     var switchPrompt by rememberSaveable { mutableStateOf(false) }
     var handover by rememberSaveable(stateSaver = ExpertOptionalJsonSaver<Pair<String, NetworkPolicy>>()) { mutableStateOf<Pair<String, NetworkPolicy>?>(null) }
     var keepVpn by rememberSaveable { mutableStateOf(false) }
@@ -248,7 +253,10 @@ internal fun ExpertRoute(
         onSaveDraft = viewModel::saveDraft,
         formMemory = viewModel.formMemory,
         selectedSection = section, onSectionChange = onSectionChange, onOpenDrawer = onOpenDrawer,
+        onSettings = onSettings,
+        frameAnimateIn = !splash.firstEntry,
     )
+    if (splash.visible) ExpertSplash()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -271,6 +279,8 @@ internal fun ExpertScreen(
     selectedSection: ExpertSection? = null,
     onSectionChange: ((ExpertSection) -> Unit)? = null,
     onOpenDrawer: () -> Unit = {},
+    onSettings: () -> Unit = {},
+    frameAnimateIn: Boolean = false,
 ) {
     var localSection by rememberSaveable { mutableStateOf(ExpertSection.OVERVIEW) }
     val section = selectedSection ?: localSection
@@ -307,6 +317,12 @@ internal fun ExpertScreen(
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                     actions = {
+                        IconButton({ selectSection(ExpertSection.JOURNAL) }, Modifier.testTag("expert_top_journal")) {
+                            Icon(LerNetSymbols.info(), contentDescription = stringResource(R.string.expert_section_journal))
+                        }
+                        IconButton(onSettings, Modifier.testTag("expert_top_settings")) {
+                            Icon(LerNetSymbols.settings(), contentDescription = stringResource(R.string.expert_top_settings))
+                        }
                         IconButton(onClick = { archiveMenu = true }, enabled = state.inventory != null) {
                             Icon(
                                 LerNetSymbols.more(),
@@ -336,6 +352,7 @@ internal fun ExpertScreen(
             }
         },
         snackbarHost = { SnackbarHost(snackbar) },
+        bottomBar = { ExpertBottomMenu(section, ::selectSection) },
     ) { padding ->
         val runtime = state.runtime
         val bundle = state.inventory
@@ -482,7 +499,13 @@ internal fun ExpertScreen(
                     }
                 }
             }
-            Column(Modifier.padding(padding)) {
+            ExpertFramedBox(
+                ExpertFrameSpec.Phone,
+                Modifier.padding(padding).fillMaxSize(),
+                lit = if (runtime?.phase == ExpertSessionPhase.RUNNING) 1f else 0.35f,
+                animateIn = frameAnimateIn && !reduced,
+            ) {
+            Column(Modifier.fillMaxSize()) {
                 if (reduced) {
                     sectionStates.SaveableStateProvider(section) { content(section) }
                 } else {
@@ -490,6 +513,7 @@ internal fun ExpertScreen(
                         sectionStates.SaveableStateProvider(it) { content(it) }
                     }
                 }
+            }
             }
             if (dnsEditor != null && onSaveDns != null) {
                 val initialDns = requireNotNull(dnsEditor)
@@ -595,6 +619,7 @@ private fun ExpertStatus(
             )
             }
             lever()
+            ExpertUptimeLine(runtime)
             summary()
         }
         Text(
@@ -674,5 +699,26 @@ private fun ExpertInactiveProtections(state: ExpertUiState) {
             color = MaterialTheme.colorScheme.tertiary,
             style = MaterialTheme.typography.bodySmall
         )
+    }
+}
+
+/** «Без перерыва»: how long the shared TUN has stayed up; hidden when the core has not confirmed a start. */
+@Composable
+internal fun ExpertUptimeLine(runtime: app.lernet.engine.policy.ExpertRuntimeState) {
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(runtime.runningSinceEpochMs, runtime.phase) {
+        while (true) {
+            now = System.currentTimeMillis()
+            kotlinx.coroutines.delay(30_000)
+        }
+    }
+    val label = app.lernet.engine.policy.ExpertUptime.label(runtime, now) ?: return
+    Column(Modifier.testTag("expert_uptime"), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            stringResource(R.string.expert_uptime_title).uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.tertiary,
+        )
+        Text(label, style = MaterialTheme.typography.headlineSmall)
     }
 }

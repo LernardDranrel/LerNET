@@ -195,6 +195,8 @@ data class ExpertRuntimeState(
     val connectionDroppedCount: Long = 0,
     val directNetwork: ExpertDirectNetworkFacts? = null,
     val reasons: List<ExpertReason> = emptyList(),
+    /** Wall-clock time the shared TUN was confirmed up; hot schema applies keep it. Shown as «Без перерыва». */
+    val runningSinceEpochMs: Long? = null,
 ) {
     val hasDraftChanges: Boolean get() = saved != draft
 }

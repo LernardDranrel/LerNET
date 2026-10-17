@@ -99,16 +99,21 @@ fun LerNetAppRoot() {
         Dest.Home.route -> false
         else -> expertContext
     }
-    LaunchedEffect(expertMode) { expertContext = expertMode }
-    var expertProfilesOpen by rememberSaveable { mutableStateOf(false) }
+    // v2: ☰ in Expert opens the configs and folders, like in the basic mode; sections live in the bottom menu.
+    var expertProfilesOpen by rememberSaveable { mutableStateOf(true) }
     var expertSection by rememberSaveable { mutableStateOf(ExpertSection.OVERVIEW) }
+    LaunchedEffect(expertMode) {
+        // Launch and every mode change open the mode's main screen: the button (basic) or the lever pult (Expert).
+        if (expertMode != expertContext && expertMode) expertSection = ExpertSection.OVERVIEW
+        expertContext = expertMode
+    }
     val homeViewModel: HomeViewModel = hiltViewModel()
     val homeState by homeViewModel.state.collectAsStateWithLifecycle()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     var drawerDragActive by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(drawerState.currentValue) {
-        if (drawerState.currentValue == DrawerValue.Closed) expertProfilesOpen = false
+        if (drawerState.currentValue == DrawerValue.Closed) expertProfilesOpen = true
     }
     fun openAppPage(route: String) {
         scope.launch { drawerState.close() }
@@ -475,6 +480,7 @@ private fun AppNavHost(
         composable(Dest.Expert.route) {
             ExpertRoute(
                 section = expertSection, onSectionChange = onExpertSection, onOpenDrawer = onOpenDrawer,
+                onSettings = { navController.navigate(Dest.Settings.route) { launchSingleTop = true } },
                 onVpn = { navController.navigate(Dest.Home.route) { popUpTo(Dest.Home.route) { inclusive = true }; launchSingleTop = true } },
                 simpleActive = homeState.snapshot.state in setOf(ConnectionState.CONNECTED, ConnectionState.CONNECTING, ConnectionState.RECONNECTING),
             )

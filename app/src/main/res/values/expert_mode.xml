@@ -5,9 +5,9 @@
     <string name="expert_active_on_simple">Сетью управляет экспертная схема · открыть</string>
     <string name="expert_title">Управление сетью</string>
     <string name="expert_subtitle">Один TUN для устройства. Соединения получают путь по вашей схеме.</string>
-    <string name="expert_section_overview">Главная</string>
+    <string name="expert_section_overview">Пульт</string>
     <string name="expert_section_schema">Схема</string>
-    <string name="expert_section_exits">Внешние прокси</string>
+    <string name="expert_section_exits">Конфиги</string>
     <string name="expert_section_safety">Экспертный режим</string>
     <string name="expert_section_activity">Запросы</string>
     <string name="expert_section_journal">События</string>
@@ -144,7 +144,7 @@
     <string name="expert_channel_remove">Удалить неиспользуемый канал</string>
     <string name="expert_restore_applied">Вернуть действующую схему в черновик</string>
     <string name="expert_restore_applied_body">Текущий черновик будет заменён схемой, которую ядро действительно применило. Сохранённая версия и работающий TUN не изменятся.</string>
-    <string name="expert_section_simulation">Симулятор</string>
+    <string name="expert_section_simulation">Правила</string>
     <string name="expert_simulation_hint">Выберите соединение из истории и посмотрите его путь. Для своего примера откройте ручной редактор. Это локальный разбор правил: запрос не отправляется, соединение не проверяется.</string>
     <string name="expert_simulation_source">Какую схему проверяем</string>
     <string name="expert_simulation_draft">Черновик</string>
@@ -241,4 +241,9 @@
     <string name="expert_health_failures">Неудач подряд до восстановления</string>
     <string name="expert_health_invalid">Интервал: 1–60 секунд, максимум не меньше минимума. Таймаут: 1–15 секунд. Неудачи: 1–10.</string>
     <string name="expert_health_save_error">Не удалось записать настройки проверок. Форма сохранена; повторите попытку или откройте её заново, если параметры изменились в другом окне.</string>
+    <string name="expert_top_settings">Настройки</string>
+    <string name="expert_bottom_menu">Разделы эксперта</string>
+    <string name="expert_splash_title">Эксперт</string>
+    <string name="expert_splash_body">Здесь ты сам решаешь, куда идёт каждое соединение. Рычаги — на пульте, правила — на схеме.</string>
+    <string name="expert_uptime_title">Без перерыва</string>
 </resources>
