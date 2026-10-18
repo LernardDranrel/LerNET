@@ -79,7 +79,8 @@ class ExpertWorkspaceRenderTest {
         }
         try {
             screenshot(scene, "workspace-scaled-guard")
-            assertThat(nodes(scene).any { "Управление выключено; системная защита включена" in texts(it) }).isTrue()
+            // v2 wording of the same fact: off, and the Windows guard blocks the ordinary way out.
+            assertThat(nodes(scene).any { texts(it).any { t -> t.startsWith("Выключено · защита Windows блокирует обычный выход") } }).isTrue()
             assertThat(nodes(scene).any { "Сеть работает как обычно" in texts(it) }).isFalse()
         } finally {
             scene.close()

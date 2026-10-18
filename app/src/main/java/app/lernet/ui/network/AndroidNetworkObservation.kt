@@ -71,8 +71,8 @@ internal class ConnectivityNetworkReader(context: Context) : AndroidNetworkReade
                     else "${proxy.host}:${proxy.port}"
                 } ?: "Не указан для этой сети",
                 privateDns = if (Build.VERSION.SDK_INT >= 28 && links?.isPrivateDnsActive == true)
-                    links.privateDnsServerName ?: "Активен · автоматический режим (opportunistic)"
-                else "Android не сообщает активный Private DNS",
+                    links.privateDnsServerName ?: "Активен · автоматический режим"
+                else "Android не сообщает, какой частный DNS активен",
                 propertiesAvailable = links != null, capabilitiesAvailable = caps != null,
                 interfaceIndex = links?.interfaceName?.let { name -> runCatching { java.net.NetworkInterface.getByName(name)?.index }.getOrNull() } ?: 0,
             )
@@ -123,8 +123,8 @@ internal class AndroidNetworkCollector(private val reader: AndroidNetworkReader)
                     mapOf("Следующий узел" to gateway, "Интерфейс" to r.name, "Семейство" to if (':' in prefix) "IPv6" else "IPv4", "Действие" to androidRouteKind(r.routeTypes["$prefix:$gateway"] ?: RouteInfo.RTN_UNICAST))) } }, capturedAt = started, complete = linksComplete),
             ObservationSource("dns", "DNS и прокси", "Настройки адресов сайтов для каждой видимой сети. PAC-файлы не загружаются.", state,
                 records.map { r -> EvidenceRow(r.id, r.name, linkedMapOf("DNS" to r.dns.joinToString().ifBlank { "Не переданы системой" },
-                    "Private DNS" to r.privateDns, "Прокси" to r.proxy)) }, capturedAt = started, complete = linksComplete),
-            ObservationSource("vpn", "VPN", "Видимый VPN transport не раскрывает настройки чужого приложения.", if (failure != null) state else if (records.none { it.vpn }) SourceState.EMPTY else SourceState.AVAILABLE,
+                    "Частный DNS" to r.privateDns, "Прокси" to r.proxy)) }, capturedAt = started, complete = linksComplete),
+            ObservationSource("vpn", "VPN", "Видимый VPN-адаптер не раскрывает настройки чужого приложения.", if (failure != null) state else if (records.none { it.vpn }) SourceState.EMPTY else SourceState.AVAILABLE,
                 records.filter { it.vpn }.map { r -> EvidenceRow(r.id, r.name, mapOf(
                     "Владелец" to if (r.ownerIsSelf) "LerNET · UID совпадает с приложением" else "Android не раскрыл владельца",
                     "Протокол" to "Не передан Android", "Путь" to if (r.active) "По умолчанию для LerNET" else "Видимая дополнительная сеть")) }, capturedAt = started, complete = capsComplete),

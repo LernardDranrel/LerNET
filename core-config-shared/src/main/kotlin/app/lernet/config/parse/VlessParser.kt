@@ -65,7 +65,7 @@ object VlessParser {
         }
         val fieldErrors = buildList {
             if (uri.userInfo.isNullOrBlank()) add(FieldError("uuid", "В ссылке нет UUID"))
-            if (uri.host.isNullOrBlank()) add(FieldError("server", "В ссылке нет хоста"))
+            if (uri.host.isNullOrBlank()) add(FieldError("server", "В ссылке нет адреса сервера"))
         }
         return if (fieldErrors.isEmpty()) null else ImportResult.Failure(fieldErrors)
     }

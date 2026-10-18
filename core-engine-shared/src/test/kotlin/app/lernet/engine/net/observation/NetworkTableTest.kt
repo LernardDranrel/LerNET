@@ -13,7 +13,7 @@ class NetworkTableTest {
         ) + if (foreignVpn) listOf(ObservedAdapter("v", 40, "tun0", "VPN", up = true, virtual = true)) else emptyList(),
         routes = listOf(ObservedRoute("0.0.0.0/0", "192.168.1.1", "w", 30, 0)),
         sources = listOf(
-            ObservationSource("dns", "DNS", "", SourceState.AVAILABLE, rows = listOf(EvidenceRow("w", "wlan0", mapOf("Private DNS" to "dns.example", "Прокси" to proxy)))),
+            ObservationSource("dns", "DNS", "", SourceState.AVAILABLE, rows = listOf(EvidenceRow("w", "wlan0", mapOf("Частный DNS" to "dns.example", "Прокси" to proxy)))),
             ObservationSource("vpn", "VPN", "", SourceState.AVAILABLE, rows = if (foreignVpn) listOf(EvidenceRow("v", "tun0", mapOf("Владелец" to "Android не раскрыл владельца"))) else emptyList()),
         ),
     )

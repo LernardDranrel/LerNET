@@ -24,7 +24,7 @@ class ClientObservationContextTest {
         val current = withClientContext(snapshot(true), ClientObservationContext("Selected", "1.1.1.1", "vless"))
         assertThat(current.findings.map { it.code }).containsAtLeast("endpoint-route", "endpoint-other-virtual")
         assertThat(current.findings.single { it.code == "endpoint-other-virtual" }.kind).isEqualTo(FindingKind.POTENTIAL_CONFLICT)
-        assertThat(current.sources.last().rows.single().fields.keys).containsExactly("Профиль", "Сервер", "Протокол", "Запрошенный режим")
+        assertThat(current.sources.last().rows.single().fields.keys).containsExactly("Конфиг", "Сервер", "Протокол", "Запрошенный режим")
     }
 
     @Test fun hostnameIsNotResolvedByPassiveAnalysis() {

@@ -550,7 +550,7 @@ fun ConfigDrawer(
             ) {
                 IconButton(onClick = { actions.onProbe(profiles.map { it.id }) }, enabled = profiles.isNotEmpty()) {
                     Icon(
-                        LerNetSymbols.probe(), contentDescription = "Проверить все профили",
+                        LerNetSymbols.probe(), contentDescription = "Проверить все конфиги",
                         tint = MaterialTheme.colorScheme.primary
                     )
                 }
@@ -832,7 +832,7 @@ private fun ProfileActionBlock(
                         CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                     } else {
                         Icon(
-                            LerNetSymbols.probe(), contentDescription = "Проверить профиль",
+                            LerNetSymbols.probe(), contentDescription = "Проверить конфиг",
                             tint = MaterialTheme.colorScheme.primary
                         )
                     }

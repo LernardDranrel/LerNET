@@ -243,7 +243,7 @@ internal fun ExpertSimulation(
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
-                    failure = error.message ?: error.javaClass.simpleName
+                    failure = app.lernet.engine.text.UserText.of(error, "Не удалось разобрать путь")
                 } finally {
                     busy = false
                 }

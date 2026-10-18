@@ -201,7 +201,7 @@ class HomeViewModel @Inject constructor(
                     stream.bufferedWriter(Charsets.UTF_8).use { it.write(raw) }
                 }
             }.onSuccess { transferMessages.emit("Архив LerNET сохранён") }
-                .onFailure { transferMessages.emit("Экспорт не выполнен: ${it.message}") }
+                .onFailure { transferMessages.emit(app.lernet.engine.text.UserText.withReason("Экспорт не выполнен", it)) }
         }
     }
 
@@ -232,10 +232,10 @@ class HomeViewModel @Inject constructor(
                 }
             }.onSuccess { bundle ->
                 if (bundle == null) transferMessages.emit(appContext.getString(R.string.expert_import_saved))
-                else transferMessages.emit("Добавлено папок: ${bundle.groups.size}, профилей: ${bundle.profiles.size}, правил: ${bundle.rules.size}")
+                else transferMessages.emit("Добавлено папок: ${bundle.groups.size}, конфигов: ${bundle.profiles.size}, правил: ${bundle.rules.size}")
             }.onFailure {
                 if (it is SerializationException) transferMessages.emit(appContext.getString(R.string.expert_import_invalid))
-                else transferMessages.emit("Импорт не выполнен: ${it.message}")
+                else transferMessages.emit(app.lernet.engine.text.UserText.withReason("Импорт не выполнен", it))
             }
         }
     }

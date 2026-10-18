@@ -112,14 +112,15 @@ fun DesktopExpert(
                     )
                     Text(
                         if (page == ExpertPage.ROUTES) {
-                            "Правила устройства, профилей и папок"
+                            "Правила устройства, конфигов и папок"
                         } else {
                             "Экспертный режим · твои правила для каждого соединения"
                         },
                         color = ExpertColors.muted
                     )
                 }
-                ExpertTag(phaseName(state.phase), if (state.phase == ExpertPhase.RUNNING) ExpertColors.green else ExpertColors.muted)
+                // The pult card already says the state next to the switch: the chip would repeat it.
+                if (page != ExpertPage.OVERVIEW) ExpertTag(phaseName(state.phase), if (state.phase == ExpertPhase.RUNNING) ExpertColors.green else ExpertColors.muted)
                 ExpertWorkspaceMenu(state, onIntent)
             }
             state.error?.let { ExpertMessage("Операция не завершена", it, error = true) }

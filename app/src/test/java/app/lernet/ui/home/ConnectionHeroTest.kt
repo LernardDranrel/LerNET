@@ -120,7 +120,7 @@ class ConnectionHeroTest {
         rule.onNodeWithText(profile.name).assertIsDisplayed()
         rule.onNodeWithText("46 мс").assertIsDisplayed()
         rule.onNodeWithText("147 мс").assertIsDisplayed()
-        rule.onNodeWithText("HTTPS · через профиль").assertIsDisplayed()
+        rule.onNodeWithText("Открывается ли интернет").assertIsDisplayed()
         val screenshot = File("build/reports/ui/mobile-home.png")
         screenshot.parentFile?.mkdirs()
         rule.runOnIdle {

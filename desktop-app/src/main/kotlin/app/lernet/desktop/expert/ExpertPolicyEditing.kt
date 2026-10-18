@@ -159,7 +159,7 @@ object ExpertPolicyEditing {
 
     fun scopeName(scope: PolicyScope, state: ExpertUiState): String = when (scope) {
         PolicyScope.Device -> "Всё устройство"
-        is PolicyScope.Profile -> state.profiles.firstOrNull { it.id == scope.id }?.name ?: "Удалённый профиль"
+        is PolicyScope.Profile -> state.profiles.firstOrNull { it.id == scope.id }?.name ?: "Удалённый конфиг"
         is PolicyScope.Folder -> state.folders.firstOrNull { it.id == scope.id }?.name ?: "Удалённая папка"
     }
 
@@ -167,7 +167,7 @@ object ExpertPolicyEditing {
         PolicyTarget.Direct -> "Напрямую"
         PolicyTarget.Block -> "Блокировать трафик"
         PolicyTarget.CurrentExit -> "Выход этой схемы"
-        is PolicyTarget.Profile -> "Профиль: ${state.profiles.firstOrNull { it.id == target.id }?.name ?: "недоступен"}"
+        is PolicyTarget.Profile -> "Конфиг: ${state.profiles.firstOrNull { it.id == target.id }?.name ?: "недоступен"}"
         is PolicyTarget.Folder -> "Папка: ${state.folders.firstOrNull { it.id == target.id }?.name ?: "недоступна"}"
         is PolicyTarget.Channel -> "Канал: ${state.draft.channels.firstOrNull { it.id == target.id }?.name ?: "недоступен"}"
     }

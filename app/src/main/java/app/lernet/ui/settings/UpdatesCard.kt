@@ -38,7 +38,7 @@ fun AndroidUpdatePrompt() {
         AlertDialog(onDismissRequest = { dismissed = release.version },
             title = { Text("Доступен LerNET v${release.version}") },
             text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Откроется релиз на GitHub. Скачайте APK и подтвердите обновление в Android. Профили сохранятся.")
+                Text("Откроется релиз на GitHub. Скачайте APK и подтвердите обновление в Android. Конфиги сохранятся.")
                 if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
             } },
             confirmButton = { TextButton(onClick = {
@@ -64,7 +64,7 @@ fun UpdatesCard() {
             Checkbox(state.automatic, onCheckedChange = monitor::automatic)
             Text("Проверять при запуске, не чаще раза в сутки", modifier = Modifier.weight(1f))
         }
-        Text("Запрос идёт на GitHub. Профили и данные диагностики не отправляются.", style = MaterialTheme.typography.bodySmall)
+        Text("Запрос идёт на GitHub. Конфиги и данные диагностики не отправляются.", style = MaterialTheme.typography.bodySmall)
         OutlinedButton(onClick = { scope.launch { monitor.check(manual = true) } }, enabled = !state.checking, modifier = Modifier.fillMaxWidth()) { Text("Проверить обновления") }
         state.release?.let { release ->
             Button(onClick = { runCatching { uri.openUri(release.pageUrl) }.onFailure { error = "Не удалось открыть браузер" } }, modifier = Modifier.fillMaxWidth()) { Text("Открыть релиз v${release.version} и скачать APK") }

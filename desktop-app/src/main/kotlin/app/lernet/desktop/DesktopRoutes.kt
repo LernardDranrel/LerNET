@@ -117,13 +117,13 @@ private val routeCard = Color(0xFF151D2B)
 fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOwnerId: String? = null) {
     val profile = saved.profiles.firstOrNull { it.id == saved.selectedProfileId }
     val owners = saved.groups.map { "grp_${it.id}" to "Папка: ${it.name}" } +
-        saved.profiles.map { it.id to "Профиль: ${it.name}" }
+        saved.profiles.map { it.id to "Конфиг: ${it.name}" }
     var ownerId by rememberSaveable(preferredOwnerId, saved.selectedProfileId) {
         mutableStateOf(preferredOwnerId?.takeIf { id -> owners.any { it.first == id } }
             ?: profile?.groupId?.let { "grp_$it" } ?: profile?.id ?: owners.firstOrNull()?.first)
     }
     if (ownerId == null) {
-        RouteEmpty("Сначала выберите профиль", "Правила принадлежат конкретному профилю и применяются при следующем подключении.")
+        RouteEmpty("Сначала выберите конфиг", "Правила принадлежат конкретному конфигу и применяются при следующем подключении.")
         return
     }
     val activeOwner = ownerId!!
@@ -225,7 +225,7 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
                         }
                     }
                 }
-                Text("Маршруты · ${rules.size} правил · ${if (dirty) "есть несохранённый черновик" else "сохранённая версия"}", color = if (dirty) routeBlue else routeMuted, fontSize = 12.sp)
+                Text("${ruleCount(rules.size)} · ${if (dirty) "есть несохранённый черновик" else "сохранённая версия"}", color = if (dirty) routeBlue else routeMuted, fontSize = 12.sp)
             }
             if (dirty) {
                 OutlinedButton(onClick = { rules = baseline; selectedId = null; selectedChannel = null; draftError = null; controller.clearRuleDraft(activeOwner) }) { Text("Отменить") }
@@ -242,7 +242,7 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
         }
         if (ownerGroup != null) {
             Surface(color = Color(0xFF302B1D), shape = RoundedCornerShape(10.dp)) {
-                Text("Профиль находится в папке «${ownerGroup.name}». Сейчас для него действует маршрут папки. Эти правила профиля сохранятся, но начнут работать только после переноса профиля из папки.",
+                Text("Конфиг находится в папке «${ownerGroup.name}». Сейчас для него действует маршрут папки. Эти правила конфига сохранятся, но начнут работать только после переноса конфига из папки.",
                     color = Color(0xFFF5C16C), modifier = Modifier.padding(12.dp), fontSize = 12.sp)
             }
             Spacer(Modifier.height(10.dp))
@@ -473,7 +473,7 @@ private fun RouteScheme(
         }
         positioned(root) {
             RouteEditorNodeActions(rootSelected, onAddRoot) {
-                RouteEditorNodeFace("Весь трафик", "Корень маршрутизации", "Выход выбранного профиля", routeBlue,
+                RouteEditorNodeFace("Весь трафик", "Начало схемы", "Выход выбранного конфига", routeBlue,
                     rootSelected, Modifier.clickable { onSelect(null) })
             }
         }
@@ -734,7 +734,7 @@ private fun RouteInspector(
                 }
             } else if (rootSelected) {
                 Text("Весь трафик", color = routeText, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                Text("Корень маршрутизации. Правила проверяются сверху вниз; иначе используется выход выбранного профиля.", color = routeMuted, fontSize = 12.sp)
+                Text("Начало схемы. Правила проверяются сверху вниз; если ни одно не подошло, трафик идёт через выбранный конфиг.", color = routeMuted, fontSize = 12.sp)
                 OutlinedButton(onClick = onAddRoot) { Text("+ Дочернее правило") }
             } else if (selected == null) {
                 Text("Выберите блок на схеме или строку в списке", color = routeText, fontSize = 16.sp)
@@ -1155,3 +1155,15 @@ internal const val BASIC_BLOCK_EXPERT_ONLY =
 /** Basic-mode actions; «Запретить» is listed only for an old ban rule being edited. */
 internal fun basicDesktopActions(legacyBlock: Boolean): List<String> =
     if (legacyBlock) listOf("PROXY", "DIRECT", "BLOCK") else listOf("PROXY", "DIRECT")
+
+
+/** «1 правило», «2 правила», «5 правил». */
+internal fun ruleCount(n: Int): String {
+    val word = when {
+        n % 100 in 11..14 -> "правил"
+        n % 10 == 1 -> "правило"
+        n % 10 in 2..4 -> "правила"
+        else -> "правил"
+    }
+    return "$n $word"
+}

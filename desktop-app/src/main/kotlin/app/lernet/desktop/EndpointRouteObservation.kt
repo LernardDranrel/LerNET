@@ -14,7 +14,7 @@ internal data class EndpointRouteObservation(val detail: String, val warning: St
                 val alias = WindowsRouteInspector.interfaceAlias(index)
                 val description = NetworkInterface.getByIndex(index)?.displayName.orEmpty()
                 describe(endpoint, index, alias, description)
-            }.getOrElse { EndpointRouteObservation("Путь к серверу не прочитан: ${it.javaClass.simpleName}. Это не подтверждает отсутствие маршрута.") }
+            }.getOrElse { EndpointRouteObservation(app.lernet.engine.text.UserText.withReason("Путь к серверу не прочитан", it).trimEnd('.') + ". Это не значит, что пути нет.") }
         }
 
         internal fun describe(endpoint: String, index: Int, alias: String, description: String): EndpointRouteObservation {

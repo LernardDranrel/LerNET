@@ -20,11 +20,11 @@ class TrafficDisplayTest {
         )
         assertThat(view.impliesDead).isFalse()
         assertThat(view.showTotals).isTrue()
-        assertThat(view.uplinkRate).isEqualTo("0 B/s")
-        assertThat(view.downlinkRate).isEqualTo("0 B/s")
-        assertThat(view.uplinkTotal).isNotEqualTo("0 B")
-        assertThat(view.downlinkTotal).isNotEqualTo("0 B")
-        assertThat(view.primary).isNotEqualTo("↑ 0 B/s ↓ 0 B/s")
+        assertThat(view.uplinkRate).isEqualTo("0 Б/с")
+        assertThat(view.downlinkRate).isEqualTo("0 Б/с")
+        assertThat(view.uplinkTotal).isNotEqualTo("0 Б")
+        assertThat(view.downlinkTotal).isNotEqualTo("0 Б")
+        assertThat(view.primary).isNotEqualTo("↑ 0 Б/с ↓ 0 Б/с")
         assertThat(view.primary).contains(view.uplinkTotal)
         assertThat(view.primary).contains(view.downlinkTotal)
     }
@@ -41,7 +41,7 @@ class TrafficDisplayTest {
         assertThat(view.impliesDead).isTrue()
         assertThat(view.showTotals).isFalse()
         assertThat(view.dnsHint).isFalse()
-        assertThat(view.primary).isEqualTo("↑ 0 B/s ↓ 0 B/s")
+        assertThat(view.primary).isEqualTo("↑ 0 Б/с ↓ 0 Б/с")
     }
 
     @Test
@@ -55,7 +55,7 @@ class TrafficDisplayTest {
         )
         assertThat(view.impliesDead).isFalse()
         assertThat(view.dnsHint).isTrue()
-        assertThat(view.primary).isNotEqualTo("↑ 0 B/s ↓ 0 B/s")
+        assertThat(view.primary).isNotEqualTo("↑ 0 Б/с ↓ 0 Б/с")
     }
 
     @Test
@@ -68,8 +68,8 @@ class TrafficDisplayTest {
             dnsOk = true,
         )
         assertThat(view.impliesDead).isFalse()
-        assertThat(view.uplinkRate).isEqualTo("2 KiB/s")
-        assertThat(view.downlinkRate).isEqualTo("4 KiB/s")
+        assertThat(view.uplinkRate).isEqualTo("2 КБ/с")
+        assertThat(view.downlinkRate).isEqualTo("4 КБ/с")
         assertThat(view.showTotals).isTrue()
     }
 }

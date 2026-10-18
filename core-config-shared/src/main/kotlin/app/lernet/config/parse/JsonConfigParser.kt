@@ -37,7 +37,7 @@ object JsonConfigParser {
         val objects = extractOutboundObjects(element)
         if (objects.isEmpty()) {
             return ImportResult.Failure(
-                listOf(FieldError("outbounds", "В JSON нет пригодного outbound (vless/trojan/ss/...)")),
+                listOf(FieldError("outbounds", "В JSON нет подходящего сервера (vless, trojan, shadowsocks…)")),
             )
         }
         val outbounds = objects.mapIndexed { index, obj ->

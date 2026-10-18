@@ -102,8 +102,8 @@ internal class WindowsObservationTrace(
             if ((owned != null || attempted != null) && mutableState.value.phase != ObservationTracePhase.ERROR) stop()
             mutableState.value = mutableState.value.copy(phase = ObservationTracePhase.ERROR,
                 title = if (owned == null && attempted == null) "Запись не началась" else "Windows не подтвердила остановку",
-                detail = if (owned == null && attempted == null) error.message ?: "Windows не предоставила запись." else
-                    "${error.message} ${mutableState.value.detail}")
+                detail = if (owned == null && attempted == null) app.lernet.engine.text.UserText.of(error, "Windows не предоставила запись.") else
+                    "${app.lernet.engine.text.UserText.of(error, "Запись не получена.")} ${mutableState.value.detail}")
             Result.failure(error)
         }
     }
@@ -126,7 +126,7 @@ internal class WindowsObservationTrace(
         } catch (error: Exception) {
             mutableState.value = mutableState.value.copy(phase = ObservationTracePhase.ERROR,
                 title = "Windows не подтвердила остановку", detail =
-                    "${error.message} Сессия: ${session.name}. Чужие записи не затронуты.")
+                    "${app.lernet.engine.text.UserText.of(error, "Запись не остановлена.")} Сессия: ${session.name}. Чужие записи не затронуты.")
             if (stopRetries++ < 3) {
                 deadline?.close()
                 deadline = scheduler.schedule(2_000) { stop() }

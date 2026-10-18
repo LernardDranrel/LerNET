@@ -66,7 +66,7 @@ class WindowsTracer : AutoCloseable {
                     mutable.update { it.copy(running = false, message = if (reached) "Маршрут до сервера найден" else "Сервер не ответил на tracert; промежуточные узлы показаны") }
                 }
             } catch (error: Exception) {
-                if (generation.get() == ticket) mutable.update { it.copy(running = false, message = error.message ?: "Ошибка tracert") }
+                if (generation.get() == ticket) mutable.update { it.copy(running = false, message = app.lernet.engine.text.UserText.of(error, "Не удалось проверить маршрут до сервера")) }
             } finally {
                 if (generation.get() == ticket) process = null
             }

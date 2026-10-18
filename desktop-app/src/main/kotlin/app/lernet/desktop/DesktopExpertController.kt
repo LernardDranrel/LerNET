@@ -325,9 +325,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                     mutable.update {
                         it.copy(
                             externalSavePending = null, externalSaveErrorRequestId = intent.requestId,
-                            externalSaveError = SecretRedactor.redact(
-                                failure.message ?: "Не удалось сохранить внешний выход"
-                            ).take(600)
+                            externalSaveError = app.lernet.engine.text.UserText.of(failure, "Не удалось сохранить внешний выход")
                         )
                     }
                 } else {
@@ -352,11 +350,11 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
         refreshInventory(allowLiveApply = false)
         val beforeBundle = TransferCodec.decode(DesktopTransfer.export(simple.state.value.saved))
         val existing = intent.profileId?.let { id ->
-            requireNotNull(beforeBundle.profiles.firstOrNull { it.id == id }) { "Профиль удалён" }
+            requireNotNull(beforeBundle.profiles.firstOrNull { it.id == id }) { "Конфиг удалён" }
         }
         if (existing != null) {
             check(intent.expectedFingerprint == ExternalExitProfiles.fingerprint(existing)) {
-                "Профиль изменился. Открой его заново перед редактированием."
+                "Конфиг изменился. Открой его заново перед редактированием."
             }
         }
         if (intent.request.kind == ExternalExitKind.CORPORATE_INTERFACE) {
@@ -386,7 +384,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
         )
         synchronized(simple) {
             check(TransferCodec.decode(DesktopTransfer.export(simple.state.value.saved)) == beforeBundle) {
-                "Список профилей изменился. Повтори сохранение после обновления."
+                "Список конфигов изменился. Повтори сохранение после обновления."
             }
             check(repository.snapshot().legacy == beforeBundle) {
                 "Рабочая область не обновилась. Обнови список перед сохранением."
@@ -403,7 +401,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                 if (existing == null) {
                     "Внешний выход добавлен. Выбери его в правиле."
                 } else {
-                    "Профиль сохранён. Примени сохранённую схему, чтобы изменить активный выход."
+                    "Конфиг сохранён. Примени сохранённую схему, чтобы изменить активный выход."
                 }
             )
         }
@@ -436,8 +434,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                 mutable.update {
                     it.copy(
                         interfacesLoading = false, interfaces = emptyList(),
-                        interfacesNotice = "Не удалось прочитать интерфейсы: " +
-                            SecretRedactor.redact(failure.message.orEmpty()).take(250)
+                        interfacesNotice = app.lernet.engine.text.UserText.withReason("Не удалось прочитать интерфейсы", failure)
                     )
                 }
             }
@@ -552,7 +549,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                     synchronized(simple) {
                         val beforeBundle = TransferCodec.decode(DesktopTransfer.export(simple.state.value.saved))
                         check(repository.snapshot().legacy == beforeBundle) {
-                            "Список профилей изменился. Обнови его перед импортом."
+                            "Список конфигов изменился. Обнови его перед импортом."
                         }
                         val plan = repository.previewImported(raw, replace)
                         repository.commitImported(plan) { updated ->
@@ -667,7 +664,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                         targetDescription = (
                             exit.key.folderId?.let { id ->
                                 "Папка: ${previous.folders.firstOrNull { it.id == id }?.name ?: id}"
-                            } ?: "Отдельный профиль"
+                            } ?: "Отдельный конфиг"
                             ) +
                             if (exit.key in snapshot.actualFolderSelections.values) " · выбран ядром" else "",
                         phase = exit.phase, profileId = exit.key.profileId, channelId = exit.key.channelId,
@@ -756,7 +753,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
     }
 
     private fun showFailure(prefix: String, failure: Throwable?) {
-        val message = "$prefix${failure?.message?.let { ": ${SecretRedactor.redact(it).take(500)}" }.orEmpty()}"
+        val message = if (failure == null) prefix else app.lernet.engine.text.UserText.withReason(prefix.trimEnd('.', ' '), failure)
         externalError = message
         mutable.update { it.copy(error = message) }
         writeLog(message)

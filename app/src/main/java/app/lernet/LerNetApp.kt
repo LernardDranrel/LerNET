@@ -22,6 +22,7 @@ class LerNetApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        app.lernet.engine.text.UserText.logger = { context, error -> LerNetLog.w("LerNet.UserText", "$context: ${error.message}", error) }
         logStore = AppLogStore(
             dir = File(filesDir, "logs"),
             filesDir = filesDir,

@@ -91,7 +91,7 @@ object OutboundProbe {
             val message = when (error) {
                 is InterruptedException -> "Проверка прервана"
                 is java.nio.file.FileSystemException -> "Нет доступа к файлам временной проверки"
-                else -> error.message?.take(180) ?: "Узел не ответил через VPN"
+                else -> app.lernet.engine.text.UserText.of(error, "Узел не ответил через VPN")
             }
             val elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
             val httpDetail = if (delayFailed && error !is InterruptedException && !Thread.currentThread().isInterrupted)

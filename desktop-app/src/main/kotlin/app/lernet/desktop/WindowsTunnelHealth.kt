@@ -61,7 +61,7 @@ internal object WindowsRouteInspector {
             }
         }
         inspectExpertRoutes(samples.distinctBy { it.hostAddress }, index, luid, ::bestInterface, ::interfaceLuid, ::interfaceAlias)
-    }.getOrElse { "Не удалось подтвердить перехват маршрутов Windows: ${it.message ?: it.javaClass.simpleName}" }
+    }.getOrElse { app.lernet.engine.text.UserText.withReason("Не удалось подтвердить перехват маршрутов Windows", it) }
 
     internal fun inspectExpertRoutes(
         destinations: List<InetAddress>, expectedIndex: Int, expectedLuid: Long,
@@ -103,7 +103,7 @@ internal object WindowsRouteInspector {
         val destinations = InetAddress.getAllByName(host)
         check(destinations.isNotEmpty()) { "Не удалось определить адрес сервера проверки" }
         inspectRoutes(destinations.toList(), ::bestInterface, ::interfaceAlias)
-    }.getOrElse { "Не удалось подтвердить маршрут Windows через LerNET: ${it.message ?: it.javaClass.simpleName}" }
+    }.getOrElse { app.lernet.engine.text.UserText.withReason("Не удалось подтвердить маршрут Windows через LerNET", it) }
 
     internal fun inspectRoutes(
         destinations: List<InetAddress>,
@@ -212,7 +212,7 @@ internal object WindowsTunnelHealth {
                 else TunnelHealthResult(error = "HTTP ${response.code}")
             }
         } catch (error: Exception) {
-            TunnelHealthResult(error = error.message?.take(100) ?: error.javaClass.simpleName)
+            TunnelHealthResult(error = app.lernet.engine.text.UserText.of(error, "нет ответа через VPN"))
         }.also { if (it.latencyMs == null) drop() }
     }
 

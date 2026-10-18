@@ -306,7 +306,7 @@ class ConfigEditorViewModel @Inject constructor(
         ) {
             return state.copy(
                 engineJson = "", fullEngineJson = "",
-                assembleError = "Укажите адрес DNS профиля"
+                assembleError = "Укажите адрес DNS конфига"
             )
         }
         val json = OutboundPatch.write(base.json, state.server, port, state.sni, state.path, state.mode)

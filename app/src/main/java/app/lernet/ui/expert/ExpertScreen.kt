@@ -593,7 +593,7 @@ private fun ExpertStatus(
                 state.inventory?.let { inventory ->
                     val policy = runtime.appliedPolicy ?: runtime.saved
                     Text(
-                        stringResource(R.string.expert_default_path_summary, targetTitle(policy.device.defaultTarget, inventory, policy)),
+                        stringResource(R.string.expert_default_path_summary, targetTitle(policy.device.defaultTarget, inventory, policy).replaceFirstChar { it.lowercase() }),
                         style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center
                     )
                 }

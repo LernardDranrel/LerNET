@@ -68,7 +68,7 @@ class NetworkObservationViewModel @JvmOverloads constructor(
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                mutable.value = mutable.value.copy(notice = "Снимок не обновлён: ${error.javaClass.simpleName}. Показаны ранее полученные данные; попробуйте обновить ещё раз.")
+                mutable.value = mutable.value.copy(notice = app.lernet.engine.text.UserText.withReason("Снимок не обновлён", error).trimEnd('.') + ". Показаны ранее полученные данные; попробуйте обновить ещё раз.")
             } finally { mutable.value = mutable.value.copy(collecting = false) }
         }
     }
@@ -107,7 +107,7 @@ class NetworkObservationViewModel @JvmOverloads constructor(
                 if (generation == ipGeneration) mutable.value = mutable.value.copy(externalIp = ip, externalIpAt = System.currentTimeMillis(), countryCode = country)
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled
             } catch (error: Exception) {
-                if (generation == ipGeneration) mutable.value = mutable.value.copy(ipError = "Адрес не получен: ${error.message ?: error.javaClass.simpleName}")
+                if (generation == ipGeneration) mutable.value = mutable.value.copy(ipError = app.lernet.engine.text.UserText.withReason("Адрес не получен", error))
             } finally { if (generation == ipGeneration) mutable.value = mutable.value.copy(checkingIp = false) }
         }
     }
@@ -122,7 +122,7 @@ class NetworkObservationViewModel @JvmOverloads constructor(
                     ?: error("Файл не удалось открыть")
             } }
             mutable.value = mutable.value.copy(notice = if (result.isSuccess) "Снимок сохранён в выбранный файл"
-                else "Не удалось сохранить: ${result.exceptionOrNull()?.message}")
+                else app.lernet.engine.text.UserText.withReason("Не удалось сохранить", result.exceptionOrNull()))
         }
     }
 

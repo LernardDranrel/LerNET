@@ -2,22 +2,21 @@
 <resources>
     <string name="home_connection_title">Ваше подключение</string>
     <string name="home_open_routes">Открыть схему маршрутизации</string>
-    <string name="home_choose_before_connect">Выберите профиль для подключения</string>
+    <string name="home_choose_before_connect">Сначала добавьте или выберите конфиг</string>
     <string name="home_latency_title">Проверка связи</string>
     <string name="home_latency_check">Проверить связь</string>
     <string name="home_latency_checking">Проверяем…</string>
     <string name="home_latency_ms">%1$d мс</string>
     <string name="home_latency_no_response">Нет ответа</string>
-    <string name="home_latency_unmeasured">Нет замера</string>
+    <string name="home_latency_unmeasured">Не проверено</string>
     <string name="home_latency_server">До сервера</string>
-    <string name="home_latency_server_hint">TCP · напрямую</string>
-    <string name="home_latency_tunnel">Через туннель</string>
-    <string name="home_latency_tunnel_hint">HTTPS · через профиль</string>
+    <string name="home_latency_server_hint">Отвечает ли сервер</string>
+    <string name="home_latency_tunnel">Интернет через VPN</string>
+    <string name="home_latency_tunnel_hint">Открывается ли интернет</string>
     <string name="home_latency_tunnel_disconnected">Нет подключения</string>
-    <string name="home_latency_distinction">TCP до сервера и HTTPS через выбранный профиль проверяются отдельно.</string>
-    <string name="home_hop_title">Путь до VPN</string>
+    <string name="home_hop_title">Путь до сервера</string>
     <string name="home_hop_checking">Проверяем…</string>
-    <string name="home_hop_check">Проверить</string>
-    <string name="home_hop_start_hint">Нажмите на схему или «Проверить». Подключение не требуется.</string>
-    <string name="home_hop_details">Подробности маршрута</string>
+    <string name="home_hop_check">Проверить путь</string>
+    <string name="home_hop_start_hint">Нажмите на схему или «Проверить путь». Подключаться для этого не нужно.</string>
+    <string name="home_hop_details">Подробности пути</string>
 </resources>

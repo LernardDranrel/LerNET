@@ -5,10 +5,10 @@
     <string name="home_mode_app_only">По настройке приложения</string>
     <string name="home_hop_server">Сервер</string>
     <string name="home_hop_scroll_hint">Проведите по схеме, чтобы увидеть остальные узлы →</string>
-    <string name="settings_defaults_scope">Используются, если профиль не задаёт своё значение. Изменения MTU, XMUX и адреса DNS вступят в силу при следующем подключении.</string>
+    <string name="settings_defaults_scope">Используются, если конфиг не задаёт своё значение. Изменения MTU, XMUX и адреса DNS вступят в силу при следующем подключении.</string>
     <string name="settings_dns_section">DNS · адреса сайтов</string>
     <string name="settings_dns_explained">Куда отправлять запросы имён сайтов. По умолчанию — через VPN: сеть не видит, какие сайты вы открываете. Если на каком-то сервере DNS через VPN не отвечает, выберите для него «DNS вашей сети».</string>
-    <string name="settings_dns_multiple_help">В этом поле поддерживается один IPv4-адрес. Несколько DNS можно задать в JSON профиля вместе с правилами выбора и включить «DNS из профиля». Список адресов через запятую здесь не применяется.</string>
+    <string name="settings_dns_multiple_help">В этом поле поддерживается один IPv4-адрес. Несколько DNS можно задать в JSON конфига вместе с правилами выбора и включить «DNS из конфига». Список адресов через запятую здесь не применяется.</string>
     <string name="settings_xmux_explained">Сколько потоков делят одно XHTTP-соединение (нижняя и верхняя граница).</string>
     <string name="settings_xmux_lower">Нижняя граница</string>
     <string name="settings_xmux_upper">Верхняя граница</string>
@@ -21,6 +21,6 @@
     <string name="settings_megabytes">МБ</string>
     <string name="settings_journal_limit">Лимит журнала</string>
     <string name="settings_attempts_help">Сколько раз пробовать восстановить связь после сбоя.</string>
-    <string name="settings_watchdog_help">Дополнительный контроль трафика и DNS. Сам туннель проверяется через профиль каждые 5–10 с, после сбоя — повторно через 2 с.</string>
+    <string name="settings_watchdog_help">Дополнительный контроль трафика и DNS. Сам туннель проверяется через конфиг каждые 5–10 с, после сбоя — повторно через 2 с.</string>
     <string name="settings_backoff_help">Максимальная пауза между повторными попытками подключения.</string>
 </resources>

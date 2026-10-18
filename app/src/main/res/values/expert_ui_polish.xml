@@ -27,9 +27,9 @@
     <string name="failover_report_next">Следующая попытка через %1$s.</string>
     <string name="failover_report_auto">Пробуем снова автоматически.</string>
     <string name="failover_report_no_leak">Маршруты VPN остаются на месте — трафик не уходит в обход.</string>
-    <string name="home_proxy_mode_note">Включён режим локального прокси: через туннель идут только приложения, настроенные на прокси. Адрес и пароль — в настройках.</string>
+    <string name="home_proxy_mode_note">Включён режим прокси: через VPN идут только приложения, в которых указан этот прокси. Адрес и пароль — в Настройках.</string>
     <string name="settings_mode_title">Режим работы</string>
-    <string name="settings_mode_profile_note">По умолчанию — полный VPN для всего устройства. Если у профиля задан свой режим, действует он.</string>
+    <string name="settings_mode_profile_note">По умолчанию — полный VPN для всего устройства. Если у конфига задан свой режим, действует он.</string>
     <string name="settings_mode_next_connection">Новый режим включится при следующем подключении.</string>
     <string name="settings_proxy_not_running">Адрес, логин и пароль для копирования появятся здесь, когда прокси запущен.</string>
     <string name="failover_other_folder">Конфиг из другой папки</string>

@@ -29,11 +29,7 @@ import app.lernet.ui.motion.rememberReduceMotion
 @Composable
 internal fun HomeModeSelector(mode: RunMode, onSelect: (RunMode) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(
-            stringResource(R.string.mode_label),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        // The card title «Режим работы» already names it; no second «Режим» label.
         Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(RunMode.FULL_VPN, RunMode.PROXY).forEach { item ->
                 val selected = item == mode

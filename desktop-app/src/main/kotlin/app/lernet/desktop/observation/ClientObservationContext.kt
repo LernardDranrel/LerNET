@@ -7,10 +7,10 @@ internal data class ClientObservationContext(val profileName: String = "", val e
 
 /** Configuration metadata only; never serialize the original outbound or its credentials. */
 internal fun withClientContext(snapshot: NetworkSnapshot, context: ClientObservationContext): NetworkSnapshot {
-    val source = ObservationSource("lernet-context", "Выбранный профиль LerNET",
-        "Параметры выбранного профиля на начало снимка. Ключи доступа не читаются в отчёт. Проверка маршрута выполняется только для числового IP без DNS.",
-        rows = listOf(EvidenceRow("selected-profile", context.profileName.ifBlank { "Профиль не выбран" }, mapOf(
-            "Профиль" to context.profileName, "Сервер" to context.endpoint, "Протокол" to context.protocol,
+    val source = ObservationSource("lernet-context", "Выбранный конфиг LerNET",
+        "Параметры выбранного конфига на начало снимка. Ключи доступа не читаются в отчёт. Проверка маршрута выполняется только для числового IP без DNS.",
+        rows = listOf(EvidenceRow("selected-profile", context.profileName.ifBlank { "Конфиг не выбран" }, mapOf(
+            "Конфиг" to context.profileName, "Сервер" to context.endpoint, "Протокол" to context.protocol,
             "Запрошенный режим" to context.requestedMode,
         ) + mapOf("Версия клиента" to context.clientVersion, "Состояние ядра" to context.tunnelState,
             "Статус ядра" to app.lernet.desktop.ProbeDiagnostics.clean(context.tunnelMessage)).filterValues(String::isNotBlank))), capturedAt = snapshot.startedAt)

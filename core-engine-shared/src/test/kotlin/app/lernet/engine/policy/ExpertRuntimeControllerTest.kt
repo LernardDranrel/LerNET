@@ -275,7 +275,10 @@ class ExpertRuntimeControllerTest {
         controller.handle(ExpertIntent.SaveDraft)
         assertEquals(0L, controller.state.value.saved.revision)
         assertTrue(controller.state.value.hasDraftChanges)
-        assertTrue(controller.state.value.errors.single().contains("disk full"))
+        // Raw exception text goes to the journal; the screen gets a sentence of our own.
+        val shown = controller.state.value.errors.single()
+        assertFalse(shown.contains("disk full"))
+        assertTrue(app.lernet.engine.text.UserText.isOurs(shown))
     }
 
     @Test fun `inventory refresh and native mode acknowledgements cannot confirm an unwritten draft`() = runTest {
@@ -285,7 +288,8 @@ class ExpertRuntimeControllerTest {
         val edited = NetworkPolicy(device = PolicyTree(PolicyScope.Device, defaultTarget = PolicyTarget.Block))
         controller.handle(ExpertIntent.Edit(edited))
         val sticky = checkNotNull(controller.state.value.draftPersistenceError)
-        assertTrue(sticky.contains("disk full"))
+        assertFalse(sticky.contains("disk full"))
+        assertTrue(app.lernet.engine.text.UserText.isOurs(sticky))
         controller.handle(ExpertIntent.InventoryChanged(inventory))
         controller.handle(ExpertIntent.WorkspaceChanged(NetworkPolicy(), edited, inventory))
         assertEquals(sticky, controller.state.value.draftPersistenceError)
@@ -385,8 +389,10 @@ class ExpertRuntimeControllerTest {
         backend.applyFailure = "$unknown \"password\":\"private\" vless://private@server"
         controller.handle(ExpertIntent.ApplySaved)
         val safeUnknown = controller.state.value.errors.single()
-        assertTrue(safeUnknown.contains(unknown))
+        // An unknown native message is not shown raw: the person reads our sentence, the journal keeps the original.
+        assertFalse(safeUnknown.contains(unknown))
         assertFalse(safeUnknown.contains("private"))
+        assertTrue(safeUnknown.contains("Подробности — в журнале"))
     }
 
     @Test fun `changed interface identity invalidates active revision`() = runTest {

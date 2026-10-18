@@ -140,10 +140,10 @@ object PolicyConfigAssembler {
                 unavailableProfileIds, probeSchedule ?: ExpertProbeSchedule.fromHealth(workspace.saved.health), probeUrl
             ).build()
         } catch (failure: AssemblyProblem) {
-            invalid(program, listOf(failure.message ?: "Не удалось собрать схему"))
+            invalid(program, listOf(app.lernet.engine.text.UserText.of(failure, "Не удалось собрать схему")))
         } catch (_: Exception) {
             // JSON parsers can include raw credentials in their exception text.
-            invalid(program, listOf("Не удалось собрать схему: проверь формат профилей и параметры выхода"))
+            invalid(program, listOf("Не удалось собрать схему: проверь формат конфигов и параметры выхода"))
         }
     }
 
@@ -274,7 +274,7 @@ object PolicyConfigAssembler {
             ) {
                 throw AssemblyProblem(
                     "DNS: старый параметр strategy нельзя сочетать с query_type или ip_version. " +
-                        "Убери strategy из настроек DNS профиля."
+                        "Убери strategy из настроек DNS конфига."
                 )
             }
             val dns = buildJsonObject {
@@ -367,7 +367,7 @@ object PolicyConfigAssembler {
                     ) {
                         return fallback(target.fallback)
                     }
-                    if (members.size > 64) throw AssemblyProblem("В одном динамическом выходе может быть не более 64 профилей")
+                    if (members.size > 64) throw AssemblyProblem("В одном динамическом выходе может быть не более 64 конфигов")
                     val supportedMembers = members.filterNot(::unsupportedInterface)
                     val candidates = supportedMembers.filter { it !in unavailable }.map { member ->
                         profile(member, channelPath, target.id).tag!!
@@ -416,14 +416,14 @@ object PolicyConfigAssembler {
                 ?: ExitLifecyclePolicy()
 
         private fun profile(id: String, channelPath: List<String>, folderId: String? = null): Resolution {
-            val profile = profiles[id] ?: throw AssemblyProblem("Профиль выхода удалён")
+            val profile = profiles[id] ?: throw AssemblyProblem("Конфиг выхода удалён")
             val tag = physicalTag(id, channelPath, folderId)
             if (tag in physical) return Resolution(tag, profile)
             physical[tag] = PolicyPhysicalExit(tag, id, channelPath, lifecycle(id, channelPath, folderId), folderId)
             val sources = profile.outbounds.associateBy { it.tag }
-            if (sources.size != profile.outbounds.size) throw AssemblyProblem("У профиля повторяются теги внутренних выходов")
+            if (sources.size != profile.outbounds.size) throw AssemblyProblem("У конфига повторяются теги внутренних выходов")
             val selected = profile.outbounds.firstOrNull { it.id == profile.selectedOutboundId }
-                ?: throw AssemblyProblem("У профиля не выбран выход")
+                ?: throw AssemblyProblem("У конфига не выбран выход")
             val tags = sources.mapValues { (_, source) -> if (source.id == selected.id) tag else "$tag-dep-${digest(source.id)}" }
             outboundTagsByExit[tag] = tags
             val walking = linkedSetOf<String>()
@@ -431,11 +431,11 @@ object PolicyConfigAssembler {
             val parsed = mutableMapOf<String, JsonObject>()
             fun add(sourceTag: String) {
                 if (sourceTag in complete) return
-                if (walking.size >= 64) throw AssemblyProblem("Слишком большая глубина внутренних выходов профиля")
-                if (!walking.add(sourceTag)) throw AssemblyProblem("У профиля цикл внутренних выходов")
-                val source = sources[sourceTag] ?: throw AssemblyProblem("Внутренний выход профиля отсутствует")
+                if (walking.size >= 64) throw AssemblyProblem("Слишком большая глубина внутренних выходов конфига")
+                if (!walking.add(sourceTag)) throw AssemblyProblem("У конфига цикл внутренних выходов")
+                val source = sources[sourceTag] ?: throw AssemblyProblem("Внутренний выход конфига отсутствует")
                 val raw = json.parseToJsonElement(source.singBoxJson) as? JsonObject
-                    ?: throw AssemblyProblem("Некорректный формат выхода профиля")
+                    ?: throw AssemblyProblem("Некорректный формат выхода конфига")
                 parsed[sourceTag] = raw
                 val type = (raw["type"] as? JsonPrimitive)?.contentOrNull
                 if (type.isNullOrBlank() || type in setOf("block", "dns", "wireguard", "urltest")) {
@@ -501,7 +501,7 @@ object PolicyConfigAssembler {
 
         private fun routeRule(rule: ProgramRule, resolution: Resolution): JsonObject = buildJsonObject {
             if (rule.protected && resolution.tag?.let { it in unproxiedExitTags } == true) {
-                throw AssemblyProblem("Защищённый выход содержит прямой маршрут. Выбери профиль без прямого выхода.")
+                throw AssemblyProblem("Защищённый выход содержит прямой маршрут. Выбери конфиг без прямого выхода.")
             }
             rule.condition.forEach { (key, value) -> put(key, value) }
             put("lernet_node_ids", JsonArray(rule.nodeIds.map(::JsonPrimitive)))
@@ -605,7 +605,7 @@ object PolicyConfigAssembler {
             val names = sources.mapNotNull { source -> DnsDependency.tagOf(source)?.let { it to "$prefix-${digest(it)}" } }.toMap()
             val final = (prepared["final"] as? JsonPrimitive)?.contentOrNull
             if (final == null || final !in names || names.size != sources.size) {
-                throw AssemblyProblem("DNS: некорректные ссылки серверов профиля")
+                throw AssemblyProblem("DNS: некорректные ссылки серверов конфига")
             }
             if (!protected && platform == EnginePlatform.WINDOWS && profileDns == DnsPolicy.PROFILE && !profile.dnsJson.isNullOrBlank()) {
                 val original = json.parseToJsonElement(requireNotNull(profile.dnsJson)) as? JsonObject
@@ -615,18 +615,18 @@ object PolicyConfigAssembler {
                             it["type"]?.jsonPrimitive?.contentOrNull == "dhcp" && DnsDependency.tagOf(it) in used
                         }
                     ) {
-                        throw AssemblyProblem("DNS: для DHCP DNS профиля Windows укажи адрес сервера явно или выбери DNS исходной сети")
+                        throw AssemblyProblem("DNS: для DHCP DNS конфига Windows укажи адрес сервера явно или выбери DNS исходной сети")
                     }
                 }
             }
             validateDnsGroups(sources)
             val reachable = reachableDnsServers(prepared)
             sources.forEach { source ->
-                val oldTag = DnsDependency.tagOf(source) ?: throw AssemblyProblem("DNS: сервер профиля без идентификатора")
+                val oldTag = DnsDependency.tagOf(source) ?: throw AssemblyProblem("DNS: сервер конфига без идентификатора")
                 val type = (source["type"] as? JsonPrimitive)?.contentOrNull
                 if (!protected && platform == EnginePlatform.WINDOWS && type in setOf("local", "dhcp")) {
                     if (type == "dhcp" && oldTag in explicitServers && oldTag in reachable) {
-                        throw AssemblyProblem("DNS: для DHCP DNS профиля Windows укажи адрес сервера явно или выбери DNS исходной сети")
+                        throw AssemblyProblem("DNS: для DHCP DNS конфига Windows укажи адрес сервера явно или выбери DNS исходной сети")
                     }
                     dnsServers[names.getValue(oldTag)] = buildJsonObject {
                         put("type", "local")
@@ -643,7 +643,7 @@ object PolicyConfigAssembler {
                         put("server", defaults.directDnsServer)
                         put("detour", tag)
                     }
-                    notes += "Локальный DNS профиля заменён DNS через туннель для защищённых веток."
+                    notes += "Локальный DNS конфига заменён DNS через туннель для защищённых веток."
                     return@forEach
                 }
                 if (protected && type !in setOf("udp", "tcp", "tls", "https", "quic", "h3", "group")) {
@@ -673,7 +673,7 @@ object PolicyConfigAssembler {
                         if (oldTag in explicitServers || type != "udp") {
                             throw AssemblyProblem(
                                 "DNS: этот выход передаёт только TCP. " +
-                                    "Выбери TCP, TLS или HTTPS вместо UDP/QUIC DNS в профиле."
+                                    "Выбери TCP, TLS или HTTPS вместо UDP/QUIC DNS в конфиге."
                             )
                         }
                         put("type", JsonPrimitive("tcp"))
@@ -689,26 +689,26 @@ object PolicyConfigAssembler {
                     } else if (detour != null && resolution.folder) {
                         put("detour", JsonPrimitive(tag))
                     } else if (detour != null) {
-                        val mapped = outboundTagsByExit[tag]?.get(detour) ?: throw AssemblyProblem("DNS: выход DNS профиля отсутствует")
+                        val mapped = outboundTagsByExit[tag]?.get(detour) ?: throw AssemblyProblem("DNS: выход DNS конфига отсутствует")
                         put("detour", JsonPrimitive(mapped))
                     }
                 }
                 dnsServers[names.getValue(oldTag)] = JsonObject(rewritten)
             }
             val rules = (prepared["rules"] as? JsonArray).orEmpty().map { element ->
-                val inner = element as? JsonObject ?: throw AssemblyProblem("DNS: некорректное правило профиля")
+                val inner = element as? JsonObject ?: throw AssemblyProblem("DNS: некорректное правило конфига")
                 if (inner.keys.any { it in setOf("outbound", "geoip", "geosite") }) {
-                    throw AssemblyProblem("DNS: правило профиля содержит поля, удалённые из текущего ядра")
+                    throw AssemblyProblem("DNS: правило конфига содержит поля, удалённые из текущего ядра")
                 }
                 val action = inner["action"]?.jsonPrimitive?.contentOrNull ?: "route"
                 if (action !in setOf("route", "reject", "predefined", "evaluate", "respond", "route-options")) {
-                    throw AssemblyProblem("DNS: действие правила профиля не поддерживается")
+                    throw AssemblyProblem("DNS: действие правила конфига не поддерживается")
                 }
                 JsonObject(
                     inner.toMutableMap().apply {
                         put("action", JsonPrimitive(action))
                         inner["server"]?.jsonPrimitive?.contentOrNull?.let { old ->
-                            put("server", JsonPrimitive(names[old] ?: throw AssemblyProblem("DNS: сервер правила профиля отсутствует")))
+                            put("server", JsonPrimitive(names[old] ?: throw AssemblyProblem("DNS: сервер правила конфига отсутствует")))
                         }
                         if (action in setOf("route", "evaluate") && "server" !in this) {
                             put("server", JsonPrimitive(names.getValue(final)))

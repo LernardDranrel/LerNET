@@ -146,7 +146,7 @@ internal fun ExpertExits(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit,
                     OutlinedButton(onClick = {
                         selected = null
                         externalDetails = profile
-                    }) { Text("Настройки внешнего профиля") }
+                    }) { Text("Настройки внешнего конфига") }
                 }
                 if (external == null) {
                     state.profiles.firstOrNull { it.id == id && it.interfaceBinding != null }?.let { profile ->
@@ -182,7 +182,7 @@ internal fun ExpertExits(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit,
                     Text("Настроить холодный старт папки")
                 }
                 exit.profileId != null -> OutlinedButton(onClick = { editingProfile = exit.profileId }) {
-                    Text("Настроить холодный старт профиля")
+                    Text("Настроить холодный старт конфига")
                 }
             }
             val nodes = (listOf(state.draft.device) + state.draft.trees).flatMap { it.nodes }.filter { node ->

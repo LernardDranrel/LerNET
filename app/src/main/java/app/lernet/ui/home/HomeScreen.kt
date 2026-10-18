@@ -229,8 +229,12 @@ private fun HomeBody(
         if (snapshot.state == ConnectionState.CONNECTED && isTunnelSilence(snapshot.channel)) {
             PipeSilentBanner(snapshot)
         }
-        ConnectionLatencyCard(state, onIntent)
-        if (snapshot.state == ConnectionState.CONNECTED || isConnecting(snapshot.state)) {
+        // While LerNET holds the tunnel the report card says what was tried; checks and zero speed would only repeat it.
+        val holding = snapshot.tried != null
+        // No configs yet: the card above says what to add; empty checks and an empty path would only add noise.
+        val noConfigs = state.profiles.isEmpty()
+        if (!holding && !noConfigs) ConnectionLatencyCard(state, onIntent)
+        if (!holding && snapshot.state == ConnectionState.CONNECTED) {
             PanelCard {
                 TrafficLines(snapshot)
                 if (snapshot.state == ConnectionState.CONNECTED) ChannelLine(snapshot)
@@ -241,16 +245,17 @@ private fun HomeBody(
             selectedHost != null && !snapshot.hopHost.equals(selectedHost, ignoreCase = true)) {
             snapshot.copy(hops = emptyList(), hopHost = "", hopRunning = false)
         } else snapshot
-        HopPathLine(
+        if (!noConfigs) HopPathLine(
             snapshot = hopSnapshot,
             onRefresh = onRefreshHop,
             enabled = state.activeProfile != null,
             modifier = Modifier.fillMaxWidth(),
         )
-        if (liveMode == RunMode.PROXY) {
+        // The proxy note at the top already says it; the banner stays only when the running session differs from the setting.
+        if (liveMode == RunMode.PROXY && state.effectiveMode != RunMode.PROXY) {
             ProxyModeBanner()
         }
-        ProxyAddressRow(access = state.proxyAccess?.takeIf { snapshot.state == ConnectionState.CONNECTED && liveMode == RunMode.PROXY })
+        // Address, login and password live in Settings (the note above says so); the home does not repeat them.
         if (!state.engineAvailable) {
             Text(
                 stringResource(R.string.engine_stub_hint),
@@ -455,7 +460,7 @@ private fun ProfileChip(
                     }
                 }
                 Text(
-                    text = name ?: stringResource(R.string.no_profile),
+                    text = name ?: stringResource(if (empty) R.string.empty_profiles else R.string.no_profile),
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -464,7 +469,7 @@ private fun ProfileChip(
                     text = stringResource(if (empty) R.string.empty_profiles_body else R.string.choose_profile),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
+                    maxLines = if (empty) 4 else 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -550,7 +555,8 @@ private fun FailedCard(
         ) {
             Text(cause?.titleRu() ?: stringResource(R.string.state_failed), style = MaterialTheme.typography.titleMedium)
             if (!detail.isNullOrBlank()) {
-                TextButton(onClick = { expanded = !expanded }, modifier = Modifier.lernetButton()) {
+                TextButton(onClick = { expanded = !expanded }, modifier = Modifier.lernetButton(),
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onErrorContainer)) {
                     Text(stringResource(if (expanded) R.string.hide_details else R.string.details))
                 }
                 AnimatedVisibility(visible = expanded) {
@@ -562,6 +568,7 @@ private fun FailedCard(
                                 copied = true
                             },
                             modifier = Modifier.lernetButton(),
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onErrorContainer),
                         ) {
                             Icon(LerNetSymbols.copy(), contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.size(8.dp))
@@ -583,7 +590,8 @@ private fun FailedCard(
                     Text(stringResource(R.string.to_profiles))
                 }
             }
-            TextButton(onClick = onShareLogs, modifier = Modifier.fillMaxWidth().lernetButton()) {
+            TextButton(onClick = onShareLogs, modifier = Modifier.fillMaxWidth().lernetButton(),
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onErrorContainer)) {
                 Text(stringResource(R.string.share_logs))
             }
         }
@@ -842,15 +850,17 @@ private fun FailoverReportCard(
         Text(stringResource(R.string.failover_report_tried), style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         report.attempts.forEach { attempt ->
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(attempt.name, Modifier.weight(0.4f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyMedium)
-                Text(attempt.reason, Modifier.weight(0.45f), maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(
-                    java.time.Instant.ofEpochMilli(attempt.atMs).atZone(java.time.ZoneId.systemDefault()).format(time),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            // Name and time on one line, the reason in full under it, same as on Windows.
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(attempt.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        java.time.Instant.ofEpochMilli(attempt.atMs).atZone(java.time.ZoneId.systemDefault()).format(time),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(attempt.reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Text(

@@ -55,7 +55,7 @@ object SubscriptionParser {
                     subscriptionUrl = subscriptionUrl,
                 ).prefixed(index)
             else -> ImportResult.Failure(
-                listOf(FieldError("line[$index]", "MVP принимает только vless:// или JSON outbound")),
+                listOf(FieldError("line[$index]", "Строка не похожа ни на ссылку vless://, ни на JSON-конфиг")),
             )
         }
         when (result) {

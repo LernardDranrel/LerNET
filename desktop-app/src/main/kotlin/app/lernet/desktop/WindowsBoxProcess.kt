@@ -130,7 +130,7 @@ class WindowsBoxProcess internal constructor(
                     synchronized(processLock) {
                         if (running.isAlive && desired && generation.get() == ticket && process === running) {
                             mutable.update {
-                                it.copy(status = TunnelStatus.RUNNING, message = "Ядро запущено", reconnectAttempt = attempt)
+                                it.copy(status = TunnelStatus.RUNNING, message = "Подключено", reconnectAttempt = attempt)
                             }
                             lifecycle?.let { listener -> runCatching { listener.coreRunning() } }
                         }
@@ -157,7 +157,7 @@ class WindowsBoxProcess internal constructor(
                         val detail = lastFatal.get()?.let(SecretRedactor::redact)?.take(180)?.let { ": $it" }.orEmpty()
                         mutable.update {
                             it.copy(status = TunnelStatus.RECONNECTING,
-                                message = "VPN включён · ядро завершилось (код $code), восстанавливаем$detail")
+                                message = "VPN включён · подключение прервалось (код $code), восстанавливаем$detail")
                         }
                     }
                     Thread.sleep(retryDelayMs(attempt))
@@ -169,7 +169,7 @@ class WindowsBoxProcess internal constructor(
                         mutable.update {
                             it.copy(
                                 status = TunnelStatus.FAILED,
-                                message = SecretRedactor.redact(error.message ?: error.javaClass.simpleName)
+                                message = app.lernet.engine.text.UserText.of(error, "VPN не запустился. Подробности — в журнале.")
                             )
                         }
                         lifecycle?.let { listener -> runCatching { listener.tunnelFailed() } }
@@ -204,7 +204,7 @@ class WindowsBoxProcess internal constructor(
                         mutable.update {
                             it.copy(
                                 status = if (stopped) TunnelStatus.STOPPED else TunnelStatus.FAILED,
-                                message = if (stopped) "Отключено" else "Не удалось подтвердить остановку ядра", reconnectAttempt = 0
+                                message = if (stopped) "Отключено" else "Не удалось подтвердить, что VPN остановлен", reconnectAttempt = 0
                             )
                         }
                     }
@@ -215,7 +215,7 @@ class WindowsBoxProcess internal constructor(
                 return@synchronized finish()
             } else {
                 thread(name = "lernet-windows-stop", isDaemon = true) { finish() }
-                mutable.update { it.copy(status = TunnelStatus.STOPPED, message = "Останавливаем ядро", reconnectAttempt = 0) }
+                mutable.update { it.copy(status = TunnelStatus.STOPPED, message = "Отключаем", reconnectAttempt = 0) }
                 return@synchronized false
             }
         }

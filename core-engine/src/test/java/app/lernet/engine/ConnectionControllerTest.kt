@@ -679,7 +679,7 @@ class ConnectionControllerTest {
         runCurrent()
         assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.RECONNECTING)
         assertThat(controller.snapshot.value.cause).isInstanceOf(ConnectionCause.WatchdogTimeout::class.java)
-        assertThat(controller.snapshot.value.cause?.titleRu()).isEqualTo("Нет трафика")
+        assertThat(controller.snapshot.value.cause?.titleRu()).isEqualTo("Данные не идут")
     }
 
     @Test
@@ -909,7 +909,7 @@ class ConnectionControllerTest {
         runCurrent()
         assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.RECONNECTING)
         assertThat(controller.snapshot.value.cause).isInstanceOf(ConnectionCause.DnsStalled::class.java)
-        assertThat(controller.snapshot.value.cause?.titleRu()).isEqualTo("DNS не отвечает")
+        assertThat(controller.snapshot.value.cause?.titleRu()).isEqualTo("Адреса сайтов не находятся")
 
         testScheduler.advanceTimeBy(1_000)
         runCurrent()

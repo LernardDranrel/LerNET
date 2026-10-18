@@ -73,11 +73,6 @@ internal fun ConnectionLatencyCard(state: HomeUiState, onIntent: (HomeIntent) ->
                 modifier = Modifier.weight(1f),
             )
         }
-        Text(
-            stringResource(R.string.home_latency_distinction),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 

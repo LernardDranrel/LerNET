@@ -90,33 +90,33 @@ private object CauseTitles {
 
     private fun sessionTitle(cause: ConnectionCause): String? =
         when (cause) {
-            ConnectionCause.UserDisconnected -> "Отключено пользователем"
-            ConnectionCause.NoActiveProfile -> "Нет активного профиля"
-            is ConnectionCause.InvalidRouteTree -> "Некорректное дерево маршрутов"
-            is ConnectionCause.InvalidConfig -> "Некорректный конфиг"
-            ConnectionCause.EngineUnavailable -> "Ядро не подключено"
-            ConnectionCause.VpnPermissionDenied -> "Нет разрешения VPN"
+            ConnectionCause.UserDisconnected -> "Отключено"
+            ConnectionCause.NoActiveProfile -> "Конфиг не выбран"
+            is ConnectionCause.InvalidRouteTree -> "Ошибка в правилах"
+            is ConnectionCause.InvalidConfig -> "Ошибка в конфиге"
+            ConnectionCause.EngineUnavailable -> "Модуль VPN не загрузился"
+            ConnectionCause.VpnPermissionDenied -> "Нет разрешения на VPN"
             ConnectionCause.ServiceRevoked -> "Система отозвала VPN"
             else -> null
         }
 
     private fun runtimeTitle(cause: ConnectionCause): String =
         when (cause) {
-            is ConnectionCause.EngineStartFailed -> "Ядро не запустилось"
-            is ConnectionCause.TlsFailure -> "Сбой TLS"
-            is ConnectionCause.HandshakeFailure -> "Сбой handshake"
-            is ConnectionCause.ConnectionReset -> "Соединение сброшено"
-            is ConnectionCause.DialFailure -> "Не удалось дозвониться"
-            is ConnectionCause.DialTimeout -> "Таймаут дозвона"
-            is ConnectionCause.WatchdogTimeout -> "Нет трафика"
-            is ConnectionCause.TunnelHealthFailed -> "Туннель не отвечает"
+            is ConnectionCause.EngineStartFailed -> "VPN не запустился"
+            is ConnectionCause.TlsFailure -> "Защищённое соединение не установилось"
+            is ConnectionCause.HandshakeFailure -> "Сервер не принял подключение"
+            is ConnectionCause.ConnectionReset -> "Соединение прервалось"
+            is ConnectionCause.DialFailure -> "Сервер не принимает подключение"
+            is ConnectionCause.DialTimeout -> "Сервер не ответил вовремя"
+            is ConnectionCause.WatchdogTimeout -> "Данные не идут"
+            is ConnectionCause.TunnelHealthFailed -> "Интернет через VPN не открывается"
             is ConnectionCause.BlockingSuspected -> "Похоже на блокировку"
-            is ConnectionCause.DnsStalled -> "DNS не отвечает"
-            is ConnectionCause.DnsUnreachable -> "DNS не отвечает"
-            is ConnectionCause.ConnectTimeout -> "Таймаут подключения"
-            is ConnectionCause.OutboundUnreachable -> "Узел недоступен"
-            is ConnectionCause.ReconnectExhausted -> "Исчерпаны попытки"
-            is ConnectionCause.FailoverExhausted -> "Группа без живых узлов"
+            is ConnectionCause.DnsStalled -> "Адреса сайтов не находятся"
+            is ConnectionCause.DnsUnreachable -> "Адреса сайтов не находятся"
+            is ConnectionCause.ConnectTimeout -> "Подключение заняло слишком много времени"
+            is ConnectionCause.OutboundUnreachable -> "Сервер недоступен"
+            is ConnectionCause.ReconnectExhausted -> "Переподключиться не удалось"
+            is ConnectionCause.FailoverExhausted -> "В папке нет рабочих конфигов"
             else -> error("unhandled cause title: $cause")
         }
 }

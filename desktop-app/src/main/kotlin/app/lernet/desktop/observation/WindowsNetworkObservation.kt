@@ -32,7 +32,7 @@ internal class WindowsNetworkObservation(private val runner: ObservationCommandR
                             "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath.toString(),
                             "-Source", definition.id, "-WfpStateFile", wfpPath.toString()), definition.timeoutMs)
                         parseSource(definition, result)
-                    }.getOrElse { source(definition, SourceState.ERROR, detail = it.message ?: it.javaClass.simpleName) }
+                    }.getOrElse { source(definition, SourceState.ERROR, detail = app.lernet.engine.text.UserText.of(it, "Windows не отдала эти данные")) }
                 }
             }
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120)

@@ -158,7 +158,7 @@ object TransferCodec {
             profile.id.isNotBlank() && profile.name.isNotBlank() && profile.outbounds.isNotEmpty() &&
                 profile.selectedOutboundId in profile.outbounds.map { it.id } &&
                 profile.outbounds.map { it.id }.distinct().size == profile.outbounds.size
-        }) { "Повреждён профиль в архиве" }
+        }) { "Повреждён конфиг в архиве" }
         require(bundle.profiles.all { it.modeOverride == null || it.modeOverride in setOf("FULL_VPN", "PROXY") }) {
             "Неизвестный режим подключения в архиве"
         }
@@ -167,7 +167,7 @@ object TransferCodec {
         }
         val profileSet = profileIds.toSet()
         require(bundle.groups.flatMap { it.profileIds }.let { it.size == it.toSet().size && it.all(profileSet::contains) }) {
-            "Папка ссылается на отсутствующий или повторный профиль"
+            "Папка ссылается на отсутствующий или повторный конфиг"
         }
         val ownerIds = profileIds.toSet() + groupIds.map { "grp_$it" }
         require(ownerIds.size == profileIds.size + groupIds.size) { "Неоднозначные владельцы правил в архиве" }
@@ -193,9 +193,9 @@ object TransferCodec {
             }
             settled.addAll(chain)
         }
-        require(bundle.selectedProfileId == null || bundle.selectedProfileId in profileIds) { "Выбранный профиль отсутствует" }
+        require(bundle.selectedProfileId == null || bundle.selectedProfileId in profileIds) { "Выбранный конфиг отсутствует" }
         if (bundle.scope == "group") require(bundle.groups.size == 1 && bundle.profiles.size == bundle.groups.single().profileIds.size) {
-            "Архив папки должен содержать одну папку и её профили"
+            "Архив папки должен содержать одну папку и её конфиги"
         }
     }
 }

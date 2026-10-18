@@ -1379,7 +1379,8 @@ class ExpertRuntimeController(
 
     private fun safeMessage(failure: Exception): String {
         val message = failure.message ?: failure.javaClass.simpleName
-        return knownExpertNativeFailureExplanation(message) ?: SecretRedactor.redact(message)
+        return knownExpertNativeFailureExplanation(message)
+            ?: app.lernet.engine.text.UserText.of(failure, "Ядро не выполнило команду. Подробности — в журнале.")
     }
     private fun reason(level: ExpertReasonLevel, message: String) {
         val entry = ExpertReason(++reasonSequence, clockMs(), level, SecretRedactor.redact(message))

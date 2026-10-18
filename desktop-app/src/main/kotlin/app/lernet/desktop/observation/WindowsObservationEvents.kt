@@ -38,7 +38,7 @@ internal class WindowsObservationEvents(
                 Base64.getEncoder().encodeToString(script.toByteArray(StandardCharsets.UTF_16LE))), 35_000)
         } catch (error: Exception) {
             return ObservationSource(id, title, explanation, SourceState.ERROR,
-                detail = "Не удалось прочитать источник: ${error.javaClass.simpleName}", capturedAt = now)
+                detail = app.lernet.engine.text.UserText.withReason("Не удалось прочитать источник", error), capturedAt = now)
         }
         if (result.timedOut) return ObservationSource(id, title, explanation, SourceState.TIMEOUT,
             detail = "Чтение журнала заняло больше 35 секунд.", capturedAt = now)

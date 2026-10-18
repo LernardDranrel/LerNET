@@ -1,5 +1,6 @@
 package app.lernet.desktop
 
+import androidx.compose.ui.unit.sp
 import app.lernet.config.net.AppTraffic
 
 import app.lernet.config.update.*
@@ -104,13 +105,14 @@ internal fun DesktopUpdateCard() {
     val state by monitor.state.collectAsState()
     val scope = rememberCoroutineScope()
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Обновления LerNET", style = MaterialTheme.typography.titleLarge)
-        Text(state.message, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // Same heading as the other settings cards.
+        SettingHeading("ВЕРСИЯ", "Обновления LerNET", state.message)
         Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             Checkbox(state.automatic, onCheckedChange = monitor::automatic)
-            Text("Проверять при запуске, не чаще раза в сутки")
+            Text("Проверять при запуске, не чаще раза в сутки", fontSize = 13.sp)
         }
-        Text("Запрос идёт на GitHub. Профили и данные диагностики не отправляются.", style = MaterialTheme.typography.bodySmall)
+        Text("Запрос идёт на GitHub. Конфиги и данные диагностики не отправляются.", color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 12.sp)
         OutlinedButton(onClick = { scope.launch { monitor.check(manual = true) } }, enabled = !state.checking) { Text("Проверить обновления") }
         state.release?.let { DesktopUpdateActions(it) }
     }
@@ -131,7 +133,7 @@ private fun DesktopUpdateActions(release: ClientRelease) {
                     val installer = withContext(Dispatchers.IO) { DesktopUpdates.download(asset) { value -> scope.launch { percent = value } } }
                     DesktopUpdates.runInstaller(installer)
                     message = "Установщик запущен. Продолжите обновление в его окне."
-                } catch (error: Exception) { message = error.message ?: "Не удалось обновить LerNET" }
+                } catch (error: Exception) { message = app.lernet.engine.text.UserText.of(error, "Не удалось обновить LerNET") }
                 finally { downloading = false }
             }
         }) { Text(if (downloading) "Скачиваем… $percent%" else "Скачать и обновить") }

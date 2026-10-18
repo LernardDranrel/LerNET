@@ -96,9 +96,9 @@ object ExternalExitProfiles {
         val errors = validate(request)
         require(errors.isEmpty()) { errors.joinToString("; ") }
         require(text(profileId, 256, empty = false) && text(outboundId, 256, empty = false)) {
-            "Профиль и выход должны иметь корректные идентификаторы"
+            "Конфиг и выход должны иметь корректные идентификаторы"
         }
-        require(existing == null || existing.id == profileId) { "Редактирование должно сохранять идентификатор профиля" }
+        require(existing == null || existing.id == profileId) { "Редактирование должно сохранять идентификатор конфига" }
         val previous = existing?.let {
             requireNotNull(describe(it)) { "Этот выход содержит расширенные настройки. Используйте редактор JSON." }
         }
@@ -237,7 +237,7 @@ object ExternalExitProfiles {
             val raw = Json.parseToJsonElement(outbound.singBoxJson) as? JsonObject ?: return null
             binding(raw)
         } catch (_: Exception) {
-            throw IllegalArgumentException("Профиль содержит некорректные данные интерфейсного выхода")
+            throw IllegalArgumentException("Конфиг содержит некорректные данные интерфейсного выхода")
         }
     }
 
@@ -260,7 +260,7 @@ object ExternalExitProfiles {
             }
             null
         } catch (_: Exception) {
-            throw IllegalArgumentException("Не удалось прочитать возможности профиля. Проверьте JSON внутренних выходов.")
+            throw IllegalArgumentException("Не удалось прочитать возможности конфига. Проверьте JSON внутренних выходов.")
         }
     }
 

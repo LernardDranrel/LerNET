@@ -283,7 +283,7 @@ class ConnectionPolicyMachineTest {
         )
         assertThat(last.snapshot.state).isEqualTo(ConnectionState.FAILED)
         assertThat(last.snapshot.cause).isInstanceOf(ConnectionCause.ReconnectExhausted::class.java)
-        assertThat(last.snapshot.cause?.labelRu()).contains("Ядро не запустилось")
+        assertThat(last.snapshot.cause?.labelRu()).contains("VPN не запустился")
         assertThat(commands.filterIsInstance<PolicyCommand.StopEngine>()).isNotEmpty()
     }
 

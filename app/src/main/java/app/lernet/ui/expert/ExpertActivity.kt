@@ -392,7 +392,7 @@ private fun ActivityTrafficPanel(
                         live = true
                     }
                 }
-            }, label = { Text(if (live) "● Live" else "↑ Live") })
+            }, label = { Text(if (live) "● Обновляется" else "↑ К новым") })
         }
         Row(Modifier.weight(1f).fillMaxWidth()) {
             LazyColumn(
@@ -405,7 +405,7 @@ private fun ActivityTrafficPanel(
             ActivityScrollRail(list)
         }
         Text(
-            if (live) "Новые соединения сверху · Live" else "Слежение приостановлено",
+            if (live) "Новые соединения сверху · слежение включено" else "Слежение приостановлено",
             style = MaterialTheme.typography.labelSmall
         )
     }

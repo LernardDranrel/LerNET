@@ -65,7 +65,7 @@ private class BoundedCommandOutput(private val stream: java.io.InputStream, priv
                     }
                 }
             }
-        } catch (error: Exception) { readError = error.javaClass.simpleName }
+        } catch (error: Exception) { readError = app.lernet.engine.text.UserText.of(error, "чтение прервалось") }
     }, "LerNET-observation-output").apply { isDaemon = true; start() }
 
     fun await() {
@@ -87,7 +87,7 @@ internal fun observationOutputProblem(result: ObservationCommandResult): String?
 
 internal fun observationJsonProblem(error: Exception): String {
     val offset = Regex("(?:offset|position)\\s+(\\d+)").find(error.message.orEmpty())?.groupValues?.get(1)
-    return "Не удалось разобрать JSON источника: ${error.javaClass.simpleName}" +
+    return app.lernet.engine.text.UserText.withReason("Не удалось разобрать JSON-ответ источника", error).trimEnd('.') +
         (offset?.let { ", позиция $it" } ?: "") + ". Содержимое ответа не включено в ошибку."
 }
 

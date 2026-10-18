@@ -33,7 +33,7 @@ class ConnectionCauseTest {
     @Test
     fun failedCardSplitsHumanTitleFromTechnicalDetail() {
         val cause = ConnectionCause.InvalidConfig(listOf("legacy inbound fields are deprecated"))
-        assertThat(cause.titleRu()).isEqualTo("Некорректный конфиг")
+        assertThat(cause.titleRu()).isEqualTo("Ошибка в конфиге")
         assertThat(cause.technicalDetail()).isEqualTo("legacy inbound fields are deprecated")
         assertThat(cause.labelRu()).contains("legacy inbound")
     }
@@ -41,7 +41,7 @@ class ConnectionCauseTest {
     @Test
     fun outboundUnreachableIsHumanReadableAndRetryable() {
         val cause = ConnectionCause.OutboundUnreachable("151.1.2.3:443: refused")
-        assertThat(cause.titleRu()).isEqualTo("Узел недоступен")
+        assertThat(cause.titleRu()).isEqualTo("Сервер недоступен")
         assertThat(cause.technicalDetail()).contains("151.1.2.3")
         assertThat(cause.isRetryable()).isTrue()
     }
@@ -49,7 +49,7 @@ class ConnectionCauseTest {
     @Test
     fun connectTimeoutIsHumanReadableAndRetryable() {
         val cause = ConnectionCause.ConnectTimeout(15)
-        assertThat(cause.titleRu()).isEqualTo("Таймаут подключения")
+        assertThat(cause.titleRu()).isEqualTo("Подключение заняло слишком много времени")
         assertThat(cause.technicalDetail()).contains("15")
         assertThat(cause.isRetryable()).isTrue()
     }
@@ -57,7 +57,7 @@ class ConnectionCauseTest {
     @Test
     fun watchdogTimeoutMentionsZeroTraffic() {
         val cause = ConnectionCause.WatchdogTimeout(20)
-        assertThat(cause.titleRu()).isEqualTo("Нет трафика")
+        assertThat(cause.titleRu()).isEqualTo("Данные не идут")
         assertThat(cause.technicalDetail()).contains("20")
         assertThat(cause.technicalDetail()).contains("прироста")
     }
@@ -65,10 +65,10 @@ class ConnectionCauseTest {
     @Test
     fun dnsUnreachableIsClearAndRetryable() {
         val stalled = ConnectionCause.DnsStalled(8)
-        assertThat(stalled.titleRu()).isEqualTo("DNS не отвечает")
+        assertThat(stalled.titleRu()).isEqualTo("Адреса сайтов не находятся")
         assertThat(stalled.technicalDetail()).contains("перезапуск")
         val dead = ConnectionCause.DnsUnreachable(8)
-        assertThat(dead.titleRu()).isEqualTo("DNS не отвечает")
+        assertThat(dead.titleRu()).isEqualTo("Адреса сайтов не находятся")
         assertThat(dead.technicalDetail()).contains("после перезапуска")
         assertThat(dead.isRetryable()).isTrue()
     }

@@ -66,12 +66,12 @@ fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller:
         if (valid) runCatching { controller.preview(profile.id, candidate) }.getOrNull() else null
     }
 
-    DialogWindow(onCloseRequest = onClose, title = "Профиль · ${profile.name}", state = rememberDialogState(size = DpSize(860.dp, 760.dp))) {
+    DialogWindow(onCloseRequest = onClose, title = "Конфиг · ${profile.name}", state = rememberDialogState(size = DpSize(860.dp, 760.dp))) {
         LaunchedEffect(window) { WindowsTitleBar.dark(window) }
         MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
             Surface(color = Color(0xFF101724), contentColor = desktopColors.onSurface) {
                 Column(Modifier.fillMaxSize().padding(22.dp)) {
-                    Text("Редактор профиля", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Редактор конфига", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
                     Text("Локальные параметры устройства и параметры удалённого сервера разделены.", color = editorMuted, fontSize = 12.sp)
                     Spacer(Modifier.height(15.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -81,7 +81,7 @@ fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller:
                     Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(13.dp)) {
                         when (page) {
                             EditorPage.LOCAL -> {
-                                OutlinedTextField(name, { name = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Название профиля") }, singleLine = true)
+                                OutlinedTextField(name, { name = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Название конфига") }, singleLine = true)
                                 Text("Режим подключения", fontWeight = FontWeight.SemiBold)
                                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                                     listOf("SYSTEM" to "Определено глобально", "FULL_VPN" to "Полный VPN", "PROXY" to "Локальный прокси").forEach { (value, label) ->
@@ -95,7 +95,7 @@ fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller:
                                     FilterChip(dnsPolicy == "SYSTEM", onClick = { dnsPolicy = "SYSTEM" }, label = { Text("Глобально") })
                                     FilterChip(dnsPolicy == "TUNNEL", onClick = { dnsPolicy = "TUNNEL" }, label = { Text("Через VPN") })
                                     FilterChip(dnsPolicy == "UNDERLAY", onClick = { dnsPolicy = "UNDERLAY" }, label = { Text("DNS сети") })
-                                    FilterChip(dnsPolicy == "PROFILE", onClick = { dnsPolicy = "PROFILE" }, label = { Text("DNS профиля") })
+                                    FilterChip(dnsPolicy == "PROFILE", onClick = { dnsPolicy = "PROFILE" }, label = { Text("DNS конфига") })
                                 }
                                 if (dnsPolicy == "SYSTEM") Text("Глобально: ${when (saved.defaultDnsPolicy) { "PROFILE" -> "DNS профиля"; "UNDERLAY" -> "DNS сети (мимо VPN)"; else -> "через VPN" }}", color = editorWarning, fontSize = 12.sp)
                                 preview?.userChanges?.takeIf { it.isNotEmpty() }?.let { changes ->

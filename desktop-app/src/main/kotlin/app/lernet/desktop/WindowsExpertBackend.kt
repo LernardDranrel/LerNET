@@ -391,7 +391,7 @@ internal class WindowsExpertBackend(
                         mutableEvents.emit(
                             ExpertBackendEvent.TunnelLost(
                                 snapshot.ack.identity(),
-                                "Связь с ядром потеряна: ${SecretRedactor.redact(failure.message.orEmpty()).take(300)}"
+                                app.lernet.engine.text.UserText.withReason("Связь с ядром потеряна", failure)
                             )
                         )
                         break

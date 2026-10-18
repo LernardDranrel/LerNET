@@ -50,7 +50,7 @@ object NetworkTable {
         }
         val dns = buildList {
             add(NetworkParam("DNS-серверы", main?.dns?.joinToString()?.ifBlank { null } ?: "Не переданы", "Адрес роутера или провайдера"))
-            field("dns", "Private DNS")?.let { add(NetworkParam("Private DNS", it, "Автоматически или выключен")) }
+            field("dns", "Частный DNS")?.let { add(NetworkParam("Частный DNS", it, "Автоматически или выключен")) }
         }
         val routes = buildList {
             val mine = defaultRoutes.filter { it.adapterId == main?.id }

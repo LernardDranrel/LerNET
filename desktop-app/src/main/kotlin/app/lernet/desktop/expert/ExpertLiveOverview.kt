@@ -145,7 +145,7 @@ private fun TunControl(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, c
             )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 ExpertUptimeBlock(state)
-                Text("Постоянный туннель", style = MaterialTheme.typography.titleLarge)
+                Text("Своя схема", style = MaterialTheme.typography.titleLarge)
                 Text(
                     when {
                         pult == app.lernet.engine.policy.PultStatus.OFF && state.protection.systemGuardEnforced ->
@@ -164,12 +164,12 @@ private fun TunControl(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, c
                 )?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = ExpertColors.muted) }
                 val policy = state.applied.takeIf { running } ?: state.saved
                 Text(
-                    "Основной путь: ${ExpertPolicyEditing.targetName(policy.device.defaultTarget, state)}",
+                    "Основной путь — ${ExpertPolicyEditing.targetName(policy.device.defaultTarget, state).replaceFirstChar { it.lowercase() }}",
                     style = MaterialTheme.typography.bodySmall, color = ExpertColors.muted
                 )
                 state.directNetwork?.takeIf { running }?.let { facts ->
                     Text(
-                        "Системные маршруты Direct${facts.interfaceName?.let { " · основной интерфейс $it" }.orEmpty()}: " +
+                        "Прямой выход${facts.interfaceName?.let { " · основной интерфейс $it" }.orEmpty()}: " +
                             "IPv4 — ${familyMeaning(facts.ipv4)}; IPv6 — ${familyMeaning(facts.ipv6)}",
                         style = MaterialTheme.typography.bodySmall, color = ExpertColors.muted,
                     )
@@ -347,7 +347,7 @@ private fun TrafficColumn(
                             live = true
                         }
                     }
-                }, label = { Text(if (live) "● Live" else "↑ Live") })
+                }, label = { Text(if (live) "● Обновляется" else "↑ К новым") })
             }
             HorizontalDivider(color = ExpertColors.border)
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -374,7 +374,7 @@ private fun TrafficColumn(
                 VerticalScrollbar(rememberScrollbarAdapter(list), Modifier.align(Alignment.CenterEnd).fillMaxHeight())
             }
             Text(
-                if (live) "Новые соединения сверху · слежение включено" else "Слежение приостановлено · Live вернёт к новым",
+                if (live) "Новые соединения сверху · слежение включено" else "Слежение приостановлено · «К новым» вернёт к свежим",
                 color = ExpertColors.muted, fontSize = 11.sp
             )
         }

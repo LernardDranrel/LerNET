@@ -674,7 +674,7 @@ class RouteEditorViewModel @Inject constructor(
                 throw error
             } catch (error: Exception) {
                 LerNetLog.e("LerNet.RouteEditor", "save failed", error)
-                _state.update { it.copy(fieldErrors = listOf("save: Не удалось сохранить маршруты. Изменения остались в редакторе.")) }
+                _state.update { it.copy(fieldErrors = listOf("Не удалось сохранить маршруты. Изменения остались в редакторе.")) }
             } finally {
                 _state.update { it.copy(saving = false) }
             }
@@ -901,7 +901,7 @@ class RouteEditorViewModel @Inject constructor(
             val errors = if (compiled.isValid) {
                 emptyList()
             } else {
-                compiled.errors.map { error -> "${error.field}: ${error.message}" }
+                compiled.errors.map { error -> error.message }
             }
             state.copy(nodes = ordered, fieldErrors = errors, saved = false)
         }

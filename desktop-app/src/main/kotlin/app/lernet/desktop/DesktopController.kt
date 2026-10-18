@@ -121,11 +121,17 @@ class DesktopController(
     } catch (_: Exception) {
         "Не удалось проверить системную защиту. Откройте экспертный режим и проверьте раздел «Защита»."
     }
+    init {
+        // Raw exception text goes to the journal only; the screen gets UserText sentences.
+        app.lernet.engine.text.UserText.logger = { context, error ->
+            runCatching { tunnel.logDiagnostic("$context: " + app.lernet.config.redact.SecretRedactor.redact("${error.javaClass.simpleName}: ${error.message.orEmpty()}")) }
+        }
+    }
     private val loaded = runCatching { store.load() }
     private val mutable = MutableStateFlow(
         DesktopUiState(
             saved = loaded.getOrDefault(StoredState()),
-            message = loaded.exceptionOrNull()?.let { "Не удалось прочитать профили: ${it.message}" }
+            message = loaded.exceptionOrNull()?.let { app.lernet.engine.text.UserText.withReason("Не удалось прочитать профили", it) }
                 ?: if (store.recoveredFromBackup) "Профили восстановлены из резервной копии" else "",
         ),
     )
@@ -420,7 +426,7 @@ class DesktopController(
             val executable = saved.corePath.takeIf { it.isNotBlank() }?.let(Path::of)
                 ?: synchronized(coreInstallLock) { BundledCore.install(store.workDirectory()) }
             OutboundProbe.check(profile, saved, executable, store.workDirectory())
-        }.getOrElse { OutboundProbeResult(message = it.message?.take(180) ?: "Не удалось проверить канал") }
+        }.getOrElse { OutboundProbeResult(message = app.lernet.engine.text.UserText.of(it, "Не удалось проверить связь через VPN")) }
         if (result.latencyMs == null) {
             tunnel.logDiagnostic("Профиль «${profile.name}»: ${result.message}")
             result.diagnostics.forEach(tunnel::logDiagnostic)
@@ -448,7 +454,7 @@ class DesktopController(
                 Files.writeString(temp, raw)
                 Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING)
             }.onSuccess { mutable.update { it.copy(busy = false, message = "Архив сохранён: $path") } }
-                .onFailure { error -> mutable.update { it.copy(busy = false, message = "Экспорт не выполнен: ${error.message}") } }
+                .onFailure { error -> mutable.update { it.copy(busy = false, message = app.lernet.engine.text.UserText.withReason("Экспорт не выполнен", error)) } }
         }
     }
 
@@ -458,7 +464,7 @@ class DesktopController(
                 check(Files.size(path) <= 20_000_000) { "Архив больше 20 МБ" }
                 Files.readString(path)
             }.onSuccess(::importBundle)
-                .onFailure { error -> mutable.update { it.copy(message = "Не удалось прочитать архив: ${error.message}") } }
+                .onFailure { error -> mutable.update { it.copy(message = app.lernet.engine.text.UserText.withReason("Не удалось прочитать архив", error)) } }
         }
     }
 
@@ -470,7 +476,7 @@ class DesktopController(
                 check(change { DesktopTransfer.merge(it, raw) }) { "Не удалось сохранить импортированные данные" }
                 "Добавлено папок: ${bundle.groups.size}, профилей: ${bundle.profiles.size}, правил: ${bundle.rules.size}"
             }.onSuccess { summary -> mutable.update { it.copy(busy = false, message = summary) } }
-                .onFailure { error -> mutable.update { it.copy(busy = false, message = "Импорт не выполнен: ${error.message}") } }
+                .onFailure { error -> mutable.update { it.copy(busy = false, message = app.lernet.engine.text.UserText.withReason("Импорт не выполнен", error)) } }
         }
     }
 
@@ -505,7 +511,7 @@ class DesktopController(
                         else importer.importSubscription(text)
                     } else importer.importSubscriptionDocument(text)
                 }
-            }.getOrElse { ImportResult.Failure(listOf(app.lernet.config.parse.FieldError("import", it.message ?: "Ошибка импорта"))) }
+            }.getOrElse { ImportResult.Failure(listOf(app.lernet.config.parse.FieldError("import", app.lernet.engine.text.UserText.of(it, "Не удалось прочитать конфиг")))) }
             when (result) {
                 is ImportResult.Success -> change { saved ->
                     val added = result.drafts.map { StoredProfile.fromDraft(it).copy(groupId = groupId) }
@@ -573,7 +579,7 @@ class DesktopController(
             } catch (error: Exception) {
                 desiredConnection = false
                 releaseGuard()
-                reportConnectionError(error.message ?: "Не удалось переключить подключение")
+                reportConnectionError(app.lernet.engine.text.UserText.of(error, "Не удалось переключить подключение"))
             } finally {
                 switchBusy.set(false)
                 if (!connectBusy.get()) mutable.update { it.copy(busy = false) }
@@ -764,7 +770,7 @@ class DesktopController(
         val profile = draftProfile ?: saved.profiles.firstOrNull { it.id == profileId }
             ?: return AssembledConfig("", "", listOf("Выберите профиль"))
         val outbound = profile.selectedOutbound
-            ?: return AssembledConfig("", "", listOf("В профиле нет рабочего outbound"))
+            ?: return AssembledConfig("", "", listOf("В конфиге нет подходящего сервера"))
         val activeRules = routingRules(saved, profile)
         val rules = activeRules.map { rule ->
             val match = ruleMatch(rule)
@@ -867,7 +873,7 @@ class DesktopController(
         updateAppTraffic()
         val savedAtStart = state.value.saved
         val profileAtStart = savedAtStart.profiles.firstOrNull { it.id == savedAtStart.selectedProfileId }
-        mutable.update { it.copy(busy = true, message = "Подготовка Windows-ядра", connectionError = null) }
+        mutable.update { it.copy(busy = true, message = "Готовим подключение", connectionError = null) }
         thread(name = "lernet-windows-connect", isDaemon = true) {
             var routeErrorOwner: String? = null
             try {
@@ -908,10 +914,10 @@ class DesktopController(
                         tunnel.start(launch)
                     }
                 }
-                mutable.update { it.copy(message = "Запускаем ядро") }
+                mutable.update { it.copy(message = "Запускаем VPN") }
             } catch (error: Exception) {
                 if (connectGeneration.get() == ticket) {
-                    val reason = error.message ?: "Не удалось запустить ядро"
+                    val reason = app.lernet.engine.text.UserText.of(error, "Не удалось запустить VPN")
                     if (holdOnError && desiredConnection && !expertReserved.get()) {
                         // A recovery/failover start failed while the VPN is wanted: keep Windows closed and retry.
                         tunnel.logDiagnostic("Повторный запуск не удался: $reason")
@@ -1167,7 +1173,7 @@ class DesktopController(
                         mutable.update { it.copy(message = "Экспертный режим не запущен · восстанавливаем предыдущее подключение") }
                     } catch (error: Exception) {
                         desiredConnection = false
-                        reportConnectionError("Не удалось восстановить предыдущее подключение: ${error.message}")
+                        reportConnectionError(app.lernet.engine.text.UserText.withReason("Не удалось восстановить предыдущее подключение", error))
                     }
                 }
             }
@@ -1199,7 +1205,7 @@ class DesktopController(
             }
             val next = block(mutable.value.saved)
             runCatching { store.save(next) }.onFailure { error ->
-                mutable.update { it.copy(message = "Не удалось сохранить: ${error.message}") }
+                mutable.update { it.copy(message = app.lernet.engine.text.UserText.withReason("Не удалось сохранить", error)) }
                 return false
             }
             mutable.update { current -> current.copy(saved = next,

@@ -32,7 +32,7 @@ class OkHttpTextFetcher(
                 }
             }
         } catch (ioe: IOException) {
-            RemoteTextFetcher.Result.Err(ioe.message ?: "Сетевая ошибка")
+            RemoteTextFetcher.Result.Err(if (ioe is java.net.SocketTimeoutException) "Время ожидания истекло" else "Не удалось загрузить: сетевая ошибка")
         }
     }
 

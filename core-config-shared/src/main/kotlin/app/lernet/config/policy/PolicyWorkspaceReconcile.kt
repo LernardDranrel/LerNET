@@ -66,7 +66,7 @@ object PolicyWorkspaceReconcile {
                             (target.routeScope == null || target.routeScope in scopes)
                 }
                 if (valid) return target
-                notes += "Ветка «$label» блокируется: её профиль, папка или канал удалены либо перенесены. Выберите новый выход."
+                notes += "Ветка «$label» блокируется: её конфиг, папка или канал удалены либо перенесены. Выберите новый выход."
                 return PolicyTarget.Block
             }
             fun tree(tree: PolicyTree) = tree.copy(
@@ -120,7 +120,7 @@ object PolicyWorkspaceReconcile {
 
     private fun scopeLabel(scope: PolicyScope): String = when (scope) {
         PolicyScope.Device -> "маршрут устройства по умолчанию"
-        is PolicyScope.Profile -> "профиль ${scope.id}"
+        is PolicyScope.Profile -> "конфиг ${scope.id}"
         is PolicyScope.Folder -> "папка ${scope.id}"
     }
 }

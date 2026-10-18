@@ -68,7 +68,7 @@ internal fun LazyListScope.externalProfileDefinitions(
         item {
             Text("Настроенные внешние выходы", color = ExpertColors.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             Text(
-                "Сохранённый профиль ещё не означает поднятое соединение. Его можно выбрать целью в схеме или поместить в папку профилей.",
+                "Сохранённый конфиг ещё не означает поднятое соединение. Его можно выбрать целью в схеме или поместить в папку конфигов.",
                 color = ExpertColors.muted, fontSize = 13.sp
             )
         }
@@ -99,7 +99,7 @@ internal fun LazyListScope.externalProfileDefinitions(
                     onClick = { edit(profile) },
                     enabled = !state.busy &&
                         state.externalSavePending == null
-                ) { Text("Изменить профиль") }
+                ) { Text("Изменить конфиг") }
             }
         }
     }
@@ -107,8 +107,8 @@ internal fun LazyListScope.externalProfileDefinitions(
         ExpertPanel(profile.name, trailing = { ExpertTag("Расширенный интерфейсный выход", ExpertColors.muted) }) {
             Text("Сохранённый адаптер: ${profile.interfaceBinding?.name}", color = ExpertColors.text)
             Text(
-                "В профиле есть расширенные настройки. Упрощённая форма их не перезаписывает. " +
-                    "Для изменения используй JSON редактор профиля в обычном режиме VPN.",
+                "В конфиге есть расширенные настройки. Упрощённая форма их не перезаписывает. " +
+                    "Для изменения используй JSON редактор конфига в обычном режиме VPN.",
                 color = ExpertColors.muted, fontSize = 13.sp
             )
             TextButton(onClick = { importedInterfaceDetails(profile) }) { Text("Сохранённая привязка и пути") }
@@ -165,7 +165,7 @@ internal fun ExpertExternalExitEditor(
     LaunchedEffect(pendingToken, state.externalSaveAck, state.externalSaveErrorRequestId) {
         val token = pendingToken ?: return@LaunchedEffect
         if (state.externalSaveErrorRequestId == token) {
-            localFailure = state.externalSaveError ?: "Профиль не сохранён. Поля оставлены для исправления и повторной попытки."
+            localFailure = state.externalSaveError ?: "Конфиг не сохранён. Поля оставлены для исправления и повторной попытки."
             pendingToken = null
         } else if (state.externalSaveAck == token) {
             onDismiss()
@@ -176,16 +176,16 @@ internal fun ExpertExternalExitEditor(
         pendingToken = token
         localFailure = null
         onIntent(ExpertIntent.SaveExternalExit(original?.id, request, token, original?.fingerprint))
-    }, errors.isEmpty() && editable && !state.busy, "Сохранить профиль") {
+    }, errors.isEmpty() && editable && !state.busy, "Сохранить конфиг") {
         if (pendingToken != null) {
             ExpertMessage(
-                "Записываем профиль",
+                "Записываем конфиг",
                 "Окно закроется после подтверждения. Если закрыть его сейчас, начатая запись продолжится."
             )
         }
         localFailure?.let { ExpertMessage("Запись не завершена", it, error = true) }
         OutlinedTextField(
-            name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Название профиля") },
+            name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Название конфига") },
             singleLine = true, enabled = editable
         )
         if (original == null && editable) {
@@ -196,7 +196,7 @@ internal fun ExpertExternalExitEditor(
         } else {
             ExpertTag(externalKindName(kind))
             Text(
-                "Идентификатор профиля и связи сохраняются. Для другого типа транспорта создай новый профиль.",
+                "Идентификатор конфига и связи сохраняются. Для другого типа транспорта создай новый конфиг.",
                 color = ExpertColors.muted, fontSize = 12.sp
             )
         }
@@ -278,7 +278,7 @@ internal fun ExpertExternalExitEditor(
             if (editable) {
                 ExpertToggle(
                     "Нужна авторизация",
-                    "Учётные данные сохраняются в локальном профиле и попадают в его явный экспорт.", auth
+                    "Учётные данные сохраняются в локальном конфиге и попадают в его явный экспорт.", auth
                 ) { auth = it }
             }
             if (auth) {
@@ -302,7 +302,7 @@ internal fun ExpertExternalExitEditor(
             ExpertMessage(
                 "Прокси — отдельный путь",
                 "Протокол прокси сам по себе не гарантирует шифрование. Выбирай доверенный сервер. " +
-                    "Этот профиль можно использовать в нескольких ветках, папке или общем канале."
+                    "Этот конфиг можно использовать в нескольких ветках, папке или общем канале."
             )
         }
         if (errors.isNotEmpty()) ExpertMessage("Проверь поля", errors.joinToString("\n"), error = true)
@@ -355,7 +355,7 @@ internal fun ExpertExternalExitDetails(
             }
         }
         ExternalReferenceLinks(profile.id, state, openScope)
-        OutlinedButton(onClick = onEdit, enabled = !state.busy) { Text("Изменить профиль") }
+        OutlinedButton(onClick = onEdit, enabled = !state.busy) { Text("Изменить конфиг") }
     }
 }
 
@@ -368,12 +368,12 @@ internal fun ExpertImportedInterfaceDetails(
 ) {
     val binding = profile.interfaceBinding ?: return
     ExpertModal(profile.name, onDismiss, onDismiss, true, "Закрыть", showCancel = false) {
-        ExpertTag("Расширенный профиль · только просмотр", ExpertColors.muted)
+        ExpertTag("Расширенный конфиг · только просмотр", ExpertColors.muted)
         Text("Сохранённый адаптер: ${binding.name}", color = ExpertColors.text)
         Text("Номер: ${binding.index}", color = ExpertColors.muted)
         Text("GUID: ${binding.guid}", color = ExpertColors.muted, fontSize = 12.sp)
         ExpertMessage(
-            "Это привязка из профиля",
+            "Это привязка из конфига",
             "GUID, имя и номер указывают нужный интерфейс Windows. Они сами по себе не подтверждают, " +
                 "что VPN сейчас подключён или что адаптер шифрует трафик. Ядро проверяет идентичность и доступность перед соединением."
         )
@@ -387,8 +387,8 @@ internal fun ExpertImportedInterfaceDetails(
         )
         ExpertMessage(
             "Расширенные параметры сохраняются",
-            "Здесь показаны только привязка и связи со схемой. Остальные поля профиля остаются как в импорте. " +
-                "Открой профиль в обычном режиме VPN и используй его JSON редактор для изменения; " +
+            "Здесь показаны только привязка и связи со схемой. Остальные поля конфига остаются как в импорте. " +
+                "Открой конфиг в обычном режиме VPN и используй его JSON редактор для изменения; " +
                 "упрощённая форма не может безопасно представить все его настройки."
         )
         ExternalReferenceLinks(profile.id, state, openScope)
@@ -401,7 +401,7 @@ private fun ExternalReferenceLinks(profileId: String, state: ExpertUiState, open
     Text("Пути черновика с этой целью", color = ExpertColors.text, fontWeight = FontWeight.SemiBold)
     if (references.isEmpty()) {
         Text(
-            "Прямых ссылок пока нет. Профиль также может использоваться через папку или канал.", color = ExpertColors.muted
+            "Прямых ссылок пока нет. Конфиг также может использоваться через папку или канал.", color = ExpertColors.muted
         )
     }
     references.forEach { reference ->

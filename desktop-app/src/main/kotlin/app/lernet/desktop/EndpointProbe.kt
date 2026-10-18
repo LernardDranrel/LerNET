@@ -74,7 +74,7 @@ object EndpointProbe {
                 message = if (protocol == "TLS") "TLS-рукопожатие" else "TCP до сервера",
                 serverProtocol = protocol)
         } catch (error: Exception) {
-            ProbeResult(message = error.message?.take(100) ?: "Сервер не отвечает", serverProtocol = protocol)
+            ProbeResult(message = app.lernet.engine.text.UserText.of(error, "Сервер не отвечает"), serverProtocol = protocol)
         }
     }
 

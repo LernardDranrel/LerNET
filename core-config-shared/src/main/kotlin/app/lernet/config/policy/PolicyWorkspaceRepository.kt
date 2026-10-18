@@ -81,7 +81,7 @@ class PolicyWorkspaceRepository(
     /** Prepare once; native/Desktop/Room consumers must use after.legacy IDs without remapping again. */
     @Synchronized
     fun previewImported(raw: String, replace: Boolean = false): PolicyImportPlan {
-        require(store.loadPendingImport() == null) { "Сначала восстановите прерванный импорт, обновив список профилей." }
+        require(store.loadPendingImport() == null) { "Сначала восстановите прерванный импорт, обновив список конфигов." }
         val imported = PolicyWorkspaceCodec.decode(raw).let { it.copy(legacy = PolicyWorkspaceImport.canonicalLegacy(it.legacy)) }
         val before = snapshot()
         if (replace) {
@@ -95,7 +95,7 @@ class PolicyWorkspaceRepository(
     /** Profile forms prepare an exact inventory transaction without publishing a partial workspace. */
     @Synchronized
     fun previewInventory(bundle: TransferBundle): PolicyImportPlan {
-        require(store.loadPendingImport() == null) { "Сначала восстановите прерванный импорт, обновив список профилей." }
+        require(store.loadPendingImport() == null) { "Сначала восстановите прерванный импорт, обновив список конфигов." }
         TransferCodec.validate(bundle)
         val before = snapshot()
         val after = PolicyWorkspaceReconcile.reconcile(before, bundle).workspace
@@ -155,13 +155,13 @@ class PolicyWorkspaceRepository(
             equivalent(bundle, pending.after.legacy) -> pending.after.copy(legacy = bundle)
             equivalent(bundle, pending.before.legacy) -> pending.before.copy(legacy = bundle)
             else -> throw IllegalStateException(
-                "Импорт не завершён, а список профилей изменился. " +
+                "Импорт не завершён, а список конфигов изменился. " +
                     "Сохраните данные и повторите восстановление импорта.",
             )
         }
         val recovered = commit(restored, allowPendingImport = true)
         store.clearPendingImport()
-        lastNotes = listOf("Восстановлена согласованность профилей и общей схемы после прерванного импорта.")
+        lastNotes = listOf("Восстановлена согласованность конфигов и общей схемы после прерванного импорта.")
         return recovered
     }
 
@@ -181,7 +181,7 @@ class PolicyWorkspaceRepository(
 
     private fun commit(workspace: PolicyWorkspace, allowPendingImport: Boolean = false): PolicyWorkspace {
         require(allowPendingImport || store.loadPendingImport() == null) {
-            "Сначала восстановите прерванный импорт, обновив список профилей."
+            "Сначала восстановите прерванный импорт, обновив список конфигов."
         }
         store.save(workspace)
         current = workspace

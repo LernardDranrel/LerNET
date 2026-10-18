@@ -1,5 +1,6 @@
 package app.lernet.desktop.expert
 
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -141,7 +142,8 @@ internal fun ExpertEmpty(title: String, explanation: String) {
         NetworkGlyph(ExpertColors.muted)
         Spacer(Modifier.height(12.dp))
         Text(title, color = ExpertColors.text, fontWeight = FontWeight.Medium)
-        Text(explanation, Modifier.padding(top = 8.dp), color = ExpertColors.muted, fontSize = 13.sp)
+        Text(explanation, Modifier.padding(top = 8.dp).widthIn(max = 560.dp), color = ExpertColors.muted, fontSize = 13.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }
 

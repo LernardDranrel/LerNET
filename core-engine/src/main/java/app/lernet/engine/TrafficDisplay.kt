@@ -45,16 +45,17 @@ object TrafficDisplay {
         )
     }
 
-    fun formatRate(bytesPerSecond: Long): String = "${formatMagnitude(bytesPerSecond)}/s"
+    fun formatRate(bytesPerSecond: Long): String = "${formatMagnitude(bytesPerSecond)}/с"
 
     fun formatBytes(bytes: Long): String = formatMagnitude(bytes)
 
     private fun formatMagnitude(bytes: Long): String {
         val value = bytes.coerceAtLeast(0)
         return when {
-            value < 1024L -> "$value B"
-            value < 1024L * 1024L -> "${value / 1024L} KiB"
-            else -> "${value / (1024L * 1024L)} MiB"
+            // Same units as the Windows app: Б, КБ, МБ.
+            value < 1024L -> "$value Б"
+            value < 1024L * 1024L -> "${value / 1024L} КБ"
+            else -> "${value / (1024L * 1024L)} МБ"
         }
     }
 }

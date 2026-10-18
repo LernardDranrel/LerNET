@@ -92,7 +92,7 @@ object DiagnosticsOverview {
         return when (f.link) {
             DiagLink.OFF -> DiagVerdict(
                 "$name выключен",
-                if (f.expert) "Поднимите рубильник на главном экране. Данные сети ниже собираются и без него."
+                if (f.expert) "Подними рубильник на главном экране. Данные сети ниже собираются и без него."
                 else "Включите его на главном экране. Данные сети ниже собираются и без него.",
                 DiagTone.IDLE,
             )
@@ -235,7 +235,7 @@ object DiagnosticsOverview {
     fun connectionsEmpty(link: DiagLink, expert: Boolean): String = when (link) {
         DiagLink.ON -> "Соединений пока нет"
         DiagLink.STARTING -> "Подключаемся — соединения появятся здесь"
-        else -> if (expert) "Поднимите рубильник — здесь появятся соединения" else "Включите VPN — здесь появятся соединения"
+        else -> if (expert) "Подними рубильник — здесь появятся соединения" else "Включите VPN — здесь появятся соединения"
     }
 
     fun route(route: DiagRoute): String = when (route) {

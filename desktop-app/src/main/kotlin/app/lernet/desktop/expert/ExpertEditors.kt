@@ -298,7 +298,7 @@ internal fun ExpertTargetEditor(
         add("block" to "Блокировать трафик")
         if (scope != PolicyScope.Device) add("current" to "Выход этой схемы")
         state.folders.forEach { add("folder:${it.id}" to "Папка: ${it.name}") }
-        state.profiles.forEach { add("profile:${it.id}" to "Профиль: ${it.name}") }
+        state.profiles.forEach { add("profile:${it.id}" to "Конфиг: ${it.name}") }
         if (allowChannels) {
             state.draft.channels.filter { it.owner == scope && it.id != excludedChannelId }
                 .forEach { add("channel:${it.id}" to "Канал: ${it.name}") }
@@ -331,15 +331,15 @@ internal fun ExpertTargetEditor(
         color = if (protected) ExpertColors.red else ExpertColors.muted, fontSize = 12.sp,
     )
     if (protected && target == PolicyTarget.Block) Text(
-        "Сейчас выбран запрет всего трафика этой ветки. Чтобы разрешить соединения, выбери профиль, папку или канал с VPN/прокси.",
+        "Сейчас выбран запрет всего трафика этой ветки. Чтобы разрешить соединения, выбери конфиг, папку или канал с VPN/прокси.",
         color = ExpertColors.muted, fontSize = 12.sp,
     )
     when (target) {
         is PolicyTarget.Profile -> {
             val profile = state.profiles.firstOrNull { it.id == target.id }
             val scopeOptions = buildList<Pair<PolicyScope?, String>> {
-                add(null to "Только прокси, без дерева профиля")
-                add(PolicyScope.Profile(target.id) to "Собственное дерево профиля")
+                add(null to "Только прокси, без дерева конфига")
+                add(PolicyScope.Profile(target.id) to "Собственное дерево конфига")
                 profile?.folderId?.let {
                     add(PolicyScope.Folder(it) to "Дерево папки: ${ExpertPolicyEditing.scopeName(PolicyScope.Folder(it), state)}")
                 }
@@ -547,7 +547,7 @@ internal fun ExpertFolderEditor(
     ExpertModal("Политика папки", onDismiss, { onSave(policy) }, !pending && lifecycleValid) {
         EditorPersistenceNotice(state, pending)
         ExpertSelect(
-            "Как выбирать профиль",
+            "Как выбирать конфиг",
             listOf(
                 FolderSelection.PREFERRED to "Предпочтительный",
                 FolderSelection.STABLE to "Самый стабильный",
@@ -557,7 +557,7 @@ internal fun ExpertFolderEditor(
         ) { policy = policy.copy(selection = it) }
         ExpertMessage(folderStrategyTitle(policy.selection), folderStrategyText(policy.selection))
         ExpertSelect(
-            "Предпочтительный профиль",
+            "Предпочтительный конфиг",
             listOf(null to "Первый доступный") + members.map {
                 it.id to it.name
             },
@@ -568,7 +568,7 @@ internal fun ExpertFolderEditor(
         ExpertToggle(
             "Автоматическая смена",
             "Когда активный выход перестаёт передавать данные, выбирается доступный сосед. " +
-                "Без этой опции повторяется текущий профиль.",
+                "Без этой опции повторяется текущий конфиг.",
             policy.autoSwap
         ) { policy = policy.copy(autoSwap = it) }
         ExpertMessage(
@@ -578,11 +578,11 @@ internal fun ExpertFolderEditor(
         if (members.isEmpty()) {
             ExpertMessage(
                 "Папка пуста",
-                "Пока сюда не добавлен профиль, трафик будет использовать заданное правило отказа.", warning = true
+                "Пока сюда не добавлен конфиг, трафик будет использовать заданное правило отказа.", warning = true
             )
         }
         Text(
-            "Здоровый текущий выход сохраняется. Добавление профиля не должно вызывать лишнее переключение действующих соединений.",
+            "Здоровый текущий выход сохраняется. Добавление конфига не должно вызывать лишнее переключение действующих соединений.",
             color = ExpertColors.muted, fontSize = 13.sp
         )
         HorizontalDivider(color = ExpertColors.border)
@@ -610,17 +610,17 @@ internal fun ExpertProfileLifecycleEditor(
         )
     }
     var valid by remember { mutableStateOf(true) }
-    ExpertModal("Холодный старт профиля", onDismiss, { onSave(policy) }, valid && !pending) {
+    ExpertModal("Холодный старт конфига", onDismiss, { onSave(policy) }, valid && !pending) {
         EditorPersistenceNotice(state, pending)
         Text(
-            state.profiles.firstOrNull { it.id == profileId }?.name ?: "Профиль недоступен", color = ExpertColors.text,
+            state.profiles.firstOrNull { it.id == profileId }?.name ?: "Конфиг недоступен", color = ExpertColors.text,
             fontWeight = FontWeight.SemiBold
         )
         ExpertLifecycleEditor(policy.lifecycle, { valid = it }) { policy = policy.copy(lifecycle = it) }
         ExpertMessage(
-            "Самостоятельный выход профиля",
+            "Самостоятельный выход конфига",
             "При выборе через папку действуют настройки папки; " +
-                "при выборе отдельного канала — настройки канала. Сам профиль не нужно помещать в канал ради холодного старта."
+                "при выборе отдельного канала — настройки канала. Сам конфиг не нужно помещать в канал ради холодного старта."
         )
     }
 }
@@ -772,7 +772,7 @@ internal fun folderStrategyTitle(selection: FolderSelection): String = when (sel
 }
 
 internal fun folderStrategyText(selection: FolderSelection): String = when (selection) {
-    FolderSelection.PREFERRED -> "Работает выбранный профиль. Соседи — только если он перестал отвечать."
+    FolderSelection.PREFERRED -> "Работает выбранный конфиг. Соседи — только если он перестал отвечать."
     FolderSelection.STABLE -> "Рабочий выход не меняется. После сбоя берётся тот, у кого меньше всего сбоев за последние 30 минут."
     FolderSelection.LOWEST_LATENCY -> "На более быстрый выход переходим, только если он быстрее на 40 мс и на 25 %, и не чаще раза в 10 минут. " +
         "Открытые соединения доживают на прежнем выходе, новые идут через новый."

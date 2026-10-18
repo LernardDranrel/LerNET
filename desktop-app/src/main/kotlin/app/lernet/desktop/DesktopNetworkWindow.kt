@@ -60,7 +60,7 @@ internal fun DesktopNetworkWindow(onClose: () -> Unit, useLerNetProxy: () -> Loc
                     val next = runInterruptible(Dispatchers.IO) { withClientContext(WindowsNetworkObservation().collect(), clientContext) }
                     history = history.refreshed(next)
                 } catch (cancelled: CancellationException) { throw cancelled }
-                catch (failure: Exception) { error = failure.message ?: "Не удалось прочитать настройки Windows" }
+                catch (failure: Exception) { error = app.lernet.engine.text.UserText.of(failure, "Не удалось прочитать настройки Windows") }
                 finally { busy = false }
             }
         }
@@ -99,7 +99,7 @@ internal fun DesktopNetworkWindow(onClose: () -> Unit, useLerNetProxy: () -> Loc
                                 withContext(Dispatchers.IO) { Files.writeString(path, reportJson.encodeToString(current)) }
                                 probeResult = "Отчёт сохранён: $path"
                             } catch (cancelled: CancellationException) { throw cancelled }
-                            catch (failure: Exception) { error = "Не удалось сохранить отчёт: ${failure.message}" }
+                            catch (failure: Exception) { error = app.lernet.engine.text.UserText.withReason("Не удалось сохранить отчёт", failure) }
                         }
                     }
                 },
@@ -115,7 +115,7 @@ internal fun DesktopNetworkWindow(onClose: () -> Unit, useLerNetProxy: () -> Loc
                                 if (ipConnection.isCurrent(request)) probeResult = result
                             }
                             catch (cancelled: CancellationException) { throw cancelled }
-                            catch (failure: Exception) { if (ipConnection.isCurrent(request)) probeResult = "Адрес не получен: ${failure.message ?: failure.javaClass.simpleName}. Это не доказывает, что весь интернет недоступен." }
+                            catch (failure: Exception) { if (ipConnection.isCurrent(request)) probeResult = app.lernet.engine.text.UserText.withReason("Адрес не получен", failure).trimEnd('.') + ". Это не доказывает, что весь интернет недоступен." }
                             finally {
                                 ipConnection.release(request)
                                 if (ipConnection.isCurrent(request)) probing = false

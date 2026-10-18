@@ -636,7 +636,7 @@ internal fun ExpertGraph(
             }
         }, content = { transform ->
             GraphCard(
-                root, transform, "Весь трафик", "Корень маршрутизации", selectedRoot, false, null,
+                root, transform, "Весь трафик", "Начало схемы", selectedRoot, false, null,
                 defaultEdit, { drag(PolicyCanvasKeys.ROOT, root, it, transform) },
                 target = "Проверка условий → ИНАЧЕ",
                 highlightTone = pathTone, onAdd = addRoot, draggable = !readOnly,

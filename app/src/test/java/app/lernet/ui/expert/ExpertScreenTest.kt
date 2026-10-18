@@ -119,7 +119,9 @@ class ExpertScreenTest {
     @Test
     fun ruleCanBeCommittedWithVisibleCheckWithoutKeyboardDone() {
         var committed: PolicyNode? = null
-        val node = PolicyNode("new-rule")
+        // Since the «ИНАЧЕ» model a new rule needs a condition (an empty one is the otherwise branch).
+        val node = PolicyNode("new-rule", conditions = app.lernet.routing.RuleConditions(
+            blocks = listOf(app.lernet.routing.ConditionBlock(app.lernet.routing.ConditionKind.DOMAIN, listOf("example.com")))))
         rule.setContent {
             FixtureTheme {
                 ExpertRuleEditor(node, app.lernet.routing.policy.PolicyScope.Device, bundle, NetworkPolicy(), { committed = it; null }, {})
@@ -132,7 +134,9 @@ class ExpertScreenTest {
 
     @Test
     fun longPressDragCommitsOnlyTheFingerDeltaAndRetainsSemanticRule() {
-        val node = PolicyNode("drag", title = "Drag rule")
+        // A last rule without conditions is shown as the legacy «ИНАЧЕ» branch, so the fixture needs a condition.
+        val node = PolicyNode("drag", title = "Drag rule", conditions = app.lernet.routing.RuleConditions(
+            blocks = listOf(app.lernet.routing.ConditionBlock(app.lernet.routing.ConditionKind.DOMAIN, listOf("example.com")))))
         val tree = PolicyTree(
             PolicyScope.Device, listOf(node),
             positions = mapOf(
@@ -150,6 +154,8 @@ class ExpertScreenTest {
                 )
             }
         }
+        // The hand (pan) mode is on by default; a block moves only after it is switched off.
+        rule.onNodeWithContentDescription("Ладошка: перемещение полотна").performClick()
         rule.onNodeWithText("Drag rule").performTouchInput {
             down(center)
             advanceEventTime(700)
