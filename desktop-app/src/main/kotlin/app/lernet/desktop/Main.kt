@@ -941,7 +941,9 @@ internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boole
                         })
                         Text(statusTitle, style = MaterialTheme.typography.titleLarge, color = statusTone, fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.testTag("home_state"))
-                        Text(if (active) "Отключить" else "Подключить", color = muted, fontSize = 13.sp)
+                        // Holding: «Выключить VPN» with its explanation is right next to it, so no second «Отключить» here.
+                        // A failure keeps «Подключить»: on Windows there is no separate retry button.
+                        if (!holding) Text(if (active) "Отключить" else "Подключить", color = muted, fontSize = 13.sp)
                         detail?.takeIf { it.isNotBlank() && it != statusTitle }?.let {
                             Text(it, color = muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center)

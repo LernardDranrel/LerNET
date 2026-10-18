@@ -77,6 +77,11 @@ class DesktopStatesRenderTest {
                 // The state is written once on the home: under the button only.
                 val states = listOf("Отключено", "Подключено", "Подключаемся…", "Нет связи · VPN держим", "Не удалось подключиться", "Готово к подключению")
                 states.forEach { s -> assertThat(all.count { it == s }).isAtMost(1) }
+                // One action per state: while holding only «Выключить VPN», never a second «Отключить» caption.
+                if ("Нет связи · VPN держим" in all) {
+                    assertThat(all.filter { it == "Отключить" }.map { "$name: $it" }).isEmpty()
+                    assertThat(all.count { it == "Выключить VPN" }).isEqualTo(1)
+                }
             }
         } finally { scene.close(); controller.close() }
     }
@@ -112,6 +117,7 @@ class DesktopStatesRenderTest {
     @Test fun holdingWide() = render("win-holding-wide", 1440, 900, preview = holding())
     @Test fun holdingNarrow() = render("win-holding-1024", 1024, 720, preview = holding())
     @Test fun failedWide() = render("win-error-wide", 1440, 900, preview = failed)
+    @Test fun failedNarrow() = render("win-error-1024", 1024, 720, preview = failed)
     @Test fun noConfigs() = render("win-no-configs", 1280, 800, StoredState(), off)
     @Test fun rules() = render("win-rules", 1440, 900, preview = off.copy(page = "ROUTES"))
     @Test fun journal() = render("win-journal", 1440, 900, preview = connected.copy(page = "DIAGNOSTICS"))

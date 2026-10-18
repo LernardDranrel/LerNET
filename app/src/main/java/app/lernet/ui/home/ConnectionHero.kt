@@ -67,6 +67,8 @@ internal fun ConnectionHero(
     onToggle: () -> Unit,
     onOpenRoutes: (() -> Unit)?,
     holding: Boolean = false,
+    // False when a card below already offers the same action («Выключить VPN», «Повторить»): one action, not two.
+    showActionCaption: Boolean = true,
     profile: @Composable ColumnScope.() -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -201,7 +203,7 @@ internal fun ConnectionHero(
                 color = if (connection == ConnectionState.DISCONNECTED) scheme.onSurface else accent,
                 textAlign = TextAlign.Center,
             )
-            Text(
+            if (showActionCaption || !enabled) Text(
                 if (enabled) action else stringResource(R.string.home_choose_before_connect),
                 style = MaterialTheme.typography.bodyMedium,
                 color = scheme.onSurfaceVariant,

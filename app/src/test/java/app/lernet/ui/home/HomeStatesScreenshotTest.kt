@@ -78,6 +78,9 @@ class HomeStatesScreenshotTest {
         listOf("TCP", "HTTPS", "B/s", "KiB", "Exception", "null.", "хоп").forEach { word ->
             assertThat(texts.filter { word in it }.map { "$name: $it" }).isEmpty()
         }
+        // One action per state: «Выключить VPN» replaces the «Отключить» caption, «Повторить» replaces «Подключить».
+        if ("Выключить VPN" in texts) assertThat(texts.filter { it == "Отключить" }.map { "$name: $it" }).isEmpty()
+        if ("Повторить" in texts) assertThat(texts.filter { it == "Подключить" }.map { "$name: $it" }).isEmpty()
     }
 
     private fun texts(): List<String> {

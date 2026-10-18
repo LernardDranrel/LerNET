@@ -186,6 +186,8 @@ private fun HomeBody(
             onToggle = { onIntent(HomeIntent.ToggleConnect) },
             onOpenRoutes = homeRouteOwnerId(state)?.let { ownerId -> { onOpenRoutes(ownerId) } },
             holding = snapshot.waitingForNetwork || snapshot.tried != null,
+            // Holding: «Выключить VPN» is right below; failed: the error card has «Повторить».
+            showActionCaption = snapshot.tried == null && snapshot.state != ConnectionState.FAILED,
         ) {
             ProfileChip(
                 name = state.activeProfile?.name,
