@@ -109,6 +109,11 @@
     <string name="hint_subscription">https://…/sub</string>
     <string name="import_action">Сохранить</string>
     <string name="importing">Импорт…</string>
+    <string name="cfg_subscription">Подписка</string>
+    <string name="cfg_subscription_why">Конфиг пришёл из подписки. При обновлении ваш выбор, переименование и правки сохраняются.</string>
+    <string name="cfg_subscription_refresh">Обновить подписку</string>
+    <string name="cfg_subscription_busy">Обновляю…</string>
+    <string name="cfg_subscription_save_first">Сначала сохраните или отмените правки.</string>
     <string name="import_saved">Сохранено конфигов: %1$d</string>
     <string name="import_added">Добавлено</string>
     <string name="import_unused_title">Эти части конфига не используются:</string>

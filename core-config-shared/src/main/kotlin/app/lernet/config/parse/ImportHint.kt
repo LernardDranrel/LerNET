@@ -29,7 +29,6 @@ data class ImportGuess(
 
 object ImportHint {
     private val json = Json { ignoreUnknownKeys = true }
-    private val vlessToken = Regex("(?i)vless://")
 
     fun detect(text: String): ImportGuess {
         val trimmed = text.trim()
@@ -59,13 +58,14 @@ object ImportHint {
         return http && !trimmed.contains('\n') && !trimmed.contains(' ')
     }
 
+    /** Share links of any supported protocol: one link, or several (a pasted list = a subscription document). */
     private fun fromVless(text: String): ImportGuess? {
-        val count = vlessToken.findAll(text).count()
+        val count = ShareLinkParser.countLinks(text)
         if (count == 0) return null
-        if (count == 1 && text.startsWith("vless://", ignoreCase = true)) {
+        if (count == 1 && ShareLinkParser.isShareLink(text) && !text.contains('\n')) {
             return ImportGuess(GuessedMode.VLESS, SoftHint.NONE)
         }
-        if (count > 1) {
+        if (count > 1 || text.contains('\n')) {
             return ImportGuess(GuessedMode.SUBSCRIPTION, SoftHint.NONE, document = true)
         }
         return null
@@ -91,7 +91,7 @@ object ImportHint {
 
     private fun fromBase64(text: String): ImportGuess? {
         val decoded = SubscriptionParser.decodeMaybeBase64(text)
-        if (decoded == text || !decoded.contains("vless://", ignoreCase = true)) return null
+        if (decoded == text || ShareLinkParser.countLinks(decoded) == 0) return null
         return ImportGuess(GuessedMode.SUBSCRIPTION, SoftHint.NONE, document = true)
     }
 }

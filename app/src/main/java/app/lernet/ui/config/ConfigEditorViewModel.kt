@@ -63,6 +63,10 @@ data class ConfigEditorUiState(
     val showEngine: Boolean = false,
     val dirty: Boolean = false,
     val saving: Boolean = false,
+    /** Set when the config came from a subscription: the editor offers «Обновить подписку». */
+    val subscriptionUrl: String? = null,
+    val subscriptionNote: String? = null,
+    val subscriptionBusy: Boolean = false,
 )
 
 enum class ConfigFieldError {
@@ -98,6 +102,8 @@ sealed class ConfigEditorIntent {
     data object ToggleEngine : ConfigEditorIntent()
 
     data object Save : ConfigEditorIntent()
+
+    data object RefreshSubscription : ConfigEditorIntent()
 }
 
 sealed class ConfigEditorEvent {
@@ -112,6 +118,7 @@ class ConfigEditorViewModel @Inject constructor(
     private val repository: ConfigRepository,
     private val settingsStore: SettingsStore,
     private val controller: ConnectionController,
+    private val subscriptions: app.lernet.subscription.SubscriptionAutoRefresh,
 ) : ViewModel() {
     private val profileId: String = checkNotNull(savedStateHandle["profileId"])
     private val _state = MutableStateFlow(ConfigEditorUiState())
@@ -146,6 +153,7 @@ class ConfigEditorViewModel @Inject constructor(
             ConfigEditorIntent.DismissProfileDns -> _state.update { it.copy(confirmProfileDns = false) }
             ConfigEditorIntent.ToggleEngine -> _state.update { it.copy(showEngine = !it.showEngine) }
             ConfigEditorIntent.Save -> save()
+            ConfigEditorIntent.RefreshSubscription -> refreshSubscription()
         }
     }
 
@@ -183,9 +191,34 @@ class ConfigEditorViewModel @Inject constructor(
             transportType = owned.transportType,
             dnsPolicy = profile.dnsPolicy,
             dnsServers = DnsDraft.read(profile.dnsJson),
+            subscriptionUrl = profile.subscriptionUrl?.takeIf(String::isNotBlank),
+            subscriptionNote = profile.subscriptionUrl?.takeIf(String::isNotBlank)?.let { subscriptionNote(it) },
         )
         savedDraft = DraftSnapshot.of(loaded)
         _state.value = withContext(Dispatchers.Default) { refresh(loaded) }
+    }
+
+    private fun subscriptionNote(url: String): String {
+        val entry = subscriptions.entry(url)
+        val hours = entry?.intervalHours ?: app.lernet.config.subscription.SubscriptionSchedule.DEFAULT_HOURS
+        val schedule = "Подписка обновляется сама примерно раз в ${hours} ч; изменения вступят в силу при следующем подключении."
+        return listOfNotNull(entry?.lastMessage, schedule).joinToString("\n")
+    }
+
+    private fun refreshSubscription() {
+        val current = _state.value
+        val url = current.subscriptionUrl ?: return
+        if (current.subscriptionBusy || current.saving || current.dirty) return
+        _state.update { it.copy(subscriptionBusy = true) }
+        viewModelScope.launch {
+            val message = subscriptions.refresh(url)
+            if (repository.getProfile(profileId) == null) {
+                _state.update { it.copy(subscriptionBusy = false, missing = true, subscriptionNote = message) }
+                return@launch
+            }
+            load()
+            _state.update { it.copy(subscriptionBusy = false, subscriptionNote = message) }
+        }
     }
 
     private fun edit(block: (ConfigEditorUiState) -> ConfigEditorUiState) {

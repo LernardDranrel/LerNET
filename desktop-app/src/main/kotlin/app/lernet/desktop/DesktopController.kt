@@ -330,6 +330,15 @@ class DesktopController(
     }
 
     private val importer = ImportCoordinator(OkHttpTextFetcher())
+    // The address of a subscription is a secret: it stays in %APPDATA%\LerNET, like state.json.
+    private val subscriptionUpdater by lazy {
+        app.lernet.config.subscription.SubscriptionUpdater(
+            importer,
+            app.lernet.config.subscription.SubscriptionBook(store.workDirectory().resolve("subscriptions.json")),
+        )
+    }
+    private val subscriptionLock = Any()
+    @Volatile private var subscriptionSchedule: Thread? = null
     private val connectBusy = AtomicBoolean(false)
     private val switchBusy = AtomicBoolean(false)
     private val connectGeneration = AtomicLong()
@@ -486,6 +495,63 @@ class DesktopController(
         if (server.isNotBlank()) tracer.trace(server)
     }
 
+    /** Subscriptions refresh on their schedule while LerNET runs; requests go through the VPN when it is on. */
+    fun startSubscriptionSchedule() {
+        if (subscriptionSchedule != null) return
+        subscriptionSchedule = thread(name = "lernet-windows-subscriptions", isDaemon = true) {
+            while (monitorOpen) {
+                runCatching {
+                    val saved = state.value.saved
+                    val urls = saved.profiles.mapNotNullTo(mutableSetOf()) { it.subscriptionUrl?.takeIf(String::isNotBlank) }
+                    subscriptionBook().retain(urls)
+                    subscriptionUpdater.due(urls).forEach { url ->
+                        val message = refreshSubscriptionNow(url)
+                        mutable.update { it.copy(message = message) }
+                    }
+                }
+                try {
+                    Thread.sleep(app.lernet.config.subscription.SubscriptionSchedule.TICK_MS)
+                } catch (_: InterruptedException) {
+                    return@thread
+                }
+            }
+        }
+    }
+
+    private fun subscriptionBook() =
+        app.lernet.config.subscription.SubscriptionBook(store.workDirectory().resolve("subscriptions.json"))
+
+    /** «Обновить подписку»: the change takes effect at the next connect, the running VPN is not restarted. */
+    fun refreshSubscription(url: String) {
+        if (url.isBlank()) return
+        mutable.update { it.copy(busy = true, message = "Обновляем подписку") }
+        thread(name = "lernet-windows-subscription", isDaemon = true) {
+            val message = refreshSubscriptionNow(url)
+            mutable.update { it.copy(busy = false, message = message) }
+        }
+    }
+
+    internal fun refreshSubscriptionNow(url: String): String = synchronized(subscriptionLock) {
+        val prepared = runCatching {
+            subscriptionUpdater.prepare(url, DesktopSubscriptions.configs(state.value.saved, url))
+        }.getOrElse { return "Подписку не удалось обновить: " + app.lernet.engine.text.UserText.of(it, "ошибка чтения") }
+        when (prepared) {
+            is app.lernet.config.subscription.SubscriptionUpdater.Prepared.Failed -> prepared.message
+            is app.lernet.config.subscription.SubscriptionUpdater.Prepared.Ready -> {
+                var added = emptyList<String>()
+                val ok = change { saved ->
+                    DesktopSubscriptions.apply(saved, url, prepared.plan).also { added = it.second }.first
+                }
+                if (ok) {
+                    subscriptionUpdater.applied(prepared, added)
+                    prepared.message
+                } else {
+                    "Подписку не удалось сохранить".also { subscriptionUpdater.failedToSave(url, it) }
+                }
+            }
+        }
+    }
+
     fun import(text: String, groupId: String? = null) {
         if (text.isBlank()) return
         if (loaded.isFailure) {
@@ -513,13 +579,24 @@ class DesktopController(
                 }
             }.getOrElse { ImportResult.Failure(listOf(app.lernet.config.parse.FieldError("import", app.lernet.engine.text.UserText.of(it, "Не удалось прочитать конфиг")))) }
             when (result) {
-                is ImportResult.Success -> change { saved ->
-                    val added = result.drafts.map { StoredProfile.fromDraft(it).copy(groupId = groupId) }
-                    saved.copy(
-                        profiles = saved.profiles + added,
-                        selectedProfileId = saved.selectedProfileId ?: added.firstOrNull()?.id,
-                    )
-                }.also { mutable.update { it.copy(busy = false, message = importMessage(result.drafts.size, result.unusedParts)) } }
+                is ImportResult.Success -> {
+                    var added = emptyList<StoredProfile>()
+                    val ok = change { saved ->
+                        added = result.drafts.map {
+                            StoredProfile.fromDraft(it).copy(groupId = groupId, dnsPolicy = saved.defaultDnsPolicy)
+                        }
+                        saved.copy(
+                            profiles = saved.profiles + added,
+                            selectedProfileId = saved.selectedProfileId ?: added.firstOrNull()?.id,
+                        )
+                    }
+                    val url = result.drafts.firstOrNull()?.subscriptionUrl?.takeIf(String::isNotBlank)
+                    if (ok && url != null) runCatching { subscriptionUpdater.imported(url, result, added.map { it.id }) }
+                    mutable.update {
+                        it.copy(busy = false, message = importMessage(result.drafts.size, result.unusedParts,
+                            app.lernet.config.parse.ImportReport.skipped(result.skipped)))
+                    }
+                }
                 is ImportResult.Failure -> mutable.update {
                     it.copy(busy = false, message = result.errors.joinToString("; ") { error -> error.message })
                 }
@@ -630,7 +707,8 @@ class DesktopController(
                 parentId = app.lernet.config.transfer.TransferCodec.remapParentId(rule.parentId, ids))
         }
         saved.copy(
-            profiles = saved.profiles + source.copy(id = copyId, name = source.name + " (копия)",
+            // The copy is the user's own config: a subscription refresh must never touch or remove it.
+            profiles = saved.profiles + source.copy(id = copyId, name = source.name + " (копия)", subscriptionUrl = null,
                 canvasLayout = app.lernet.config.transfer.TransferCodec.remapCanvasLayout(source.canvasLayout, ids)),
             rules = saved.rules + copiedRules,
             rulePositions = saved.rulePositions + ids.mapNotNull { (old, fresh) ->
@@ -1240,6 +1318,8 @@ internal fun guardProblemText(status: SimpleGuardStatus): String? = when (status
 }
 
 /** Import result line; unused parts of the config are named on screen, not only in the journal. */
-internal fun importMessage(added: Int, unusedParts: List<String>): String =
-    if (unusedParts.isEmpty()) "Добавлено профилей: $added"
-    else "Добавлено профилей: $added. Эти части конфига не используются: ${unusedParts.joinToString("; ")}"
+internal fun importMessage(added: Int, unusedParts: List<String>, skipped: String? = null): String = listOfNotNull(
+    "Добавлено конфигов: $added",
+    unusedParts.takeIf { it.isNotEmpty() }?.let { "Эти части конфига не используются: ${it.joinToString("; ")}" },
+    skipped,
+).joinToString(". ")

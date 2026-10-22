@@ -26,6 +26,8 @@ import app.lernet.config.transfer.TransferProfile
 import app.lernet.config.transfer.TransferRule
 import app.lernet.config.parse.ImportedProfileDraft
 import app.lernet.config.parse.newId
+import app.lernet.config.subscription.RefreshPlan
+import app.lernet.config.subscription.SubscribedConfig
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -311,6 +313,67 @@ class ConfigRepository(
         return id
     }
 
+    /** Subscription addresses the saved configs came from. */
+    suspend fun subscriptionUrls(): Set<String> =
+        profileDao.listProfiles().mapNotNullTo(mutableSetOf()) { it.subscriptionUrl?.takeIf(String::isNotBlank) }
+
+    /** Configs of one subscription as the refresh planner sees them; [activeProfileId] is the user's current choice. */
+    suspend fun subscribedConfigs(url: String, activeProfileId: String?): List<SubscribedConfig> =
+        profileDao.listProfiles().filter { it.subscriptionUrl == url }.map { entity ->
+            SubscribedConfig(
+                id = entity.id,
+                name = entity.name,
+                outbounds = outboundDao.listForProfile(entity.id).map {
+                    NormalizedOutbound(id = it.id, tag = it.tag, type = it.type, singBoxJson = it.singBoxJson)
+                },
+                selectedOutboundId = entity.selectedOutboundId,
+                selected = entity.id == activeProfileId,
+                hasOwnSettings = entity.modeOverride != null || entity.canvasLayout != null ||
+                    ruleNodeDao.listForProfile(entity.id).size > 1,
+            )
+        }
+
+    /**
+     * Save a subscription refresh: changed configs keep their id, name the user gave and selection;
+     * new ones join the folder the subscription's configs are in. Returns the ids of added configs, in plan order.
+     */
+    suspend fun applySubscriptionPlan(
+        url: String,
+        plan: RefreshPlan,
+        defaultDnsPolicy: DnsPolicy = DnsPolicy.DEFAULT,
+    ): List<String> {
+        val added = mutableListOf<String>()
+        val operation: suspend () -> Unit = {
+            val now = nowMs()
+            plan.updates.forEach { update ->
+                val entity = profileDao.getProfile(update.id) ?: return@forEach
+                outboundDao.deleteForProfile(update.id)
+                outboundDao.upsertAll(update.outbounds.map { it.toEntity(update.id) })
+                profileDao.updateProfile(
+                    entity.copy(
+                        name = update.name ?: entity.name,
+                        selectedOutboundId = update.selectedOutboundId,
+                        lastRefreshEpochMs = now,
+                        updatedAtEpochMs = now,
+                    ),
+                )
+            }
+            val memberIds = profileDao.listProfiles().filter { it.subscriptionUrl == url }.map { it.id }.toSet()
+            val folder = groupDao.listGroups()
+                .map { group -> group.id to groupMemberDao.listForGroup(group.id).count { it.profileId in memberIds } }
+                .filter { it.second > 0 }
+                .maxByOrNull { it.second }?.first
+            plan.adds.forEach { draft -> added += insertDraft(draft.copy(subscriptionUrl = url), defaultDnsPolicy) }
+            if (folder != null && added.isNotEmpty()) {
+                val current = groupMemberDao.listForGroup(folder).sortedBy { it.sortIndex }.map { it.profileId }
+                setGroupMembers(folder, current + added)
+            }
+            plan.removes.forEach { deleteProfile(it) }
+        }
+        if (database != null) database.withTransaction { operation() } else operation()
+        return added
+    }
+
     suspend fun getProfile(id: String): Profile? {
         val entity = profileDao.getProfile(id) ?: return null
         return entity.toModel(outboundDao.listForProfile(id))
@@ -385,8 +448,9 @@ class ConfigRepository(
                 updatedAtEpochMs = now,
                 source = profile.source.name,
                 selectedOutboundId = selected,
-                subscriptionUrl = profile.subscriptionUrl,
-                lastRefreshEpochMs = profile.lastRefreshEpochMs,
+                // The copy is the user's own config: a subscription refresh must never touch or remove it.
+                subscriptionUrl = null,
+                lastRefreshEpochMs = null,
                 dnsJson = profile.dnsJson,
                 dnsPolicy = profile.dnsPolicy.name,
                 modeOverride = profile.modeOverride,

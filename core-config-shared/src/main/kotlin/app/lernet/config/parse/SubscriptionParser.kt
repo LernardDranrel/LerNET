@@ -1,10 +1,9 @@
 package app.lernet.config.parse
 
 import app.lernet.config.model.ProfileSource
-import java.util.Base64
 
 object SubscriptionParser {
-    fun parse(body: String, subscriptionUrl: String): ImportResult {
+    fun parse(body: String, subscriptionUrl: String, updateIntervalHours: Int? = null): ImportResult {
         val trimmed = body.trim()
         val jsonOrEmpty = when {
             trimmed.isEmpty() ->
@@ -15,79 +14,68 @@ object SubscriptionParser {
                     source = ProfileSource.SUBSCRIPTION,
                     defaultName = "Подписка",
                     subscriptionUrl = subscriptionUrl,
-                )
+                ).withInterval(updateIntervalHours)
             else -> null
         }
         if (jsonOrEmpty != null) return jsonOrEmpty
         val decoded = decodeMaybeBase64(trimmed)
-        val lines = decoded.lines().map { it.trim() }.filter { it.isNotBlank() && !it.startsWith("#") }
+        val lines = decoded.lines().map { it.trim() }.filter { it.isNotBlank() && !it.startsWith("#") && !it.startsWith("//") }
         if (lines.isEmpty()) {
-            return ImportResult.Failure(listOf(FieldError("subscription", "В подписке нет узлов")))
+            return ImportResult.Failure(listOf(FieldError("subscription", "В подписке нет серверов")))
         }
         val drafts = mutableListOf<ImportedProfileDraft>()
-        val errors = mutableListOf<FieldError>()
+        val skipped = mutableListOf<SkippedLine>()
         lines.forEachIndexed { index, line ->
-            parseLine(line, index, subscriptionUrl, drafts, errors)
+            when (val result = parseLine(line, index, subscriptionUrl)) {
+                is ImportResult.Success -> drafts += result.drafts
+                is ImportResult.Failure -> skipped += SkippedLine(index + 1, result.errors.joinToString("; ") { it.message })
+            }
         }
         if (drafts.isEmpty()) {
-            return ImportResult.Failure(
-                errors.ifEmpty { listOf(FieldError("subscription", "Не удалось разобрать ни одного узла")) },
-            )
+            val reason = ImportReport.skipped(skipped) ?: "Не удалось разобрать ни одного сервера"
+            return ImportResult.Failure(listOf(FieldError("subscription", reason)))
         }
-        return ImportResult.Success(drafts)
+        return ImportResult.Success(drafts, skipped, updateIntervalHours)
     }
 
-    private fun parseLine(
-        line: String,
-        index: Int,
-        subscriptionUrl: String,
-        drafts: MutableList<ImportedProfileDraft>,
-        errors: MutableList<FieldError>,
-    ) {
-        val result = when {
-            line.startsWith("vless://", ignoreCase = true) ->
-                VlessParser.parse(line).prefixed(index).withSubscription(subscriptionUrl)
-            line.startsWith("{") ->
-                JsonConfigParser.parse(
-                    raw = line,
-                    source = ProfileSource.SUBSCRIPTION,
-                    defaultName = "Узел ${index + 1}",
-                    subscriptionUrl = subscriptionUrl,
-                ).prefixed(index)
-            else -> ImportResult.Failure(
-                listOf(FieldError("line[$index]", "Строка не похожа ни на ссылку vless://, ни на JSON-конфиг")),
+    private fun parseLine(line: String, index: Int, subscriptionUrl: String): ImportResult = when {
+        ShareLinkParser.isShareLink(line) ->
+            ShareLinkParser.parse(line).withSubscription(subscriptionUrl)
+        line.startsWith("{") ->
+            JsonConfigParser.parse(
+                raw = line,
+                source = ProfileSource.SUBSCRIPTION,
+                defaultName = "Сервер ${index + 1}",
+                subscriptionUrl = subscriptionUrl,
+            )
+        else -> {
+            val scheme = line.substringBefore("://", "").takeIf { it.isNotBlank() && it.length <= 16 && line.contains("://") }
+            ImportResult.Failure(
+                listOf(
+                    FieldError(
+                        "line[$index]",
+                        if (scheme != null) "ссылки «$scheme://» не поддерживаются" else "строка не похожа ни на ссылку на сервер, ни на JSON-конфиг",
+                    ),
+                ),
             )
         }
-        when (result) {
-            is ImportResult.Success -> drafts += result.drafts
-            is ImportResult.Failure -> errors += result.errors
-        }
     }
-
-    private fun ImportResult.prefixed(index: Int): ImportResult =
-        when (this) {
-            is ImportResult.Success -> this
-            is ImportResult.Failure ->
-                ImportResult.Failure(errors.map { it.copy(field = "line[$index].${it.field}") })
-        }
 
     private fun ImportResult.withSubscription(url: String): ImportResult =
         when (this) {
             is ImportResult.Success ->
-                ImportResult.Success(drafts.map { it.copy(source = ProfileSource.SUBSCRIPTION, subscriptionUrl = url) })
+                copy(drafts = drafts.map { it.copy(source = ProfileSource.SUBSCRIPTION, subscriptionUrl = url.ifBlank { null }) })
             is ImportResult.Failure -> this
         }
 
+    private fun ImportResult.withInterval(hours: Int?): ImportResult =
+        if (this is ImportResult.Success) copy(updateIntervalHours = hours) else this
+
     internal fun decodeMaybeBase64(raw: String): String {
         val compact = raw.replace("\\s".toRegex(), "")
-        val looksBase64 = compact.matches(Regex("^[A-Za-z0-9+/=_-]+$")) && compact.length % 4 == 0
+        val looksBase64 = compact.matches(Regex("^[A-Za-z0-9+/=_-]+$"))
         if (!looksBase64) return raw
-        val padded = compact.replace('-', '+').replace('_', '/')
-            .let { text ->
-                val pad = (4 - text.length % 4) % 4
-                text + "=".repeat(pad)
-            }
-        val decoded = runCatching { String(Base64.getDecoder().decode(padded), Charsets.UTF_8) }.getOrNull()
-        return decoded?.takeIf { it.contains("vless://", ignoreCase = true) || it.contains("{") } ?: raw
+        val decoded = ShareLinkParser.decodeBase64(compact)
+        return decoded?.takeIf { ShareLinkParser.countLinks(it) > 0 || it.contains("{") } ?: raw
     }
 }

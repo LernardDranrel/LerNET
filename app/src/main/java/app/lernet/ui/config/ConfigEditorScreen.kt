@@ -202,9 +202,26 @@ private fun ConfigBody(
         LocalDefaultsCard(state, onIntent, byId)
         Text(stringResource(R.string.cfg_remote_section), style = MaterialTheme.typography.headlineSmall)
         Text(stringResource(R.string.cfg_remote_help), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (state.subscriptionUrl != null) SubscriptionCard(state, onIntent)
         NodeCard(state, onIntent)
         DisguiseCard(state, onIntent, byId[TruthFieldId.REALITY])
         EngineCard(state, onIntent)
+    }
+}
+
+@Composable
+private fun SubscriptionCard(state: ConfigEditorUiState, onIntent: (ConfigEditorIntent) -> Unit) {
+    PanelCard {
+        SectionTitle(stringResource(R.string.cfg_subscription), stringResource(R.string.cfg_subscription_why))
+        state.subscriptionNote?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        if (state.dirty) Text(stringResource(R.string.cfg_subscription_save_first), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        OutlinedButton(
+            onClick = { onIntent(ConfigEditorIntent.RefreshSubscription) },
+            enabled = !state.subscriptionBusy && !state.saving && !state.dirty,
+            modifier = Modifier.lernetButton().testTag("cfg-subscription-refresh"),
+        ) {
+            Text(stringResource(if (state.subscriptionBusy) R.string.cfg_subscription_busy else R.string.cfg_subscription_refresh))
+        }
     }
 }
 

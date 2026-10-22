@@ -7,6 +7,7 @@ import app.lernet.config.parse.GuessedMode
 import app.lernet.config.parse.ImportCoordinator
 import app.lernet.config.parse.ImportGuess
 import app.lernet.config.parse.ImportHint
+import app.lernet.config.parse.ImportReport
 import app.lernet.config.parse.ImportResult
 import app.lernet.config.repo.ConfigRepository
 import app.lernet.engine.redact.LerNetLog
@@ -45,6 +46,8 @@ data class ImportUiState(
     val firstSavedId: String? = null,
     /** Parts of the imported config LerNET does not use; shown with the result, not only in the journal. */
     val unusedParts: List<String> = emptyList(),
+    /** «Не удалось добавить N ссылок: …» — lines of a subscription or paste that were not added, never dropped silently. */
+    val skipped: String? = null,
 ) {
     val effectiveMode: ImportMode? get() = modeOverride ?: guess.mode?.toImportMode()
 }
@@ -68,6 +71,7 @@ class ImportViewModel @Inject constructor(
     private val coordinator: ImportCoordinator,
     private val repository: ConfigRepository,
     private val settingsStore: SettingsStore,
+    private val subscriptions: app.lernet.subscription.SubscriptionAutoRefresh,
 ) : ViewModel() {
     private val _state = MutableStateFlow(ImportUiState())
     val state: StateFlow<ImportUiState> = _state.asStateFlow()
@@ -86,7 +90,7 @@ class ImportViewModel @Inject constructor(
     }
 
     private fun onInput(value: String) {
-        _state.update { it.copy(input = value, guess = ImportGuess.EMPTY, errors = emptyList(), done = false) }
+        _state.update { it.copy(input = value, guess = ImportGuess.EMPTY, errors = emptyList(), done = false, skipped = null) }
         classifyJob?.cancel()
         classifyJob = viewModelScope.launch {
             delay(IMPORT_CLASSIFY_DEBOUNCE_MS)
@@ -140,6 +144,8 @@ class ImportViewModel @Inject constructor(
         val defaultDnsPolicy = settingsStore.settings.first().defaultDnsPolicy
         val ids = withContext(Dispatchers.IO) { repository.importDrafts(named.drafts, defaultDnsPolicy) }
         if (ids.isNotEmpty()) settingsStore.setActiveProfile(ids.first())
+        // The provider's own names are remembered, not the display name, so a user rename is kept on refresh.
+        if (ids.size == result.drafts.size) subscriptions.imported(result, ids)
         _state.update {
             it.copy(
                 busy = false,
@@ -149,6 +155,7 @@ class ImportViewModel @Inject constructor(
                 guess = ImportGuess.EMPTY,
                 firstSavedId = ids.firstOrNull(),
                 unusedParts = if (ids.isNotEmpty()) named.unusedParts else emptyList(),
+                skipped = ImportReport.skipped(result.skipped),
             )
         }
         events.emit(ImportEvent.Saved(ids.size, ids.firstOrNull(), ids))

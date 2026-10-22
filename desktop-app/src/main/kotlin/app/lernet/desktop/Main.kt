@@ -147,7 +147,12 @@ fun main(args: Array<String>) {
 }
 
 private fun desktopApplication(startupCheck: String?, startupFallbackMessage: String?) = application {
-    val controller = remember { DesktopController().also { startupFallbackMessage?.let(it::showMessage) } }
+    val controller = remember {
+        DesktopController().also {
+            startupFallbackMessage?.let(it::showMessage)
+            if (startupCheck == null) it.startSubscriptionSchedule()
+        }
+    }
     val expert = remember { if (startupCheck == null) DesktopExpertController(controller) else null }
     DisposableEffect(controller, expert) {
         val closed = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -790,6 +795,7 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                         ProfileRow(profile, profile.id == saved.selectedProfileId, !selectionLocked, probes[profile.id],
                             onProbe = { controller.probe(listOf(profile.id)) }, onMove = { controller.moveProfile(profile.id, it) },
                             onDuplicate = { controller.duplicateProfile(profile.id) },
+                            onRefreshSubscription = profile.subscriptionUrl?.takeIf(String::isNotBlank)?.let { url -> { controller.refreshSubscription(url) } },
                             groups = saved.groups, onSetGroup = { destination ->
                                 if (controller.setGroup(profile.id, destination) && destination != null) expanded = expanded + destination
                             },
@@ -805,6 +811,7 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                     ProfileRow(profile, profile.id == saved.selectedProfileId, !selectionLocked, probes[profile.id],
                         onProbe = { controller.probe(listOf(profile.id)) }, onMove = { controller.moveProfile(profile.id, it) },
                         onDuplicate = { controller.duplicateProfile(profile.id) },
+                        onRefreshSubscription = profile.subscriptionUrl?.takeIf(String::isNotBlank)?.let { url -> { controller.refreshSubscription(url) } },
                         groups = saved.groups, onSetGroup = { destination ->
                             if (controller.setGroup(profile.id, destination) && destination != null) expanded = expanded + destination
                         },
@@ -1450,6 +1457,7 @@ private fun ProfileGlyph() {
 @Composable
 private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boolean, probe: ProbeResult?, onProbe: () -> Unit,
     onMove: (Int) -> Unit, onDuplicate: () -> Unit, groups: List<StoredGroup>, onSetGroup: (String?) -> Unit,
+    onRefreshSubscription: (() -> Unit)? = null,
     dragging: Boolean, dropTarget: Boolean, indent: Boolean, dragOffset: Offset,
     onBounds: (Rect) -> Unit, onDragStart: (Offset) -> Unit, onDrag: (Offset) -> Unit, onDragEnd: () -> Unit,
     onDelete: () -> Unit, compact: Boolean = false, onClick: () -> Unit) {
@@ -1502,6 +1510,10 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
                         DropdownMenuItem(text = { Text("Ниже") }, onClick = { onMove(1); menu = false })
                         DropdownMenuItem(text = { Text("Переместить в папку…") }, onClick = { menu = false; folderMenu = true })
                         DropdownMenuItem(text = { Text("Дублировать") }, onClick = { onDuplicate(); menu = false })
+                        // Your choice, renames and edits are kept; the change takes effect at the next connect.
+                        onRefreshSubscription?.let { refresh ->
+                            DropdownMenuItem(text = { Text("Обновить подписку") }, onClick = { refresh(); menu = false })
+                        }
                     }
                     DropdownMenu(folderMenu, onDismissRequest = { folderMenu = false }) {
                         DropdownMenuItem(text = { Text("Без папки") }, onClick = { onSetGroup(null); folderMenu = false })
