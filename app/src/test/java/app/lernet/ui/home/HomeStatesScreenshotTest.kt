@@ -198,7 +198,9 @@ class HomeStatesScreenshotTest {
     @Config(qualifiers = "w390dp-h2000dp-xxhdpi")
     fun failedWholeScroll() = render("phone-error-full", base(ConnectionSnapshot.idle().copy(
         state = ConnectionState.FAILED, activeProfileId = "nl",
-        cause = ConnectionCause.DialFailure("dial tcp 203.0.113.5:443: connect: connection refused"))))
+        cause = ConnectionCause.DialFailure("dial tcp 203.0.113.5:443: connect: connection refused")),
+        // The same checks as the Windows pair (win-error-wide): the server answered the last check.
+        mapOf("nl" to ProfileProbe(tcpMs = 38, reachable = true))))
 
     @Test
     fun failedTimeout() = render("phone-error-timeout", base(ConnectionSnapshot.idle().copy(

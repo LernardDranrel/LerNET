@@ -115,8 +115,10 @@ class DesktopStatesRenderTest {
         { it.copy(busy = true, message = "Запускаем VPN", probes = goodProbes) })
     private val connected = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.RUNNING, "Подключено"),
         { it.copy(probes = goodProbes, healthMessage = "VPN отвечает · 142 мс", healthVerified = true, tunnelLatencyMs = 142) })
-    private val failed = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.FAILED, "VPN не запустился. Подробности — в журнале."),
-        { it.copy(probes = goodProbes) })
+    // The phone's failedWholeScroll: the server refused the connection; the raw line is behind «Подробнее».
+    private val refused = "dial tcp 203.0.113.5:443: connect: connection refused"
+    private val failed = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.FAILED, refused),
+        { it.copy(probes = goodProbes, connectionError = ConnectionError(app.lernet.engine.text.CoreFailureWords.title(refused))) })
     private fun holding(): DesktopScreenPreview {
         val now = System.currentTimeMillis()
         val report = FailoverReport("Работа", listOf(
