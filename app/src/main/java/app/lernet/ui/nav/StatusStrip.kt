@@ -60,10 +60,14 @@ internal fun stripStatus(snapshot: ConnectionSnapshot, profileName: String?, exp
         ConnectionState.CONNECTED -> when (snapshot.hold) {
             LinkHold.JAMMED -> StripStatus(stringResource(R.string.status_jammed), StripTone.WAIT)
             LinkHold.ALL_SILENT -> StripStatus(stringResource(R.string.status_hold), StripTone.WAIT)
-            else -> {
-                val base = profileName?.takeIf { it.isNotBlank() }
-                    ?.let { stringResource(R.string.status_connected_profile, it) } ?: stringResource(R.string.status_connected)
-                StripStatus(if (snapshot.dnsOk) "$base · ${stringResource(R.string.status_dns_ok)}" else base, StripTone.OK)
+            // Same as Windows: the VPN is up but its checks get no reply (the home shows the banner).
+            else -> if (snapshot.channel == app.lernet.engine.live.ChannelHealth.PIPE_SILENT ||
+                snapshot.channel == app.lernet.engine.live.ChannelHealth.TUNNEL_DEAD) {
+                StripStatus(stringResource(R.string.status_no_reply), StripTone.BAD)
+            } else {
+                // «Подключено · Нидерланды», word for word as Windows (shared StatusWords); Windows has no DNS signal to add.
+                StripStatus(profileName?.takeIf { it.isNotBlank() }
+                    ?.let { stringResource(R.string.status_connected_profile, it) } ?: stringResource(R.string.status_connected), StripTone.OK)
             }
         }
         ConnectionState.CONNECTING -> StripStatus(stringResource(R.string.status_connecting), StripTone.WAIT)

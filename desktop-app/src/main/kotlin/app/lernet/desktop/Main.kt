@@ -2,6 +2,7 @@
 
 package app.lernet.desktop
 
+import app.lernet.engine.text.HomeWords
 import app.lernet.config.net.LocalProxyAccess
 
 import app.lernet.engine.policy.ExpertVpnHandover
@@ -211,6 +212,8 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
     val modeStates = rememberSaveableStateHolder()
     var expertTab by rememberSaveable { mutableStateOf(false) }
     var homeRequest by remember { mutableIntStateOf(0) }
+    // G1 as on the phone: the strip is for the other pages; the basic home says the state under its button.
+    var basicHome by remember { mutableStateOf(true) }
     var expertConfirm by remember { mutableStateOf<ExpertIntent?>(null) }
     var expertImport by remember { mutableStateOf<ExpertArchivePreview?>(null) }
     var expertReplaceConfirm by remember { mutableStateOf(false) }
@@ -284,7 +287,7 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
                 Column(Modifier.fillMaxSize()) {
                     // G1: the connection state is visible on every page of both modes, in one place of constant height.
                     DesktopModeTabs(expertTab, { expertTab = it },
-                        status = workspaceStatus(expertUi, tunnel, ui),
+                        status = workspaceStatus(expertUi, tunnel, ui).takeUnless { !expertTab && basicHome },
                         reducedMotion = expertUi?.reducedMotion == true,
                         onStatusClick = {
                             val expertOwns = expertUi?.phase in setOf(ExpertPhase.RUNNING, ExpertPhase.STARTING, ExpertPhase.APPLYING, ExpertPhase.FAILED)
@@ -331,7 +334,8 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
                                 })
                                 if (splash.visible) DesktopExpertSplash()
                                 }
-                            } else DesktopScreen(controller, onOpenNetwork = { networkWindowOpen = true }, onRequestElevation = {
+                            } else DesktopScreen(controller, homeRequest = homeRequest, onHomeShown = { basicHome = it },
+                                onOpenNetwork = { networkWindowOpen = true }, onRequestElevation = {
                                 WindowsElevation.relaunchAsAdministrator()
                                     .onSuccess { expert?.close(); controller.close(); exitApplication() }
                                     .onFailure { controller.showMessage(app.lernet.engine.text.UserText.of(it, "Не удалось запросить права администратора")) }
@@ -364,7 +368,7 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
                                 }
                                 if (!WindowsElevation.isElevated) {
                                     Text("Windows запросит права администратора и откроет новую копию LerNET. " +
-                                        "Текущее подключение будет остановлено. После этого открой экспертный режим и подтверди включение.")
+                                        "Текущее подключение будет остановлено. После этого открой Эксперт и подтверди включение.")
                                 }
                                 if (tunnel.status in setOf(TunnelStatus.RUNNING, TunnelStatus.STARTING)) {
                                     Text("Обычное подключение LerNET будет остановлено перед переключением. " +
@@ -493,19 +497,19 @@ internal fun workspaceStatus(expertUi: ExpertUiState?, tunnel: TunnelSnapshot, u
     }
     val profile = ui.saved.profiles.firstOrNull { it.id == ui.saved.selectedProfileId }?.name
     val holding = ui.tried != null && tunnel.status != TunnelStatus.STOPPED
+    // The same words and order as the phone's strip (shared StatusWords).
     return when {
-        holding -> WorkspaceStatus("Нет связи · VPN держим", StatusTone.HOLD)
-        // The same short hold words as the Android strip; the full sentence stays on the main screen.
+        holding -> WorkspaceStatus(app.lernet.engine.text.StatusWords.NO_LINK_HELD, StatusTone.HOLD)
         tunnel.status == TunnelStatus.RUNNING && ui.hold == app.lernet.engine.policy.LinkHold.JAMMED ->
-            WorkspaceStatus("Связь глушат · держим подключение", StatusTone.HOLD)
+            WorkspaceStatus(app.lernet.engine.text.StatusWords.JAMMED, StatusTone.HOLD)
         tunnel.status == TunnelStatus.RUNNING && ui.hold == app.lernet.engine.policy.LinkHold.ALL_SILENT ->
-            WorkspaceStatus("Серверы не отвечают · VPN держим", StatusTone.HOLD)
-        tunnel.status == TunnelStatus.RUNNING && ui.healthFailures >= 2 -> WorkspaceStatus("Подключено · нет ответа", StatusTone.PROBLEM)
-        tunnel.status == TunnelStatus.RUNNING -> WorkspaceStatus(listOfNotNull("Подключено", profile).joinToString(" · "), StatusTone.OK)
-        ui.busy || tunnel.status == TunnelStatus.STARTING -> WorkspaceStatus("Подключаемся…", StatusTone.PROGRESS)
-        tunnel.status == TunnelStatus.RECONNECTING -> WorkspaceStatus("Переподключаемся…", StatusTone.PROGRESS)
-        tunnel.status == TunnelStatus.FAILED -> WorkspaceStatus("Не удалось подключиться", StatusTone.PROBLEM)
-        else -> WorkspaceStatus("Отключено")
+            WorkspaceStatus(app.lernet.engine.text.StatusWords.HOLD, StatusTone.HOLD)
+        tunnel.status == TunnelStatus.RUNNING && ui.healthFailures >= 2 -> WorkspaceStatus(app.lernet.engine.text.StatusWords.NO_REPLY, StatusTone.PROBLEM)
+        tunnel.status == TunnelStatus.RUNNING -> WorkspaceStatus(app.lernet.engine.text.StatusWords.connected(profile, dnsOk = false), StatusTone.OK)
+        ui.busy || tunnel.status == TunnelStatus.STARTING -> WorkspaceStatus(app.lernet.engine.text.StatusWords.CONNECTING, StatusTone.PROGRESS)
+        tunnel.status == TunnelStatus.RECONNECTING -> WorkspaceStatus(app.lernet.engine.text.StatusWords.RECONNECTING, StatusTone.PROGRESS)
+        tunnel.status == TunnelStatus.FAILED || ui.connectionError != null -> WorkspaceStatus(app.lernet.engine.text.StatusWords.FAILED, StatusTone.PROBLEM)
+        else -> WorkspaceStatus(app.lernet.engine.text.StatusWords.OFF)
     }
 }
 
@@ -532,7 +536,7 @@ private data class ExportSelection(val groupId: String?, val suggestedName: Stri
 
 @Composable
 internal fun DesktopScreen(controller: DesktopController, onRequestElevation: () -> Unit, onOpenNetwork: () -> Unit,
-    preview: DesktopScreenPreview? = null) {
+    preview: DesktopScreenPreview? = null, homeRequest: Int = 0, onHomeShown: (Boolean) -> Unit = {}) {
     val liveUi by controller.state.collectAsState()
     val liveTunnel by controller.tunnel.state.collectAsState()
     // Screenshot tests show every state without starting a real core; the app itself never passes a preview.
@@ -543,6 +547,9 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
     val trace by controller.tracer.state.collectAsState()
     // v2: launch and every mode change open the basic home, not the last page.
     var tab by remember { mutableStateOf(preview?.page?.let { p -> Tab.entries.firstOrNull { it.name == p } } ?: Tab.PROFILES) }
+    // A click on the status strip opens the home, as on the phone (it used to be counted and never read).
+    LaunchedEffect(homeRequest) { if (homeRequest > 0) tab = Tab.PROFILES }
+    LaunchedEffect(tab) { onHomeShown(tab == Tab.PROFILES) }
     var importOpen by remember { mutableStateOf(false) }
     var importGroupId by remember { mutableStateOf<String?>(null) }
     var newGroupOpen by remember { mutableStateOf(false) }
@@ -561,6 +568,7 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
                 onGroupRoutes = { groupId -> routeOwnerId = "grp_$groupId"; tab = Tab.ROUTES },
                 onExportGroup = { group -> exportRequest = ExportSelection(group.id, "LerNET-${group.name.take(30)}.lernet.json") },
                 onSelect = { id -> controller.select(id); tab = Tab.PROFILES },
+                onProfileRoutes = { id -> routeOwnerId = id; tab = Tab.ROUTES },
             ) {
                 Box {
                     GroupActionButton("Добавить конфиг или папку", onClick = { createMenu = true }) { color ->
@@ -585,22 +593,9 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
             val holding = ui.tried != null && tunnel.status != TunnelStatus.STOPPED
             val statusLine = if (holding) "Нет связи · VPN держим" else (if (tunnel.status == TunnelStatus.RUNNING) ui.healthMessage else tunnel.message)
                 .ifBlank { "Готово к подключению" }
-            // The home and the journal already say the state in their own body: the header does not repeat it.
-            // Other pages mention the state only when something needs attention.
-            val headerStatus = tab != Tab.PROFILES && tab != Tab.DIAGNOSTICS &&
-                (holding || tunnel.status == TunnelStatus.FAILED || ui.healthFailures >= 2)
+            // Audit G1/H: the open page is named once, by its highlighted button (no page title repeating it);
+            // the connection state is the strip on top, as on the phone's secondary screens.
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(tab.label, style = MaterialTheme.typography.headlineMedium)
-                    if (headerStatus) Spacer(Modifier.height(4.dp))
-                    if (headerStatus) Text(statusLine, style = MaterialTheme.typography.bodyMedium,
-                        color = when {
-                            holding -> hold
-                            ui.healthFailures >= 2 -> desktopColors.error
-                            tunnel.status == TunnelStatus.RUNNING && ui.healthVerified != true -> Color(0xFFFFD27B)
-                            else -> statusColor(tunnel.status)
-                        })
-                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     // Audit N10/G5: ordinary navigation; the open page is not a toggle and «Правила» keeps the chosen owner.
                     Tab.entries.forEach { item ->
@@ -627,19 +622,7 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
             }
                 if (ui.networkWarning.isNotBlank()) Text(ui.networkWarning, color = Color(0xFFF1CC80), fontSize = 12.sp, maxLines = 3)
             ui.guardProblem?.let { Text(it, color = desktopColors.error, fontSize = 12.sp, maxLines = 3) }
-            // Audit N15: a failure is an InfoBar on the page, not a window over it.
-            ui.connectionError?.let { error ->
-                Spacer(Modifier.height(10.dp))
-                InfoBar("Не удалось подключиться", app.lernet.engine.text.UserText.clean(error.message, error.message), desktopColors.error,
-                    Modifier.testTag("connection_error_bar")) {
-                    TextButton(onClick = {
-                        controller.dismissConnectionError()
-                        if (error.routeOwnerId != null) { routeOwnerId = error.routeOwnerId; tab = Tab.ROUTES } else tab = Tab.DIAGNOSTICS
-                    }) { Text(if (error.routeOwnerId != null) "Открыть правила" else "Журнал запросов") }
-                    TextButton(onClick = { copyToClipboard(error.message) }) { Text("Скопировать") }
-                    TextButton(onClick = controller::dismissConnectionError) { Text("Закрыть") }
-                }
-            }
+            // Audit N15: a failure is the same card as on the phone, in the home's attention zone (ProfileHome).
             // Audit N14: deleting a config can be undone, as on the phone.
             val deleted by controller.deleted.collectAsState()
             deleted?.let { item ->
@@ -659,7 +642,7 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
                     localProxy = ui.localProxy.takeIf { tunnel.status == TunnelStatus.RUNNING },
                     tried = ui.tried.takeIf { holding }, diagnostics = diagnostics,
                     onOpenRules = { owner -> routeOwnerId = owner; tab = Tab.ROUTES },
-                    onOpenJournal = { tab = Tab.DIAGNOSTICS })
+                    onOpenJournal = { tab = Tab.DIAGNOSTICS }, connectionError = ui.connectionError)
                 Tab.ROUTES -> DesktopRoutes(ui.saved, controller, routeOwnerId)
                 Tab.DIAGNOSTICS -> Diagnostics(tunnel, diagnostics, connectionHistory, controller)
                 Tab.SETTINGS -> Settings(ui.saved, controller, onRequestElevation, onOpenNetwork = onOpenNetwork,
@@ -729,9 +712,10 @@ private fun NavSymbol(tab: Tab, selected: Boolean) {
 @Composable
 internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, probes: Map<String, ProbeResult>,
     controller: DesktopController, compact: Boolean = false, onImport: (String?) -> Unit, onGroupRoutes: (String) -> Unit,
-    onExportGroup: (StoredGroup) -> Unit, onSelect: (String) -> Unit, addAction: @Composable () -> Unit) {
+    onExportGroup: (StoredGroup) -> Unit, onSelect: (String) -> Unit, onProfileRoutes: (String) -> Unit = {},
+    addAction: @Composable () -> Unit) {
     val selectionLocked = busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RECONNECTING)
-    var delete by remember { mutableStateOf<StoredProfile?>(null) }
+    var editProfile by remember { mutableStateOf<StoredProfile?>(null) }
     var renameGroup by remember { mutableStateOf<StoredGroup?>(null) }
     var deleteGroup by remember { mutableStateOf<StoredGroup?>(null) }
     var groupMenu by remember { mutableStateOf<String?>(null) }
@@ -892,7 +876,8 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                             onBounds = { profileBounds[profile.id] = it },
                             onDragStart = { local -> beginDrag(profile.id, (profileBounds[profile.id]?.topLeft ?: Offset.Zero) + local) },
                             onDrag = { dragDelta += it }, onDragEnd = finishDrag,
-                            onDelete = { delete = profile }, compact = compact) { onSelect(profile.id) }
+                            onDelete = { controller.delete(profile.id) }, compact = compact,
+                            onEdit = { editProfile = profile }, onRules = { onGroupRoutes(group.id) }) { onSelect(profile.id) }
                     }
                 }
                 items(saved.profiles.filter { it.groupId == null }, key = { it.id }) { profile ->
@@ -908,7 +893,8 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                         onBounds = { profileBounds[profile.id] = it },
                         onDragStart = { local -> beginDrag(profile.id, (profileBounds[profile.id]?.topLeft ?: Offset.Zero) + local) },
                         onDrag = { dragDelta += it }, onDragEnd = finishDrag,
-                        onDelete = { delete = profile }, compact = compact) { onSelect(profile.id) }
+                        onDelete = { controller.delete(profile.id) }, compact = compact,
+                        onEdit = { editProfile = profile }, onRules = { onProfileRoutes(profile.id) }) { onSelect(profile.id) }
                 }
                 if (draggingId != null) item("drop-root") {
                     DisposableEffect(Unit) { onDispose { rootBounds = null } }
@@ -942,24 +928,7 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
             dismissButton = { TextButton(onClick = { deleteGroup = null }) { Text("Отмена") } },
         )
     }
-    delete?.let { profile ->
-        AlertDialog(
-            modifier = Modifier.onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown) false else when (event.key) {
-                    Key.Enter, Key.NumPadEnter -> { controller.delete(profile.id); delete = null; true }
-                    Key.Escape -> { delete = null; true }
-                    else -> false
-                }
-            },
-            onDismissRequest = { delete = null },
-            title = { Text("Удалить «" + profile.name + "»?") },
-            text = { Text("Конфиг и его правила будут удалены.") },
-            confirmButton = {
-                TextButton(onClick = { controller.delete(profile.id); delete = null }) { Text("Удалить") }
-            },
-            dismissButton = { TextButton(onClick = { delete = null }) { Text("Отмена") } },
-        )
-    }
+    editProfile?.let { profile -> DesktopProfileEditor(profile, saved, controller) { editProfile = null } }
 }
 
 @Composable
@@ -967,10 +936,9 @@ internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boole
     controller: DesktopController, onImport: (String?) -> Unit,
     localProxy: LocalProxyAccess?, tried: FailoverReport?, diagnostics: CoreDiagnostics,
     onOpenRules: (String) -> Unit, onOpenJournal: () -> Unit, detail: String? = null,
-    linkHold: app.lernet.engine.policy.LinkHold? = null) {
+    linkHold: app.lernet.engine.policy.LinkHold? = null, connectionError: ConnectionError? = null) {
     val selected = saved.profiles.firstOrNull { it.id == saved.selectedProfileId }
     LaunchedEffect(selected?.id) { selected?.let { controller.probe(listOf(it.id)) } }
-    var editProfile by remember { mutableStateOf<StoredProfile?>(null) }
     if (selected == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(Modifier.widthIn(max = 490.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -994,19 +962,23 @@ internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boole
     val holding = tried != null
     val proxyMode = controller.effectiveMode(selected) == RunMode.PROXY
     val group = saved.groups.firstOrNull { it.id == selected.groupId }
+    val failed = connectionError != null || tunnel.status == TunnelStatus.FAILED
     val (statusTitle, statusTone) = when {
-        holding -> "Нет связи · VPN держим" to hold
+        holding -> HomeWords.HOLDING to hold
         // The same headline as the phone while LerNET holds a running tunnel (resilience hold states).
         linkHold != null -> (detail?.takeIf { it.isNotBlank() } ?: app.lernet.engine.policy.LinkJudge.holdMessage(linkHold)) to hold
         tunnel.status == TunnelStatus.RUNNING -> "Подключено" to green
         active -> "Подключаемся…" to blue
-        tunnel.status == TunnelStatus.FAILED -> "Не удалось подключиться" to desktopColors.error
+        failed && !active -> HomeWords.FAILED to desktopColors.error
         else -> "Отключено" to muted
     }
     // Audit H7: one attention zone, the most important note first and «Ещё N» for the rest.
     val attention = buildList<@Composable () -> Unit> {
-        tried?.let { report -> add { Column { HoldActions(saved, selected, controller); Spacer(Modifier.height(10.dp)); FailoverReportCard(report) } } }
+        // Same order as the phone: the error card first, then the hold report with its buttons inside.
+        if (failed && !active && !holding) add { HomeFailedCard(connectionError, tunnel.message, saved, selected, controller, onOpenRules) }
+        tried?.let { report -> add { FailoverReportCard(report) { HoldActions(saved, selected, controller) } } }
         if (hasSkippedConditions(saved, selected)) add { HomeSkippedConditions(saved, selected) }
+        if (proxyMode) add { HomeNote(HomeWords.PROXY_NOTE) }
     }
     var attentionOpen by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1014,28 +986,29 @@ internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boole
             // Audit H1/H2 (mockup 1): the button and the state without a frame or a title.
             Column(Modifier.fillMaxWidth().testTag("home_center"), horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                ConnectionPower(active = active, busy = busy, holding = holding, connected = tunnel.status == TunnelStatus.RUNNING && !busy,
-                    failed = tunnel.status == TunnelStatus.FAILED, onClick = {
+                // Orange while LerNET holds the tunnel, also when replies are jammed or every server is silent (as the phone).
+                ConnectionPower(active = active, busy = busy, holding = holding || linkHold != null,
+                    connected = tunnel.status == TunnelStatus.RUNNING && !busy, failed = failed, onClick = {
                         if (active) controller.disconnect() else controller.connect()
                     })
                 Text(statusTitle, style = MaterialTheme.typography.titleLarge, color = statusTone, fontWeight = FontWeight.SemiBold,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.testTag("home_state"))
-                // Holding: «Выключить VPN» with its explanation is in the attention zone, so no second action here.
-                if (!holding) Text(if (active) "Нажмите, чтобы отключить" else "Нажмите, чтобы подключить", color = muted, fontSize = 13.sp)
-                detail?.takeIf { it.isNotBlank() && it != statusTitle }?.let {
+                // Holding: «Выключить VPN» is in the report; failed: the error card has «Повторить» (as the phone).
+                if (!holding && !(failed && !active)) Text(if (active) HomeWords.TAP_DISCONNECT else HomeWords.TAP_CONNECT, color = muted, fontSize = 13.sp)
+                detail?.takeIf { it.isNotBlank() && it != statusTitle && !failed }?.let {
                     Text(it, color = muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 }
             }
             HomeProfileLine(saved, selected, group, proxyMode, controller,
-                onRules = { onOpenRules(routeOwner(selected)) }, onEdit = { editProfile = selected })
+                onRules = { onOpenRules(routeOwner(selected)) })
             if (attention.isNotEmpty()) {
                 Column(Modifier.fillMaxWidth().testTag("home_attention"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     attention.first()()
                     if (attention.size > 1) {
                         if (attentionOpen) attention.drop(1).forEach { it() }
                         TextButton(onClick = { attentionOpen = !attentionOpen }, modifier = Modifier.testTag("home_attention_more")) {
-                            Text(if (attentionOpen) "Свернуть" else "Ещё ${attention.size - 1}")
+                            Text(if (attentionOpen) HomeWords.ATTENTION_LESS else HomeWords.attentionMore(attention.size - 1))
                         }
                     }
                 }
@@ -1043,50 +1016,106 @@ internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boole
             // While LerNET holds the tunnel the report says what was tried; the checks would only repeat it.
             if (!holding) HomeLinkPanel(selected, endpoint, tunnel, active, probes[selected.id], tunnelLatencyMs, diagnostics, trace, controller)
             // Audit H4: the journal is one row under «Связь», as on the phone.
-            Surface(color = panel, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()
-                .clickable(role = Role.Button, onClick = onOpenJournal).testTag("home_journal_row")) {
-                Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Журнал запросов", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                    Text("что и куда ушло  ›", color = muted, fontSize = 13.sp)
-                }
+            // Audit H4: the same outlined «Журнал запросов ›» button as the phone.
+            OutlinedButton(onClick = onOpenJournal, modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).testTag("home_journal_row")) {
+                Text(HomeWords.JOURNAL_ROW)
             }
         }
     }
-    editProfile?.let { profile -> DesktopProfileEditor(profile, saved, controller) { editProfile = null } }
 }
 
-/** Audit H3/N12/N13: one line for the config — name, folder, mode; «Правила» and the rest in ⋮ (delete is there, with «Отменить»). */
+/**
+ * Audit H3/N12 (mockup 1): one line for the config — name, folder, autoswap, mode — with «Правила» and «Сменить ›»,
+ * the same words and actions as the phone. Editing, moving and deleting are in the config's ⋮ in the left column
+ * (the phone has them in the drawer's ⋮).
+ */
 @Composable
 private fun HomeProfileLine(saved: StoredState, selected: StoredProfile, group: StoredGroup?, proxyMode: Boolean,
-    controller: DesktopController, onRules: () -> Unit, onEdit: () -> Unit) {
-    var menu by remember { mutableStateOf(false) }
-    var moveMenu by remember { mutableStateOf(false) }
-    Surface(color = panel, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().testTag("home_profile_line")) {
+    controller: DesktopController, onRules: () -> Unit) {
+    var change by remember { mutableStateOf(false) }
+    Surface(color = panel, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().testTag("home_profile_line")
+        .clickable(role = Role.Button) { change = true }) {
         Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(selected.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                val meta = listOfNotNull(group?.let { "папка «${it.name}»" + if (it.autoSwap) " · автосмена" else "" } ?: "без папки",
-                    if (proxyMode) "режим прокси" else null).joinToString(" · ")
-                Text(meta, color = muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(HomeWords.profileSubtitle(group?.name, group?.autoSwap == true, proxyMode),
+                    color = muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            TextButton(onClick = onRules, modifier = Modifier.testTag("home_profile_rules")) { Text("Правила") }
+            TextButton(onClick = onRules, modifier = Modifier.testTag("home_profile_rules")) { Text(HomeWords.RULES) }
             Box {
-                TextButton(onClick = { menu = true }, modifier = Modifier.testTag("home_profile_more")) { Text("⋮", fontSize = 18.sp) }
-                DropdownMenu(menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text("Изменить конфиг") }, onClick = { menu = false; onEdit() })
-                    DropdownMenuItem(text = { Text("Переместить в папку") }, onClick = { menu = false; moveMenu = true })
-                    DropdownMenuItem(text = { Text("Проверить связь") }, onClick = { menu = false; controller.probe(listOf(selected.id)) })
-                    HorizontalDivider()
-                    DropdownMenuItem(text = { Text("Удалить", color = desktopColors.error) }, onClick = { menu = false; controller.delete(selected.id) })
+                TextButton(onClick = { change = true }, modifier = Modifier.testTag("home_profile_change")) { Text(HomeWords.CHANGE) }
+                ConfigChoiceMenu(change, saved, exclude = selected.id, onDismiss = { change = false }) { controller.select(it) }
+            }
+        }
+    }
+}
+
+/** «Сменить ›» and «Другой конфиг»: every other config, folder by folder, as the phone's drawer lists them. */
+@Composable
+private fun ConfigChoiceMenu(open: Boolean, saved: StoredState, exclude: String?, onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    DropdownMenu(open, onDismissRequest = onDismiss) {
+        val folders = saved.groups.map { g -> g.name to saved.profiles.filter { it.groupId == g.id && it.id != exclude } } +
+            listOf("без папки" to saved.profiles.filter { p -> p.id != exclude && saved.groups.none { it.id == p.groupId } })
+        folders.filter { it.second.isNotEmpty() }.forEach { (folder, profiles) ->
+            Text(folder, color = muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp))
+            profiles.forEach { profile ->
+                DropdownMenuItem(text = { Text(profile.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    onClick = { onDismiss(); onPick(profile.id) })
+            }
+        }
+    }
+}
+
+/** The phone's error card: what failed, «Подробнее» with the technical line, «Повторить», «Другой конфиг», the journal. */
+@Composable
+private fun HomeFailedCard(error: ConnectionError?, technical: String, saved: StoredState, selected: StoredProfile,
+    controller: DesktopController, onOpenRules: (String) -> Unit) {
+    val title = error?.message?.let { app.lernet.engine.text.UserText.clean(it, it) }?.takeIf { it.isNotBlank() } ?: HomeWords.FAILED
+    val detail = technical.takeIf { it.isNotBlank() && it != title && it !in plainStates }
+    var expanded by remember { mutableStateOf(false) }
+    var other by remember { mutableStateOf(false) }
+    Surface(color = desktopColors.error.copy(alpha = .12f), shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, desktopColors.error.copy(alpha = .35f)), modifier = Modifier.fillMaxWidth().testTag("connection_error_card")) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, fontWeight = FontWeight.SemiBold, color = desktopColors.onSurface)
+            if (detail != null) {
+                TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) HomeWords.HIDE_DETAILS else HomeWords.DETAILS) }
+                if (expanded) {
+                    Text(detail, color = muted, fontSize = 12.sp)
+                    TextButton(onClick = { copyToClipboard(detail) }) { Text("Скопировать") }
                 }
-                DropdownMenu(moveMenu, onDismissRequest = { moveMenu = false }) {
-                    DropdownMenuItem(text = { Text("Без папки") }, onClick = { controller.setGroup(selected.id, null); moveMenu = false })
-                    saved.groups.forEach { g ->
-                        DropdownMenuItem(text = { Text(g.name) }, onClick = { controller.setGroup(selected.id, g.id); moveMenu = false })
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(onClick = { controller.dismissConnectionError(); controller.connect() }, modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = desktopColors.error, contentColor = desktopColors.onError)) {
+                    Text(HomeWords.RETRY)
+                }
+                Box(Modifier.weight(1f)) {
+                    OutlinedButton(onClick = { other = true }, modifier = Modifier.fillMaxWidth()) { Text(HomeWords.OTHER_CONFIG) }
+                    ConfigChoiceMenu(other, saved, exclude = selected.id, onDismiss = { other = false }) {
+                        controller.dismissConnectionError(); controller.select(it)
                     }
                 }
             }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                error?.routeOwnerId?.let { owner -> TextButton(onClick = { controller.dismissConnectionError(); onOpenRules(owner) }) { Text("Открыть правила") } }
+                TextButton(onClick = {
+                    val dialog = FileDialog(null as Frame?, "Сохранить журнал", FileDialog.SAVE)
+                    dialog.file = "LerNET-журнал-" + java.time.LocalDate.now() + ".txt"
+                    dialog.isVisible = true
+                    dialog.file?.let { controller.saveJournal(Path.of(dialog.directory, it)) }
+                    dialog.dispose()
+                }) { Text("Сохранить журнал") }
+            }
         }
+    }
+}
+
+/** A plain note in the attention zone (the phone's ProxyModeNote). */
+@Composable
+private fun HomeNote(text: String) {
+    Surface(color = panel, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+        Text(text, color = muted, fontSize = 13.sp, lineHeight = 18.sp, modifier = Modifier.padding(14.dp))
     }
 }
 
@@ -1098,61 +1127,52 @@ private fun HomeLinkPanel(selected: StoredProfile, endpoint: app.lernet.engine.c
     var pathOpen by remember { mutableStateOf(false) }
     val running = tunnel.status == TunnelStatus.RUNNING
     val checking = probe?.checking == true
+    // The same rows, words and rules as the phone's LinkCard (shared HomeWords); no tooltip with protocol names.
     Panel(Modifier.fillMaxWidth().testTag("home_link_card")) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Связь", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            // Audit H5: the technical words are a tooltip, not a fold-out block.
-            TooltipArea(tooltip = {
-                Surface(color = Color(0xFF1B2A3E), shape = RoundedCornerShape(8.dp), shadowElevation = 4.dp) {
-                    Text(listOf(
-                        "«Сервер» — ${probe?.serverProtocol ?: EndpointProbe.protocol(selected)}-соединение с сервером, без VPN.",
-                        "«Интернет через VPN» — HTTP-запрос через этот конфиг.",
-                        "Сетевой адаптер VPN создаётся только при подключении.",
-                    ).joinToString("\n"), color = desktopColors.onSurface, fontSize = 12.sp, lineHeight = 17.sp,
-                        modifier = Modifier.padding(10.dp).widthIn(max = 360.dp))
-                }
-            }) { Text("Как проверяем ⓘ", color = muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 8.dp)) }
+            Text(HomeWords.LINK_TITLE, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             TextButton(onClick = { controller.probe(listOf(selected.id)) }, enabled = !checking, modifier = Modifier.testTag("home_link_check")) {
-                Text(if (checking) "Проверяем…" else "Проверить связь")
+                Text(if (checking) HomeWords.CHECKING_BUTTON else HomeWords.CHECK)
             }
         }
         probe?.budgetWaitMs?.let { wait ->
             Text(app.lernet.engine.policy.BudgetNotice.full(wait, expert = false), color = muted, fontSize = 12.sp)
         }
-        val channel = if (active && tunnelLatencyMs != null) tunnelLatencyMs else probe?.tunnelLatencyMs
-        HomeLinkRow("Интернет через VPN", when {
-            !active && channel == null && probe?.tunnelMessage.isNullOrBlank() -> "после подключения"
-            checking -> "проверяем…"
-            channel != null -> "работает · $channel мс"
-            !probe?.tunnelMessage.isNullOrBlank() -> "не открывается"
-            else -> "не проверено"
-        }, good = channel != null && !checking, bad = !checking && channel == null && !probe?.tunnelMessage.isNullOrBlank())
-        probe?.takeIf { !it.checking && it.tunnelLatencyMs == null && it.tunnelMessage.isNotBlank() }?.let {
-            Text(app.lernet.engine.text.UserText.clean(it.tunnelMessage, "Через этот конфиг интернет не открывается."),
-                color = desktopColors.error, fontSize = 12.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
-        }
+        val channel = if (running) tunnelLatencyMs ?: probe?.tunnelLatencyMs else null
+        val tunnelChecked = probe != null && !checking && probe.tunnelFailed
+        HomeLinkRow(HomeWords.INTERNET, when {
+            !running -> HomeWords.WHEN_CONNECTED
+            checking -> HomeWords.CHECKING
+            channel != null -> HomeWords.works(channel)
+            tunnelChecked -> HomeWords.NO_ANSWER
+            else -> HomeWords.UNCHECKED
+        }, good = channel != null && !checking, bad = running && !checking && channel == null && tunnelChecked)
         HorizontalDivider(color = desktopColors.outlineVariant)
-        HomeLinkRow("Сервер", when {
-            checking -> "проверяем…"
-            probe?.latencyMs != null -> "отвечает · ${probe.latencyMs} мс"
-            probe != null -> "нет ответа"
-            else -> "не проверено"
+        HomeLinkRow(HomeWords.SERVER, when {
+            checking -> HomeWords.CHECKING
+            probe?.latencyMs != null -> HomeWords.answers(probe.latencyMs)
+            probe != null -> HomeWords.NO_ANSWER
+            else -> HomeWords.UNCHECKED
         }, good = probe?.latencyMs != null && !checking, bad = probe != null && !checking && probe.latencyMs == null)
         if (running) {
             val rate = rememberTrafficRate(diagnostics.uploadTotal, diagnostics.downloadTotal)
             HorizontalDivider(color = desktopColors.outlineVariant)
-            HomeLinkRow("Скорость", "↑ ${bytesText(rate.first)}/с · ↓ ${bytesText(rate.second)}/с")
-            HorizontalDivider(color = desktopColors.outlineVariant)
-            HomeLinkRow("Передано", "↑ ${bytesText(diagnostics.uploadTotal)} · ↓ ${bytesText(diagnostics.downloadTotal)}")
+            HomeLinkRow(HomeWords.SPEED, HomeWords.pair(app.lernet.engine.text.TrafficUnits.rate(rate.first), app.lernet.engine.text.TrafficUnits.rate(rate.second)))
+            // As the phone: the total appears once something has gone through.
+            if (diagnostics.uploadTotal > 0 || diagnostics.downloadTotal > 0) {
+                HorizontalDivider(color = desktopColors.outlineVariant)
+                HomeLinkRow(HomeWords.TOTAL, HomeWords.pair(bytesText(diagnostics.uploadTotal), bytesText(diagnostics.downloadTotal)))
+            }
         }
         HorizontalDivider(color = desktopColors.outlineVariant)
         val sameTarget = trace.target.equals(endpoint?.server, ignoreCase = true)
-        val hops = if (sameTarget) trace.hops.size else 0
-        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) { pathOpen = true }
-            .padding(vertical = 10.dp).testTag("home_link_path"), verticalAlignment = Alignment.CenterVertically) {
-            Text("Путь до сервера", color = muted, fontSize = 14.sp, modifier = Modifier.width(170.dp))
-            Text(if (hops > 0) "${hopsCount(hops)}  ›" else "проверить по кнопке  ›", fontSize = 14.sp, modifier = Modifier.weight(1f))
-        }
+        val hops = if (sameTarget) trace.hops else emptyList()
+        val country = hops.lastOrNull { !it.country.isNullOrBlank() }?.country?.uppercase()
+        HomeLinkRow(HomeWords.PATH, when {
+            sameTarget && trace.running -> HomeWords.CHECKING
+            hops.isEmpty() -> HomeWords.PATH_CHECK
+            else -> HomeWords.pathValue(hopsCount(hops.size), country)
+        }, link = true, tag = "home_link_path") { pathOpen = true }
     }
     if (pathOpen) {
         AlertDialog(
@@ -1178,13 +1198,19 @@ private fun HomeLinkPanel(selected: StoredProfile, endpoint: app.lernet.engine.c
 }
 
 @Composable
-private fun HomeLinkRow(label: String, value: String, good: Boolean = false, bad: Boolean = false) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = muted, fontSize = 14.sp, modifier = Modifier.width(170.dp))
+private fun HomeLinkRow(label: String, value: String, good: Boolean = false, bad: Boolean = false, link: Boolean = false,
+    tag: String? = null, onClick: (() -> Unit)? = null) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+        .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+        .then(if (tag != null) Modifier.testTag(tag) else Modifier)
+        .padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        // As the phone's LinkRow: the label in the text colour, a plain value muted.
+        Text(label, color = desktopColors.onSurface, fontSize = 14.sp, modifier = Modifier.width(170.dp))
         Text(value, fontSize = 14.sp, color = when {
             good -> green
             bad -> desktopColors.error
-            else -> desktopColors.onSurface
+            link -> blue
+            else -> muted
         }, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
@@ -1256,21 +1282,21 @@ private fun HoldActions(saved: StoredState, selected: StoredProfile, controller:
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(Modifier.fillMaxWidth()) {
             OutlinedButton(onClick = { other = true }, enabled = candidates.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
-                Text("Конфиг из другой папки", maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
+                Text(HomeWords.OTHER_FOLDER, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
             }
             DropdownMenu(other, onDismissRequest = { other = false }) {
                 candidates.forEach { profile ->
-                    val folder = saved.groups.firstOrNull { it.id == profile.groupId }?.name ?: "без папки"
+                    val folder = saved.groups.firstOrNull { it.id == profile.groupId }?.name ?: HomeWords.NO_FOLDER
                     DropdownMenuItem(text = { Text("${profile.name}  ·  $folder", maxLines = 1) },
                         onClick = { other = false; controller.select(profile.id) })
                 }
             }
         }
         OutlinedButton(onClick = controller::disconnect, modifier = Modifier.fillMaxWidth()) {
-            Text("Выключить VPN", maxLines = 1, fontSize = 12.sp)
+            Text(HomeWords.TURN_OFF, maxLines = 1, fontSize = 12.sp)
         }
     }
-    Text("Выключить VPN можно только вручную. Тогда трафик пойдёт напрямую, и LerNET покажет это.",
+    Text(HomeWords.TURN_OFF_NOTE,
         color = muted, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 6.dp))
 }
 
@@ -1493,7 +1519,7 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
     onRefreshSubscription: (() -> Unit)? = null,
     dragging: Boolean, dropTarget: Boolean, indent: Boolean, dragOffset: Offset,
     onBounds: (Rect) -> Unit, onDragStart: (Offset) -> Unit, onDrag: (Offset) -> Unit, onDragEnd: () -> Unit,
-    onDelete: () -> Unit, compact: Boolean = false, onClick: () -> Unit) {
+    onDelete: () -> Unit, compact: Boolean = false, onEdit: () -> Unit = {}, onRules: () -> Unit = {}, onClick: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     var folderMenu by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
@@ -1522,20 +1548,15 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
                     Text(profile.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium)
                     if (compact) {
-                        // One short line under the name instead of two metric columns: the name keeps the full width.
-                        val (word, tone) = when {
-                            probe?.budgetWaitMs != null -> app.lernet.engine.policy.BudgetNotice.short(probe.budgetWaitMs) to muted
-                            probe?.checking == true -> "Проверяем…" to muted
-                            probe?.tunnelLatencyMs != null -> "Работает · ${probe.tunnelLatencyMs} мс" to green
-                            probe?.latencyMs != null && probe.tunnelMessage.isBlank() -> "Сервер отвечает · ${probe.latencyMs} мс" to muted
-                            probe?.latencyMs != null -> "Через VPN не работает" to desktopColors.error
-                            probe != null -> "Сервер не отвечает" to desktopColors.error
-                            else -> "" to muted
-                        }
-                        if (word.isNotEmpty()) {
+                        // One short line under the name, word for word as the phone's drawer (shared ConfigCheckWords).
+                        configCheckLine(probe)?.let { line ->
                             Text(
-                                word,
-                                color = tone,
+                                line.text,
+                                color = when (line.tone) {
+                                    app.lernet.engine.text.ConfigCheckWords.Tone.OK -> green
+                                    app.lernet.engine.text.ConfigCheckWords.Tone.BAD -> desktopColors.error
+                                    app.lernet.engine.text.ConfigCheckWords.Tone.NEUTRAL -> muted
+                                },
                                 fontSize = 12.sp,
                                 maxLines = if (probe?.budgetWaitMs != null) 2 else 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -1547,15 +1568,20 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
                     TextButton(onClick = { menu = true }, modifier = Modifier.size(28.dp), contentPadding = PaddingValues(0.dp)) {
                         Text("⋮", fontSize = 19.sp)
                     }
+                    // The same items and words as the config's ⋮ in the phone's drawer; delete can be undone (N14).
                     DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(text = { Text("Изменить") }, onClick = { menu = false; onEdit() })
+                        DropdownMenuItem(text = { Text("Правила") }, onClick = { menu = false; onRules() })
+                        DropdownMenuItem(text = { Text("Переместить…") }, onClick = { menu = false; folderMenu = true })
                         DropdownMenuItem(text = { Text("Выше") }, onClick = { onMove(-1); menu = false })
                         DropdownMenuItem(text = { Text("Ниже") }, onClick = { onMove(1); menu = false })
-                        DropdownMenuItem(text = { Text("Переместить в папку…") }, onClick = { menu = false; folderMenu = true })
                         DropdownMenuItem(text = { Text("Дублировать") }, onClick = { onDuplicate(); menu = false })
                         // Your choice, renames and edits are kept; the change takes effect at the next connect.
                         onRefreshSubscription?.let { refresh ->
                             DropdownMenuItem(text = { Text("Обновить подписку") }, onClick = { refresh(); menu = false })
                         }
+                        HorizontalDivider()
+                        DropdownMenuItem(text = { Text("Удалить", color = desktopColors.error) }, onClick = { menu = false; onDelete() })
                     }
                     DropdownMenu(folderMenu, onDismissRequest = { folderMenu = false }) {
                         DropdownMenuItem(text = { Text("Без папки") }, onClick = { onSetGroup(null); folderMenu = false })
@@ -1576,7 +1602,8 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
                 ProbeMiniMetric("Через VPN", when {
                     probe?.tunnelLatencyMs != null -> "Работает"
                     probe?.checking == true -> "Проверяем…"
-                    !probe?.tunnelMessage.isNullOrBlank() -> "Не работает"
+                    // «Проверим при переключении» is not a failure: LinkCheck measures another config's full path on switching.
+                    probe?.tunnelFailed == true -> "Не работает"
                     else -> "Не проверено"
                 }, probe?.tunnelLatencyMs?.let { "$it мс" } ?: "—",
                     probe?.tunnelLatencyMs != null, Modifier.weight(1f))
@@ -1592,6 +1619,13 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
             }
         }
     }
+}
+
+internal fun configCheckLine(probe: ProbeResult?): app.lernet.engine.text.ConfigCheckWords.Line? = probe?.let {
+    app.lernet.engine.text.ConfigCheckWords.line(
+        checking = it.checking, budgetWaitMs = it.budgetWaitMs, serverOk = it.latencyMs != null, serverMs = it.latencyMs,
+        serverChecked = !it.checking, tunnelMs = it.tunnelLatencyMs, tunnelFailed = it.tunnelFailed,
+    )
 }
 
 @Composable
@@ -1958,12 +1992,8 @@ private fun CountryFlagIcon(code: String) {
     }
 }
 
-private fun bytesText(value: Long): String = when {
-    value >= 1_073_741_824 -> "%.1f ГБ".format(value / 1_073_741_824.0)
-    value >= 1_048_576 -> "%.1f МБ".format(value / 1_048_576.0)
-    value >= 1024 -> "%.1f КБ".format(value / 1024.0)
-    else -> "$value Б"
-}
+/** The same units as the phone (shared TrafficUnits). */
+private fun bytesText(value: Long): String = app.lernet.engine.text.TrafficUnits.bytes(value)
 
 /** S5: a field applies itself once it is valid and the person stopped typing; no separate «Сохранить». */
 @Composable
@@ -2430,7 +2460,7 @@ private fun chooseTransferFile(save: Boolean, suggestedName: String = ""): Path?
 
 /** Mockup 10 E: which configs were tried, why, and when the next attempt is. Traffic does not leak meanwhile. */
 @Composable
-internal fun FailoverReportCard(report: FailoverReport) {
+internal fun FailoverReportCard(report: FailoverReport, actions: (@Composable ColumnScope.() -> Unit)? = null) {
     val time = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
     Surface(
         color = Color(0xFF1A1F2B), shape = RoundedCornerShape(12.dp),
@@ -2459,6 +2489,8 @@ internal fun FailoverReportCard(report: FailoverReport) {
                 (report.nextRetry?.let { "Следующая попытка через $it. " } ?: "Пробуем снова автоматически. ") + "Маршруты VPN остаются на месте — трафик не уходит в обход.",
                 color = muted, fontSize = 12.sp,
             )
+            // As the phone: «Конфиг из другой папки» and «Выключить VPN» inside the report, under what was tried.
+            actions?.let { Spacer(Modifier.height(4.dp)); it() }
         }
     }
 }

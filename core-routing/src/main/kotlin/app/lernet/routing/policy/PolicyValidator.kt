@@ -48,7 +48,7 @@ object PolicyValidator {
             issue(null, "folder", "Повторяющаяся политика папки")
         }
         if (policy.profilePolicies.map { it.profileId }.distinct().size != policy.profilePolicies.size) {
-            issue(null, "profile", "Повторяющаяся политика профиля")
+            issue(null, "profile", "Повторяющаяся политика конфига")
         }
         val treeByScope = trees.associateBy { it.scope }
         val channels = policy.channels.associateBy { it.id }
@@ -59,14 +59,14 @@ object PolicyValidator {
         }
         inventory.folderMembers.forEach { (_, members) ->
             if (members.distinct().size != members.size || members.any { it !in inventory.profileIds }) {
-                issue(null, "inventory", "Папка ссылается на отсутствующий или повторный профиль")
+                issue(null, "inventory", "Папка ссылается на отсутствующий или повторный конфиг")
             }
         }
         if (inventory.profileIds.any { it.isBlank() } || inventory.folderMembers.keys.any { it.isBlank() }) {
-            issue(null, "inventory", "Профиль или папка без идентификатора")
+            issue(null, "inventory", "Конфиг или папка без идентификатора")
         }
         if (inventory.profilePlatformRequirements.keys.any { it !in inventory.profileIds }) {
-            issue(null, "inventory", "Платформенные возможности относятся к отсутствующему профилю")
+            issue(null, "inventory", "Возможности платформы относятся к отсутствующему конфигу")
         }
         fun targetErrors(target: PolicyTarget, scope: PolicyScope, id: String?) {
             when (target) {
@@ -85,7 +85,7 @@ object PolicyValidator {
                     }
                 }
                 is PolicyTarget.Profile -> {
-                    if (target.id !in inventory.profileIds) issue(id, "profile", "Профиль отсутствует")
+                    if (target.id !in inventory.profileIds) issue(id, "profile", "Конфиг отсутствует")
                     target.routeScope?.let { if (it !in treeByScope) issue(id, "scope", "Дочерняя схема отсутствует") }
                     val scopeFits = when (val routeScope = target.routeScope) {
                         null -> true
@@ -93,7 +93,7 @@ object PolicyValidator {
                         is PolicyScope.Profile -> routeScope.id == target.id
                         is PolicyScope.Folder -> target.id in inventory.folderMembers[routeScope.id].orEmpty()
                     }
-                    if (!scopeFits) issue(id, "scope", "Схема не принадлежит выбранному профилю или его папке")
+                    if (!scopeFits) issue(id, "scope", "Схема не принадлежит выбранному конфигу или его папке")
                 }
                 is PolicyTarget.Folder -> {
                     if (target.id !in inventory.folderMembers) issue(id, "folder", "Папка отсутствует")
@@ -137,7 +137,7 @@ object PolicyValidator {
                     node.target is PolicyTarget.Folder ||
                     node.target is PolicyTarget.Channel
                 if (node.id in structuralIds && physicalTarget) {
-                    val reason = "Профиль, папка и канал должны быть конечной целью. " +
+                    val reason = "Конфиг, папка и канал должны быть конечной целью. " +
                         "Добавьте ветви в схему самой цели."
                     issue(node.id, "target", reason)
                 }
@@ -167,13 +167,13 @@ object PolicyValidator {
             lifecycleErrors(channel.id, channel.lifecycle)
         }
         policy.profilePolicies.forEach { profile ->
-            if (profile.profileId !in inventory.profileIds) issue(profile.profileId, "profile", "Профиль отсутствует")
+            if (profile.profileId !in inventory.profileIds) issue(profile.profileId, "profile", "Конфиг отсутствует")
             lifecycleErrors(profile.profileId, profile.lifecycle)
         }
         policy.folderPolicies.forEach { folder ->
             if (folder.folderId !in inventory.folderMembers) issue(folder.folderId, "folder", "Папка отсутствует")
             if (folder.preferredProfileId != null && folder.preferredProfileId !in inventory.folderMembers[folder.folderId].orEmpty()) {
-                issue(folder.folderId, "preferred", "Предпочтительный профиль не принадлежит папке")
+                issue(folder.folderId, "preferred", "Предпочтительный конфиг не принадлежит папке")
             }
             if (folder.freshnessMs !in 1_000..300_000 ||
                 folder.cooldownMs !in 0..300_000

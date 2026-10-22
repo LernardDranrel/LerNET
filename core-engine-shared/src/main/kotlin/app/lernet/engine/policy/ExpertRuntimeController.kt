@@ -233,7 +233,7 @@ class ExpertRuntimeController(
         }
         check(session.replaceWorkspace(next, next)) { "Confirmed handover policy could not be adopted" }
         draftPersistenceError = null
-        reason(ExpertReasonLevel.INFO, "Текущий VPN выбран основным путём экспертного режима.")
+        reason(ExpertReasonLevel.INFO, "Текущий VPN выбран основным путём Эксперта.")
         publish()
         true
     }
@@ -456,7 +456,7 @@ class ExpertRuntimeController(
         val request = mutex.withLock {
             val tun = mutableState.value.tun
             if (mutableState.value.phase != ExpertSessionPhase.RUNNING || tun == null) {
-                reason(ExpertReasonLevel.WARNING, "Для применения сначала включи экспертный режим.")
+                reason(ExpertReasonLevel.WARNING, "Для применения сначала включи Эксперт.")
                 return
             }
             when (val candidate = session.requestApply(inventory, mutableState.value.capabilities, tun)) {
@@ -1100,7 +1100,7 @@ class ExpertRuntimeController(
             reason(
                 ExpertReasonLevel.ERROR,
                 "Предыдущая версия правил ${failure.revision}: $detail. " +
-                    "Текущие выходы проверяются отдельно. Повтори остановку экспертного режима для освобождения ресурсов.",
+                    "Текущие выходы проверяются отдельно. Повтори остановку Эксперта, чтобы освободить ресурсы.",
             )
         }
         mutableState.value = mutableState.value.copy(retiredCleanupFailures = bounded)

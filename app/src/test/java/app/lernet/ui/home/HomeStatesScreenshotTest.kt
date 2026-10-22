@@ -46,12 +46,19 @@ class HomeStatesScreenshotTest {
     private val nl = profile("nl", "Нидерланды")
     private val de = profile("de", "Германия")
     private val fi = profile("fi", "Финляндия")
-    private val group = Group("work", "Работа", listOf("nl", "de"))
+    private val solo = profile("solo", "Личный")
+
+    // The same data as DesktopStatesRenderTest (Windows), so the pairs of screenshots compare honestly.
+    private val group = Group("work", "Работа", listOf("nl", "de"), autoFailover = true)
+    private val home = Group("home", "Дом", listOf("fi"))
 
     private fun base(snapshot: ConnectionSnapshot, probes: Map<String, ProfileProbe> = emptyMap()) = HomeUiState(
-        snapshot = snapshot, activeProfile = nl, profiles = listOf(nl, de, fi), groups = listOf(group),
+        snapshot = snapshot, activeProfile = nl, profiles = listOf(nl, de, fi, solo), groups = listOf(group, home),
         engineAvailable = true, loading = false, probes = probes,
     )
+
+    /** «Сервер: отвечает · 38 мс», «Интернет через VPN: работает · 142 мс» — on both platforms. */
+    private val good = mapOf("nl" to ProfileProbe(tcpMs = 38, reachable = true, tunnelMs = 142, tunnelChecked = true))
 
     private fun render(name: String, state: HomeUiState) {
         rule.setContent {
@@ -107,8 +114,17 @@ class HomeStatesScreenshotTest {
     @Config(qualifiers = "w390dp-h2000dp-xxhdpi")
     fun connectedWholeScroll() = render("phone-connected-full", base(
         ConnectionSnapshot.idle().copy(state = ConnectionState.CONNECTED, activeProfileId = "nl", serverTcpMs = 38),
-        mapOf("nl" to ProfileProbe(tcpMs = 38, reachable = true, tunnelMs = 142, tunnelChecked = true)),
+        good,
     ))
+
+    @Test
+    @Config(qualifiers = "w390dp-h2000dp-xxhdpi")
+    fun offWholeScroll() = render("phone-off-full", base(ConnectionSnapshot.idle(), good))
+
+    @Test
+    @Config(qualifiers = "w390dp-h2000dp-xxhdpi")
+    fun connectingWholeScroll() = render("phone-connecting-full",
+        base(ConnectionSnapshot.idle().copy(state = ConnectionState.CONNECTING, activeProfileId = "nl"), good))
 
     @Test
     @Config(qualifiers = "w390dp-h2000dp-xxhdpi")
@@ -126,14 +142,15 @@ class HomeStatesScreenshotTest {
     fun jammedWholeScroll() = render("phone-hold-jammed-full", base(
         ConnectionSnapshot.idle().copy(state = ConnectionState.CONNECTED, activeProfileId = "nl", serverTcpMs = 38,
             hold = app.lernet.engine.policy.LinkHold.JAMMED),
-        mapOf("nl" to ProfileProbe(tcpMs = 38, reachable = true)),
+        mapOf("nl" to ProfileProbe(tcpMs = 38, reachable = true, tunnelChecked = true)),
     ))
 
     @Test
     @Config(qualifiers = "w390dp-h2000dp-xxhdpi")
     fun allSilentWholeScroll() = render("phone-hold-silent-full", base(
-        ConnectionSnapshot.idle().copy(state = ConnectionState.CONNECTED, activeProfileId = "nl",
+        ConnectionSnapshot.idle().copy(state = ConnectionState.CONNECTED, activeProfileId = "nl", serverTcpMs = 38,
             hold = app.lernet.engine.policy.LinkHold.ALL_SILENT, nextCheckAtMs = System.currentTimeMillis() + 95_000),
+        mapOf("nl" to ProfileProbe(tcpMs = 38, reachable = true, tunnelChecked = true)),
     ))
 
     @Test

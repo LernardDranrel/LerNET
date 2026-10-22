@@ -60,6 +60,7 @@
     <string name="home_profile_folder">папка «%1$s»</string>
     <string name="home_profile_autoswap">автосмена</string>
     <string name="home_profile_single">без папки</string>
+    <string name="home_profile_proxy">режим прокси</string>
     <string name="home_link_title">Связь</string>
     <string name="home_link_check">Проверить</string>
     <string name="home_link_internet">Интернет через VPN</string>

@@ -21,7 +21,7 @@ internal object PolicyReferences {
         }
         fun treeLabel(scope: PolicyScope): String = when (scope) {
             PolicyScope.Device -> "Схема устройства"
-            is PolicyScope.Profile -> "Дерево профиля"
+            is PolicyScope.Profile -> "Дерево конфига"
             is PolicyScope.Folder -> "Дерево папки"
         }
         fun inspect(target: PolicyTarget, protected: Boolean, path: Set<Any>, id: String?, depth: Int, location: String) {

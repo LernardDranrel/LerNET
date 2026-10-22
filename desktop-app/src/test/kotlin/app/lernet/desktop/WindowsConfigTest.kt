@@ -51,7 +51,7 @@ class WindowsConfigTest {
             assertThat(failure.message).contains("Request timeout")
 
             val tunnel = WindowsBoxProcess(directory)
-            tunnel.logDiagnostic("Профиль «test»: ${failure.message}")
+            tunnel.logDiagnostic("Конфиг «test»: ${failure.message}")
             assertThat(Files.readString(directory.resolve("session.log"))).contains("Request timeout")
             assertThat(tunnel.state.value.logs.last()).contains("HTTP 504")
         } finally {

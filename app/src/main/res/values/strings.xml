@@ -241,10 +241,6 @@
     <string name="rename">Переименовать</string>
     <string name="profile_name">Отображаемое имя</string>
     <string name="profile_name_hint">Необязательно. Если пусто — возьмём имя из импорта.</string>
-    <string name="source_vless">VLESS</string>
-    <string name="source_json_url">JSON по ссылке</string>
-    <string name="source_json_paste">JSON</string>
-    <string name="source_subscription">Подписка</string>
     <string name="done">Готово</string>
     <string name="confirm_exit_title">Выйти при активной сессии?</string>
     <string name="confirm_exit_body">Соединение останется, пока служба VPN работает.</string>

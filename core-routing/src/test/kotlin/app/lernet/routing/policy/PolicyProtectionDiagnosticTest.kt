@@ -24,14 +24,14 @@ class PolicyProtectionDiagnosticTest {
             assertFalse(result.isValid)
             val error = result.errors.single()
             assertEquals("ru", error.nodeId)
-            assertTrue(error.message, error.message.contains("Дерево профиля → правило «Россия»"))
+            assertTrue(error.message, error.message.contains("Дерево конфига → правило «Россия»"))
             assertTrue(error.message, error.message.contains("Напрямую"))
         }
     }
 
     @Test fun `direct default identifies child tree default path`() {
         val errors = PolicyValidator.validate(policy(PolicyTree(scope, defaultTarget = PolicyTarget.Direct)), inventory)
-        assertTrue(errors.single().message, errors.single().message.contains("Дерево профиля → путь по умолчанию"))
+        assertTrue(errors.single().message, errors.single().message.contains("Дерево конфига → путь по умолчанию"))
     }
 
     @Test fun `explicitly skipping child keeps protected profile and block fallback`() {

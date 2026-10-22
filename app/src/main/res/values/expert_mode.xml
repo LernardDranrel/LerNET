@@ -114,7 +114,7 @@
     <string name="expert_protected_count">Правил с запретом прямого выхода: %1$d</string>
     <string name="expert_inactive_count">Неактивных на Android: %1$d</string>
     <string name="expert_import">Импортировать рабочую схему</string>
-    <string name="expert_import_saved">Рабочая схема импортирована. Для изменения активного пути примени её в экспертном режиме.</string>
+    <string name="expert_import_saved">Рабочая схема импортирована. Для изменения активного пути примени её в Эксперте.</string>
     <string name="expert_export">Сохранить рабочую схему в файл</string>
     <string name="expert_export_warning">Архив включает конфиги и их секреты. Передавай его только доверенному человеку.</string>
     <string name="expert_storage_error">Не удалось сохранить или прочитать схему. Предыдущая сохранённая версия оставлена; проверь журнал.</string>

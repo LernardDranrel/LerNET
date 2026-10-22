@@ -48,6 +48,7 @@ internal fun ProfileLine(
     empty: Boolean,
     onChange: () -> Unit,
     onRules: (() -> Unit)?,
+    proxyMode: Boolean = false,
 ) {
     Card(
         onClick = onChange,
@@ -69,11 +70,12 @@ internal fun ProfileLine(
                 val subtitle = when {
                     empty -> stringResource(R.string.empty_profiles_body)
                     name == null -> stringResource(R.string.choose_profile)
-                    group != null -> listOfNotNull(
-                        stringResource(R.string.home_profile_folder, group.name),
-                        stringResource(R.string.home_profile_autoswap).takeIf { group.autoFailover },
+                    // Same order as Windows (HomeWords.profileSubtitle): folder or «без папки», autoswap, mode.
+                    else -> listOfNotNull(
+                        group?.let { stringResource(R.string.home_profile_folder, it.name) } ?: stringResource(R.string.home_profile_single),
+                        stringResource(R.string.home_profile_autoswap).takeIf { group?.autoFailover == true },
+                        stringResource(R.string.home_profile_proxy).takeIf { proxyMode },
                     ).joinToString(" · ")
-                    else -> stringResource(R.string.home_profile_single)
                 }
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = if (empty) 4 else 1, overflow = TextOverflow.Ellipsis)

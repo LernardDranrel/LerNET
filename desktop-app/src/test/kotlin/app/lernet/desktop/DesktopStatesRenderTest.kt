@@ -42,9 +42,10 @@ class DesktopStatesRenderTest {
         )
     }
 
+    // The same data as the phone's HomeStatesScreenshotTest: 38 ms to the server, 142 ms through the VPN.
     private val goodProbes = mapOf(
-        "nl" to ProbeResult(latencyMs = 34, tunnelLatencyMs = 128),
-        "de" to ProbeResult(latencyMs = 51, tunnelLatencyMs = null, tunnelMessage = "Required value was null."),
+        "nl" to ProbeResult(latencyMs = 38, tunnelLatencyMs = 142, tunnelMessage = "Работает"),
+        "de" to ProbeResult(latencyMs = 51, tunnelMessage = app.lernet.engine.policy.LinkCheck.notMeasured(app.lernet.engine.policy.LinkCheck.FullPath.ON_SWITCH)!!),
         "fi" to ProbeResult(latencyMs = null, message = "нет ответа"),
     )
 
@@ -62,6 +63,8 @@ class DesktopStatesRenderTest {
         preview: DesktopScreenPreview,
         setup: (DesktopController) -> Unit = {},
     ) {
+        // An administrator window: VPN mode, as on the phone (on Linux the token check says «not elevated»).
+        WindowsElevation.overrideForTests = true
         val dir = Files.createTempDirectory("lernet-states")
         DesktopStore(dir).save(state)
         val controller = DesktopController(DesktopStore(dir))
@@ -71,7 +74,8 @@ class DesktopStatesRenderTest {
         val status = workspaceStatus(null, preview.tunnel ?: TunnelSnapshot(TunnelStatus.STOPPED), stripUi)
         val scene = ImageComposeScene(width, height, Density(1f), content = theme {
             Column(Modifier.fillMaxSize()) {
-                DesktopModeTabs(false, {}, status = status, reducedMotion = true)
+                // As the app: no strip over the basic home (its state is under the button), the strip on other pages.
+                DesktopModeTabs(false, {}, status = status.takeIf { preview.page != null && preview.page != "PROFILES" }, reducedMotion = true)
                 DesktopScreen(controller, {}, {}, preview = preview)
             }
         })
@@ -97,7 +101,7 @@ class DesktopStatesRenderTest {
                     assertThat(all.count { it == "Выключить VPN" }).isEqualTo(1)
                 }
             }
-        } finally { scene.close(); controller.close() }
+        } finally { scene.close(); controller.close(); WindowsElevation.overrideForTests = null }
     }
 
     private fun texts(scene: ImageComposeScene): List<String> {
@@ -110,7 +114,7 @@ class DesktopStatesRenderTest {
     private val connecting = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.STARTING, "Запускаем VPN"),
         { it.copy(busy = true, message = "Запускаем VPN", probes = goodProbes) })
     private val connected = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.RUNNING, "Подключено"),
-        { it.copy(probes = goodProbes, healthMessage = "VPN отвечает · 128 мс", healthVerified = true, tunnelLatencyMs = 128) })
+        { it.copy(probes = goodProbes, healthMessage = "VPN отвечает · 142 мс", healthVerified = true, tunnelLatencyMs = 142) })
     private val failed = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.FAILED, "VPN не запустился. Подробности — в журнале."),
         { it.copy(probes = goodProbes) })
     private fun holding(): DesktopScreenPreview {
@@ -119,11 +123,11 @@ class DesktopStatesRenderTest {
             FailoverAttempt("Нидерланды", "сервер отвечает, но трафик через него не идёт", now - 60_000),
             FailoverAttempt("Германия", "нет ответа · время истекло", now - 30_000)), "30 с")
         return DesktopScreenPreview(TunnelSnapshot(TunnelStatus.RECONNECTING),
-            { it.copy(tried = report, healthMessage = "Нет связи", healthFailures = 2) })
+            { it.copy(tried = report, healthMessage = "Нет связи", healthFailures = 2, probes = heldProbes) })
     }
 
     // While held, the live check through the VPN has no answer: no «работает · 128 мс» in these previews.
-    private val heldProbes = goodProbes + ("nl" to ProbeResult(latencyMs = 34, tunnelMessage = "Нет ответа"))
+    private val heldProbes = goodProbes + ("nl" to ProbeResult(latencyMs = 38, tunnelMessage = "Нет ответа"))
     private val jammed = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.RUNNING, "Подключено"), {
         it.copy(probes = heldProbes, healthVerified = false, hold = app.lernet.engine.policy.LinkHold.JAMMED,
             healthMessage = app.lernet.engine.policy.LinkJudge.holdMessage(app.lernet.engine.policy.LinkHold.JAMMED))
@@ -133,8 +137,8 @@ class DesktopStatesRenderTest {
             healthMessage = app.lernet.engine.policy.LinkJudge.holdMessage(app.lernet.engine.policy.LinkHold.ALL_SILENT, "1 мин 35 с"))
     })
     private val budgetWait = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.RUNNING, "Подключено"), {
-        it.copy(probes = goodProbes + ("nl" to ProbeResult(latencyMs = 34, checking = true, budgetWaitMs = 42_000)),
-            healthMessage = "VPN отвечает · 128 мс", healthVerified = true, tunnelLatencyMs = 128)
+        it.copy(probes = goodProbes + ("nl" to ProbeResult(latencyMs = 38, checking = true, budgetWaitMs = 42_000)),
+            healthMessage = "VPN отвечает · 142 мс", healthVerified = true, tunnelLatencyMs = 142)
     })
     private val errorBar = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.FAILED, "VPN не запустился"), {
         it.copy(probes = goodProbes, message = "Сервер не принял подключение. Проверьте конфиг или выберите другой.",

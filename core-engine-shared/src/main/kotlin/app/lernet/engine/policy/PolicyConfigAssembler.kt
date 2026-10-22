@@ -439,7 +439,7 @@ object PolicyConfigAssembler {
                 parsed[sourceTag] = raw
                 val type = (raw["type"] as? JsonPrimitive)?.contentOrNull
                 if (type.isNullOrBlank() || type in setOf("block", "dns", "wireguard", "urltest")) {
-                    throw AssemblyProblem("Тип внутреннего выхода не поддерживается экспертным режимом этого ядра")
+                    throw AssemblyProblem("Тип внутреннего выхода не поддерживается Экспертом в этом ядре")
                 }
                 val dependencies = listOfNotNull((raw["detour"] as? JsonPrimitive)?.contentOrNull) +
                     (raw["outbounds"] as? JsonArray).orEmpty().map { it.jsonPrimitive.content }

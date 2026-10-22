@@ -135,7 +135,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
     init {
         simple.simpleModeRestriction = {
             if (guardEnabled || mutable.value.protection.systemGuardEnforced) {
-                "Системная защита экспертного режима блокирует обычный VPN. " +
+                "Системная защита Эксперта блокирует обычный VPN. " +
                     "Открой «Эксперт → Защита и DNS» и восстанови сеть перед переключением."
             } else {
                 null
@@ -453,7 +453,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                                 ExpertSessionPhase.RUNNING, ExpertSessionPhase.STARTING, ExpertSessionPhase.STOPPING,
                             )
                     ) {
-                        "Сначала останови экспертный режим. " +
+                        "Сначала останови Эксперт. " +
                             "Системная защита создаёт собственный адаптер при следующем включении."
                     }
                     backend.negotiateCapabilities()

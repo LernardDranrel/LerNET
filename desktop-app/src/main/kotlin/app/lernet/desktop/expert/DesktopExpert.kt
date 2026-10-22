@@ -252,7 +252,7 @@ fun DesktopExpert(
 private fun ExpertWorkspaceMenu(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Box {
-        TextButton(onClick = { menu = true }, modifier = Modifier.semantics { contentDescription = "Настройки экспертного режима" }) {
+        TextButton(onClick = { menu = true }, modifier = Modifier.semantics { contentDescription = "Настройки Эксперта" }) {
             Text("⋮", fontSize = 24.sp)
         }
         DropdownMenu(menu, onDismissRequest = { menu = false }) {

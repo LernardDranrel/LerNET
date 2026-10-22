@@ -22,7 +22,7 @@ class ExpertOnlyTransportTest {
         for (platform in EnginePlatform.entries) {
             val result = ConfigAssembler.assemble(outbound, route, RunMode.FULL_VPN, "info", platform = platform)
             assertFalse(result.isValid)
-            assertTrue(result.errors.toString(), result.errors.single().contains("экспертном режиме"))
+            assertTrue(result.errors.toString(), result.errors.single().contains("в Эксперте"))
             assertTrue(result.json.isEmpty())
         }
     }

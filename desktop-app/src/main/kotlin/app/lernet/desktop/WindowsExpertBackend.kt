@@ -132,7 +132,7 @@ internal class WindowsExpertBackend(
     override suspend fun start(program: PolicyProgram): ExpertTunnelAck = withContext(Dispatchers.IO) {
         val ticket = requireNotNull(negotiatedEpoch) { "Запуск управления отменён; повтори включение" }
         check(ticket == epoch.get()) { "Запуск был отменён" }
-        check(elevated()) { "Экспертному режиму нужны права администратора для общего туннеля" }
+        check(elevated()) { "Эксперту нужны права администратора для общего туннеля" }
         val owner = ensureControl(ticket)
         val local = owner.client
         check(capabilities.preservesTun && capabilities.atomicRules && capabilities.independentExits) {
@@ -142,7 +142,7 @@ internal class WindowsExpertBackend(
         check(config.isValid) { config.errors.joinToString("\n") }
         synchronized(lifecycleLock) {
             check(isCurrent(owner)) { "Запуск был отменён" }
-            check(applied == null) { "Экспертный режим уже запущен" }
+            check(applied == null) { "Эксперт уже запущен" }
             simple.reserveExpertMode()
             reserved = true
         }
@@ -300,7 +300,7 @@ internal class WindowsExpertBackend(
         client?.takeIf { existing?.isAlive == true }?.let {
             return@synchronized OwnedControl(requireNotNull(existing), it, ticket)
         }
-        check(elevated()) { "Запусти LerNET от имени администратора для экспертного режима" }
+        check(elevated()) { "Запусти LerNET от имени администратора для Эксперта" }
         val directory = simple.workspaceDirectory().resolve("expert-runtime")
         Files.createDirectories(directory)
         val secured = prepareBinary?.invoke(directory) ?: WindowsExpertProtection.prepareProtectedCore(installCore(directory)).getOrThrow()

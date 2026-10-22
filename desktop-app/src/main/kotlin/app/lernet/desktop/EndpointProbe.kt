@@ -26,7 +26,17 @@ data class ProbeResult(
     val serverProtocol: String = "TCP",
     /** The check waits for the handshake budget; shown as BudgetNotice instead of a silent «Проверяем…». */
     val budgetWaitMs: Long? = null,
-)
+) {
+    /** The path through the VPN was measured and failed — not «waiting» and not «checked on switching» (LinkCheck). */
+    val tunnelFailed: Boolean
+        get() = tunnelLatencyMs == null && !checking && tunnelMessage.isNotBlank() && tunnelMessage != WAITING &&
+            tunnelMessage != app.lernet.engine.policy.LinkCheck.notMeasured(app.lernet.engine.policy.LinkCheck.FullPath.ON_SWITCH) &&
+            tunnelMessage != app.lernet.engine.policy.LinkCheck.notMeasured(app.lernet.engine.policy.LinkCheck.FullPath.ON_CONNECT)
+
+    companion object {
+        const val WAITING = "Ожидает проверки"
+    }
+}
 
 /** Direct TCP/TLS handshake to the endpoint; the HTTP channel is checked separately. */
 object EndpointProbe {

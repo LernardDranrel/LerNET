@@ -128,7 +128,7 @@ class DesktopController(
     private fun simpleRestriction(): String? = try {
         simpleModeRestriction?.invoke()
     } catch (_: Exception) {
-        "Не удалось проверить системную защиту. Откройте экспертный режим и проверьте раздел «Защита»."
+        "Не удалось проверить системную защиту. Откройте Эксперт и проверьте раздел «Защита»."
     }
     init {
         // Raw exception text goes to the journal only; the screen gets UserText sentences.
@@ -438,7 +438,7 @@ class DesktopController(
             probeTickets[profile.id] = ticket
             mutable.update { it.copy(probes = it.probes + (profile.id to ProbeResult(
                 message = "Ждёт очереди", checking = true,
-                tunnelMessage = "Ожидает проверки", serverProtocol = EndpointProbe.protocol(profile),
+                tunnelMessage = ProbeResult.WAITING, serverProtocol = EndpointProbe.protocol(profile),
             ))) }
             profile.id to ticket
         }
@@ -454,7 +454,7 @@ class DesktopController(
                 val access = (AppTraffic.route as? AppTraffic.Route.Through)?.access?.takeIf { running }
                 mutable.update { it.copy(probes = it.probes + (profile.id to ProbeResult(
                     message = "Проверяем…", checking = true,
-                    tunnelMessage = "Ожидает проверки", serverProtocol = EndpointProbe.protocol(profile),
+                    tunnelMessage = ProbeResult.WAITING, serverProtocol = EndpointProbe.protocol(profile),
                 ))) }
                 // One algorithm with Android (LinkCheck): budget first, one by one, never a second core.
                 // Another config goes through the VPN only when LerNET's internal listener is there to carry it.
@@ -1065,7 +1065,7 @@ class DesktopController(
     private fun connectInternal(resetFailover: Boolean, holdOnError: Boolean = false) {
         simpleRestriction()?.let { reportConnectionError(it); return }
         if (expertReserved.get()) {
-            reportConnectionError("Устройством управляет экспертный режим. Остановите его перед включением обычного VPN.")
+            reportConnectionError("Устройством управляет Эксперт. Остановите его перед включением обычного VPN.")
             return
         }
         if (loaded.isFailure) {
@@ -1085,7 +1085,7 @@ class DesktopController(
         val ticket = synchronized(connectLock) {
             if (expertReserved.get()) {
                 connectBusy.set(false)
-                reportConnectionError("Устройством управляет экспертный режим. Остановите его перед включением обычного VPN.")
+                reportConnectionError("Устройством управляет Эксперт. Остановите его перед включением обычного VPN.")
                 return
             }
             desiredConnection = true
@@ -1427,7 +1427,9 @@ class DesktopController(
             // Sequential with a random pause, the same rule as on Android: no burst of handshakes.
             if (index > 0) runCatching { Thread.sleep(LinkJudge.candidateGapMs()) }
             if (!takeCandidateBudget(candidate)) continue
-            val tcp = EndpointProbe.check(candidate)
+            // One TLS handshake per budget slot, as on Android: a plain TCP connect (no SNI) to see the server,
+            // then the one real handshake — a request through it by the second core.
+            val tcp = EndpointProbe.check(candidate, timeoutMs = LinkCheck.TIMEOUT_MS, tlsHandshake = false)
             val outbound = checkOutbound(candidate, saved)
             val probe = tcp.copy(tunnelLatencyMs = outbound.latencyMs, tunnelMessage = outbound.message)
             mutable.update { it.copy(probes = it.probes + (candidate.id to probe)) }
@@ -1467,7 +1469,7 @@ class DesktopController(
         val key = keyOf(candidate) ?: return true
         val wait = handshakeBudget.waitMs(key, System.currentTimeMillis())
         if (wait > LinkJudge.CANDIDATE_BUDGET_WAIT_MS) {
-            tunnel.logDiagnostic("Профиль «${candidate.name}» пропущен: лимит новых соединений к серверу")
+            tunnel.logDiagnostic("Конфиг «${candidate.name}» пропущен: лимит новых соединений к серверу")
             return false
         }
         if (wait > 0L) runCatching { Thread.sleep(wait) }
@@ -1528,7 +1530,7 @@ class DesktopController(
     /** Cancels pending Simple starts before the Expert host is allowed to acquire TUN. */
     fun reserveExpertMode() {
         synchronized(connectLock) {
-            check(expertReserved.compareAndSet(false, true)) { "Экспертный режим уже запускается" }
+            check(expertReserved.compareAndSet(false, true)) { "Эксперт уже запускается" }
             val oldGeneration = connectGeneration.get()
             val nextGeneration = connectGeneration.incrementAndGet()
             simpleRestoreLease = WindowsSimpleRestoreLease.capture(activeSimpleConnection, tunnel.captureRunningLaunch(),

@@ -201,6 +201,7 @@ private fun HomeBody(
             empty = state.profiles.isEmpty(),
             onChange = onOpenDrawer,
             onRules = homeRouteOwnerId(state)?.let { ownerId -> { onOpenRoutes(ownerId) } },
+            proxyMode = state.effectiveMode == RunMode.PROXY,
         )
         // Audit H7: one zone, most important first; the rest fold behind «Ещё N».
         val attention = buildList<@Composable ColumnScope.() -> Unit> {

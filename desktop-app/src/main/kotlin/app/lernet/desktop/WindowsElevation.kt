@@ -28,9 +28,14 @@ object DesktopStartup {
 
 /** Checks the process token and requests UAC when full VPN is selected. */
 object WindowsElevation {
-    val isElevated: Boolean by lazy {
+    private val tokenElevated: Boolean by lazy {
         runCatching { readTokenElevation() }.getOrDefault(false)
     }
+
+    /** Screenshot tests draw the VPN mode of an administrator window on Linux; the app never sets it. */
+    @Volatile internal var overrideForTests: Boolean? = null
+
+    val isElevated: Boolean get() = overrideForTests ?: tokenElevated
 
     /** [arguments] go to the new copy too: an autostart relaunch must stay an autostart. */
     fun relaunchAsAdministrator(arguments: String? = null): Result<Unit> = runCatching {

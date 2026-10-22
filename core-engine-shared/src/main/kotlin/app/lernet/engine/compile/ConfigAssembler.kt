@@ -97,7 +97,7 @@ object ConfigAssembler {
             }
         if (ExternalExitProfiles.INTERFACE_FIELD in outboundObj) {
             return AssembledConfig("", outbound.tag, listOf(
-                "Подтверждённый интерфейс Windows используется только в экспертном режиме. " +
+                "Подтверждённый интерфейс Windows используется только в Эксперте. " +
                     "Выберите его целью правила в «Эксперте»; обычный VPN этот выход не запускает.",
             ))
         }

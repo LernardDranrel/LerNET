@@ -81,7 +81,6 @@ import androidx.compose.ui.zIndex
 import app.lernet.R
 import app.lernet.config.model.Group
 import app.lernet.config.model.Profile
-import app.lernet.config.model.ProfileSource
 import app.lernet.ui.components.LerNetLogo
 import app.lernet.ui.icons.LerNetSymbols
 import app.lernet.ui.theme.LerNetDimens
@@ -806,21 +805,30 @@ private fun ProfileActionBlock(
             Text(profile.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
         },
         supportingContent = {
-            Text(
-                when {
-                    moving -> stringResource(R.string.drawer_move_selected)
-                    probe?.budgetWaitMs != null ->
-                        stringResource(R.string.probe_budget_wait_short, app.lernet.engine.policy.BudgetNotice.seconds(probe.budgetWaitMs))
-                    probe?.running == true -> stringResource(R.string.drawer_probe_running)
-                    probe?.reachable == true && probe.tcpMs == null -> "${protocolOf(profile)} · подключён"
-                    probe?.reachable == true && probe.throughTunnel -> "${protocolOf(profile)} · через VPN ${probe.tcpMs} мс"
-                    probe?.reachable == true -> "${protocolOf(profile)} · TCP ${probe.tcpMs} мс"
-                    probe != null -> "${protocolOf(profile)} · ${stringResource(R.string.diag_ping_fail)}"
-                    else -> protocolOf(profile)
-                },
-                maxLines = if (probe?.budgetWaitMs != null) 2 else 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            // The same words as the narrow Windows column (shared ConfigCheckWords), without protocol names.
+            val line = if (moving) {
+                app.lernet.engine.text.ConfigCheckWords.Line(stringResource(R.string.drawer_move_selected),
+                    app.lernet.engine.text.ConfigCheckWords.Tone.NEUTRAL)
+            } else {
+                probe?.let {
+                    app.lernet.engine.text.ConfigCheckWords.line(
+                        checking = it.running, budgetWaitMs = it.budgetWaitMs, serverOk = it.reachable, serverMs = it.tcpMs,
+                        serverChecked = !it.running, tunnelMs = it.tunnelMs, tunnelFailed = it.tunnelChecked && it.tunnelMs == null,
+                    )
+                }
+            }
+            line?.let {
+                Text(
+                    it.text,
+                    color = when (it.tone) {
+                        app.lernet.engine.text.ConfigCheckWords.Tone.OK -> app.lernet.ui.theme.LerNetOk
+                        app.lernet.engine.text.ConfigCheckWords.Tone.BAD -> MaterialTheme.colorScheme.error
+                        app.lernet.engine.text.ConfigCheckWords.Tone.NEUTRAL -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    maxLines = if (probe?.budgetWaitMs != null) 2 else 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         },
         leadingContent = { ActiveMark(selected) },
         trailingContent = {
@@ -955,21 +963,3 @@ private fun RowScope.InlineRenameRow(current: String, rename: RenameHooks) {
         Text(stringResource(R.string.done))
     }
 }
-
-@Composable
-private fun protocolOf(profile: Profile): String {
-    val type = profile.selectedOutbound()?.type
-    if (!type.isNullOrBlank()) return type.uppercase()
-    return sourceLabel(profile.source)
-}
-
-@Composable
-private fun sourceLabel(source: ProfileSource): String =
-    stringResource(
-        when (source) {
-            ProfileSource.VLESS -> R.string.source_vless
-            ProfileSource.JSON_URL -> R.string.source_json_url
-            ProfileSource.JSON_PASTE -> R.string.source_json_paste
-            ProfileSource.SUBSCRIPTION -> R.string.source_subscription
-        },
-    )

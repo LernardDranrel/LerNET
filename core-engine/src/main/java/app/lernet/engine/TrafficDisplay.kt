@@ -45,17 +45,8 @@ object TrafficDisplay {
         )
     }
 
-    fun formatRate(bytesPerSecond: Long): String = "${formatMagnitude(bytesPerSecond)}/с"
+    fun formatRate(bytesPerSecond: Long): String = app.lernet.engine.text.TrafficUnits.rate(bytesPerSecond)
 
-    fun formatBytes(bytes: Long): String = formatMagnitude(bytes)
-
-    private fun formatMagnitude(bytes: Long): String {
-        val value = bytes.coerceAtLeast(0)
-        return when {
-            // Same units as the Windows app: Б, КБ, МБ.
-            value < 1024L -> "$value Б"
-            value < 1024L * 1024L -> "${value / 1024L} КБ"
-            else -> "${value / (1024L * 1024L)} МБ"
-        }
-    }
+    /** Same units as the Windows app (shared [app.lernet.engine.text.TrafficUnits]): Б, КБ, МБ, ГБ. */
+    fun formatBytes(bytes: Long): String = app.lernet.engine.text.TrafficUnits.bytes(bytes)
 }
