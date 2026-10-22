@@ -1270,7 +1270,9 @@ private val plainStates = setOf("Отключено", "Подключено", "�
 /** One extra line under the state on the home, only when it says something the state itself does not. */
 private fun homeDetail(ui: DesktopUiState, tunnel: TunnelSnapshot, holding: Boolean): String? = when {
     holding -> null
-    ui.busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RECONNECTING) ->
+    // As on the phone: «Подключаемся…» is enough; «Готовим/Запускаем VPN» only restated it.
+    tunnel.status == TunnelStatus.STARTING -> null
+    ui.busy || tunnel.status == TunnelStatus.RECONNECTING ->
         ui.message.takeIf { it.isNotBlank() && it !in plainStates } ?: tunnel.message.takeIf { it !in plainStates }
     tunnel.status == TunnelStatus.RUNNING && (ui.healthVerified != true || ui.healthFailures > 0) -> ui.healthMessage
     tunnel.status == TunnelStatus.FAILED -> tunnel.message

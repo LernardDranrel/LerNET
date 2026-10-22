@@ -235,7 +235,7 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
             }
             RouteEditorViewToggle(view) { view = it }
             Spacer(Modifier.width(6.dp))
-            Button(onClick = { editing = newRule(activeOwner, null, rules) }) { Text("+ Правило") }
+            Button(onClick = { editing = newRule(activeOwner, null, rules) }) { Text(app.lernet.engine.text.RouteWords.ADD_RULE) }
         }
         Spacer(Modifier.height(10.dp))
         if (draftError != null) {
@@ -1135,12 +1135,12 @@ private fun ruleBreadcrumb(parentId: String?, rules: List<StoredRule>): String {
     path += reversed.asReversed()
     return path.joinToString("  /  ")
 }
-private fun actionLabelDesktop(action: String) = when (action) { "DIRECT" -> "Напрямую"; "BLOCK" -> "Запретить"; else -> "Через VPN" }
+private fun actionLabelDesktop(action: String) = when (action) { "DIRECT" -> app.lernet.engine.text.RouteWords.DIRECT; "BLOCK" -> app.lernet.engine.text.RouteWords.BLOCK; else -> app.lernet.engine.text.RouteWords.VIA }
 private fun actionLabelDesktop(rule: StoredRule): String =
     if (rule.action == "PROXY" && rule.pipeName.isNotBlank()) "Соединение: ${rule.pipeName}" else actionLabelDesktop(rule.action)
 private fun displayTitle(rule: StoredRule): String = rule.title.ifBlank { if (DesktopRouteTree.isElse(rule)) "Иначе" else "Правило ${rule.sortIndex + 1}" }
-private fun ruleSummary(rule: StoredRule): String = (rule.domains + rule.domainSuffixes.map { "*.$it" } + rule.cidrs + rule.countries + rule.processes)
-    .take(3).joinToString(" · ").ifBlank { "Любой трафик" }
+private fun ruleSummary(rule: StoredRule): String = app.lernet.engine.text.RouteWords.conditionSummary(
+    rule.domains, rule.domainSuffixes, rule.cidrs, rule.countries, rule.processes, rule.apps)
 
 @Composable
 private fun RouteEmpty(title: String, description: String) {

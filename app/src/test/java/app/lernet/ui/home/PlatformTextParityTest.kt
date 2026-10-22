@@ -318,6 +318,16 @@ class PlatformTextParityTest {
     }
 
     @Test
+    fun routeWordsMatchWindows() {
+        val w = app.lernet.engine.text.RouteWords
+        same("rule_block_domain", w.DOMAIN)
+        same("action_proxy", w.VIA)
+        same("action_direct", w.DIRECT)
+        same("action_block", w.BLOCK)
+        assertEquals("Домен: *.corp.example", w.conditionSummary(emptyList(), listOf("corp.example"), emptyList(), emptyList(), emptyList()))
+    }
+
+    @Test
     fun configListWordsMatchWindows() {
         val w = app.lernet.engine.text.ConfigListWords
         same("drawer_title", w.TITLE)
