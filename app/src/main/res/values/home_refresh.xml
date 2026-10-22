@@ -17,6 +17,6 @@
     <string name="home_hop_title">Путь до сервера</string>
     <string name="home_hop_checking">Проверяем…</string>
     <string name="home_hop_check">Проверить путь</string>
-    <string name="home_hop_start_hint">Нажмите на схему или «Проверить путь». Подключаться для этого не нужно.</string>
+    <string name="home_hop_start_hint">Путь проверяется только по кнопке: нажмите на схему или «Проверить путь». Проверка идёт мимо VPN, подключаться для неё не нужно.</string>
     <string name="home_hop_details">Подробности пути</string>
 </resources>

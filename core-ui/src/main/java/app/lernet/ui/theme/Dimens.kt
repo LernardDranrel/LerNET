@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Shapes
-import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -48,7 +47,3 @@ fun Modifier.lernetPrimaryAction(): Modifier =
         .fillMaxWidth()
         .heightIn(min = LerNetDimens.primaryActionMinHeight)
         .defaultMinSize(minHeight = LerNetDimens.primaryActionMinHeight)
-
-@Composable
-fun lernetButtonPadding(): PaddingValues =
-    PaddingValues(horizontal = LerNetDimens.contentPadding, vertical = 10.dp)

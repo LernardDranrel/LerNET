@@ -14,7 +14,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.BorderStroke
@@ -307,31 +306,6 @@ private fun NetworkTableCard(section: NetworkParamSection, onAllowLocation: () -
 private fun AllowLocationButton(onAllowLocation: () -> Unit) {
     androidx.compose.material3.OutlinedButton(onClick = onAllowLocation, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp).testTag("network_allow_location")) {
         Text("Разрешить, чтобы видеть имя Wi-Fi")
-    }
-}
-
-@Composable
-private fun PathStep(number: String, title: String, subtitle: String, status: String, selected: Boolean, reduceMotion: Boolean, onClick: () -> Unit) {
-    val color by animateColorAsState(if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
-        animationSpec = motionTween(reduceMotion, 200), label = "Выбор участка сети")
-    Surface(onClick = onClick, color = color, contentColor = MaterialTheme.colorScheme.onSurface, shape = MaterialTheme.shapes.large, border = BorderStroke(1.dp,
-        if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant), modifier = Modifier.fillMaxWidth().semantics { this.selected = selected }) {
-        Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
-            Text(number, style = MaterialTheme.typography.titleMedium, color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(status, style = MaterialTheme.typography.labelMedium)
-            }
-            Text(if (selected) "✓" else "›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
-        }
-    }
-}
-
-@Composable
-private fun PathConnector() {
-    Row(Modifier.padding(start = 29.dp).height(26.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("↓", color = MaterialTheme.colorScheme.outline, style = MaterialTheme.typography.titleMedium)
     }
 }
 

@@ -829,11 +829,6 @@ class DesktopController(
         )
     }
 
-    fun saveRule(rule: StoredRule): Boolean = editRules { DesktopRouteTree.save(it, rule) }
-    fun deleteRule(ruleId: String): Boolean = editRules { DesktopRouteTree.delete(it, ruleId) }
-    fun moveRule(ruleId: String, delta: Int): Boolean = editRules { DesktopRouteTree.move(it, ruleId, delta) }
-    fun reorderRule(ruleId: String, targetId: String, after: Boolean): Boolean =
-        editRules { DesktopRouteTree.reorder(it, ruleId, targetId, after) }
     data class RuleDraft(val baseline: List<StoredRule>, val rules: List<StoredRule>)
     private val routeDrafts = mutableMapOf<String, RuleDraft>()
     fun routeDraft(ownerId: String): RuleDraft = synchronized(routeDrafts) {
@@ -862,18 +857,6 @@ class DesktopController(
                 saved.copy(rules = all, rulePositions = saved.rulePositions.filterKeys { id -> all.any { it.id == id } })
             }
         }
-    }
-    fun setRulePosition(ruleId: String, position: RulePosition) = change { saved ->
-        saved.copy(rulePositions = saved.rulePositions + (ruleId to position))
-    }
-
-    private fun editRules(block: (List<StoredRule>) -> DesktopRouteTree.Edit): Boolean {
-        val result = block(state.value.saved.rules)
-        if (result.error != null) {
-            mutable.update { it.copy(message = result.error) }
-            return false
-        }
-        return change { it.copy(rules = result.rules, rulePositions = it.rulePositions.filterKeys { id -> result.rules.any { rule -> rule.id == id } }) }
     }
 
     fun preview(profileId: String? = state.value.saved.selectedProfileId, draftProfile: StoredProfile? = null,
@@ -1301,11 +1284,6 @@ class DesktopController(
     }
 
     fun workspaceDirectory(): Path = store.workDirectory()
-
-    /** Called inside the shared import journal transaction; IDs must remain stable. */
-    fun commitWorkspaceInventory(bundle: TransferBundle) {
-        check(change { DesktopTransfer.materializeWorkspace(it, bundle) }) { "Не удалось сохранить конфиги из рабочей области" }
-    }
 
     /** A form must not overwrite a concurrent import, profile edit or selection. */
     fun commitWorkspaceInventoryIfUnchanged(before: TransferBundle, after: TransferBundle) {

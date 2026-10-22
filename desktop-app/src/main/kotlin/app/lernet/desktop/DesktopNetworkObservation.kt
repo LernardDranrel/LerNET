@@ -3,10 +3,8 @@ package app.lernet.desktop
 import app.lernet.engine.net.observation.NetworkTable
 import app.lernet.engine.net.observation.NetworkParamSection
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -25,7 +23,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -293,67 +290,6 @@ private fun RoutePlayground(snapshot: NetworkSnapshot) {
                     Text("Это расчёт настроек, а не подтверждение доступности адреса.", fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun NetworkSettingsExplorer(snapshot: NetworkSnapshot, compact: Boolean, reducedMotion: Boolean, onPage: (ObservationPage) -> Unit) {
-    var selected by remember { mutableStateOf(3) }
-    val titles = listOf("Программы", "DNS и прокси", "Маршруты", "Адаптеры")
-    val marks = listOf("◈", "◇", "⑂", "▤")
-    val targets = listOf(ObservationPage.APPS, ObservationPage.DNS, ObservationPage.ROUTES, ObservationPage.ADAPTERS)
-    val summaries = listOf("Приложение выбирает прямое соединение или настроенный прокси.",
-        "DNS определяет адрес назначения; прокси может изменить путь запроса приложения.",
-        "Найдено ${snapshot.routes.size} маршрутов. Точный префикс важнее низкой метрики общего маршрута.",
-        "${snapshot.adapters.count { it.up }} из ${snapshot.adapters.size} адаптеров включены. Маршрут определяет, какой из них используется для нужного адреса.")
-    val focus by animateFloatAsState(selected.toFloat(), tween(if (reducedMotion) 0 else 220))
-    Surface(color = observationInk, shape = RoundedCornerShape(20.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-        Column(Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Как Windows выбирает путь", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                Text("Схема настроек", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Text("Нажмите на участок, чтобы понять его роль", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
-            Box(Modifier.fillMaxWidth().height(if (compact) 126.dp else 142.dp)) {
-                val wire = MaterialTheme.colorScheme.outlineVariant
-                val accent = MaterialTheme.colorScheme.primary
-                Canvas(Modifier.fillMaxSize()) {
-                    val step = size.width / 4
-                    val centerY = size.height / 2 - 13.dp.toPx()
-                    drawLine(wire, Offset(step / 2, centerY), Offset(size.width - step / 2, centerY), strokeWidth = 2.dp.toPx())
-                    drawCircle(accent.copy(alpha = .15f), radius = 37.dp.toPx(), center = Offset(step * (focus + .5f), centerY))
-                }
-                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    titles.forEachIndexed { index, title ->
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                            Surface(onClick = { selected = index }, shape = RoundedCornerShape(15.dp),
-                                color = if (selected == index) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-                                border = BorderStroke(1.dp, if (selected == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
-                                modifier = Modifier.size(if (compact) 48.dp else 58.dp).semantics {
-                                    contentDescription = title
-                                    stateDescription = if (selected == index) "Выбранный участок" else "Исследовать участок"
-                                }) {
-                                Box(contentAlignment = Alignment.Center) { Text(marks[index], fontSize = 24.sp, color = MaterialTheme.colorScheme.primary) }
-                            }
-                            Text(title, fontSize = if (compact) 11.sp else 13.sp, modifier = Modifier.padding(top = 9.dp), maxLines = 1)
-                        }
-                    }
-                }
-            }
-            HorizontalDivider()
-            Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(1f)) {
-                    Text(titles[selected], color = observationMint, fontWeight = FontWeight.SemiBold)
-                    Text(summaries[selected], fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 5.dp))
-                }
-                TextButton({ onPage(targets[selected]) }) { Text("Исследовать →") }
-            }
-            if (selected == 3 && snapshot.adapters.isNotEmpty()) Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                snapshot.adapters.forEach { adapter -> SuggestionChip({ onPage(ObservationPage.ADAPTERS) }, {
-                    Text("${if (adapter.up) "●" else "○"} ${adapter.name}", color = if (adapter.up) observationMint else MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-                }) }
             }
         }
     }

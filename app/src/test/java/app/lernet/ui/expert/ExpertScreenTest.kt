@@ -155,7 +155,7 @@ class ExpertScreenTest {
             }
         }
         // The hand (pan) mode is on by default; a block moves only after it is switched off.
-        rule.onNodeWithContentDescription("Ладошка: перемещение полотна").performClick()
+        rule.onNodeWithContentDescription("Перемещение полотна").performClick()
         rule.onNodeWithText("Drag rule").performTouchInput {
             down(center)
             advanceEventTime(700)

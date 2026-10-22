@@ -40,20 +40,6 @@ import app.lernet.engine.log.JournalCeiling
 import app.lernet.ui.components.PanelCard
 
 @Composable
-internal fun GlobalDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(stringResource(R.string.settings_global), style = MaterialTheme.typography.titleMedium)
-        SettingHelp(stringResource(R.string.settings_defaults_scope))
-    }
-    DnsDefaultsCard(state, onIntent)
-    XmuxDefaultsCard(state, onIntent)
-    MtuDefaultsCard(state, onIntent)
-    TlsHandshakeCard(state, onIntent)
-    ProxyPasswordCard(state, onIntent)
-    JournalDefaultsCard(state, onIntent)
-}
-
-@Composable
 internal fun DnsDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
     val saved = state.settings.engineDefaults.directDnsServer
     var draft by remember(saved) { mutableStateOf(saved) }

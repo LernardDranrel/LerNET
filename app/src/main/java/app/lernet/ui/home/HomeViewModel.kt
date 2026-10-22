@@ -65,7 +65,6 @@ data class HomeUiState(
     val groups: List<Group> = emptyList(),
     val activeProfile: Profile? = null,
     val engineAvailable: Boolean = false,
-    val applyRoutesPrompt: Boolean = false,
     val loading: Boolean = true,
     val pendingSwitch: Profile? = null,
     val pendingMode: RunMode? = null,

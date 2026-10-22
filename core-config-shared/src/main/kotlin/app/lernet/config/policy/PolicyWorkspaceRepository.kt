@@ -75,9 +75,6 @@ class PolicyWorkspaceRepository(
     @Synchronized
     fun export(): String = PolicyWorkspaceCodec.encode(snapshot())
 
-    @Synchronized
-    fun replaceImported(raw: String): PolicyWorkspace = commit(previewImported(raw, replace = true).after)
-
     /** Prepare once; native/Desktop/Room consumers must use after.legacy IDs without remapping again. */
     @Synchronized
     fun previewImported(raw: String, replace: Boolean = false): PolicyImportPlan {
@@ -114,10 +111,6 @@ class PolicyWorkspaceRepository(
         store.clearPendingImport()
         return next
     }
-
-    /** Append keeps rule order and the existing default. A foreign default requires explicit replacement. */
-    @Synchronized
-    fun mergeImported(raw: String): PolicyWorkspace = commit(previewImported(raw).after)
 
     private fun appendImported(before: PolicyWorkspace, imported: PolicyWorkspace): PolicyWorkspace {
         require(imported.saved.device.defaultTarget == PolicyTarget.Direct && imported.draft.device.defaultTarget == PolicyTarget.Direct) {

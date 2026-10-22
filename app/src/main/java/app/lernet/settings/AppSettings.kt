@@ -17,10 +17,10 @@ data class AppSettings(
     val engineDefaults: EngineDefaults = EngineDefaults(),
     val defaultDnsPolicy: DnsPolicy = DnsPolicy.DEFAULT,
     val lockdownHintDismissed: Boolean = false,
-    /** Own persistent login/password for the local proxy; empty means random for every connection. */
     /** Android 13+: the notification permission was offered once, at the first connection. */
     val notificationsAsked: Boolean = false,
     val notificationHintDismissed: Boolean = false,
+    /** Own persistent login/password for the local proxy; empty means random for every connection. */
     val proxyUsername: String = "",
     val proxyPassword: String = "",
 )
