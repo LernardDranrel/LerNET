@@ -162,7 +162,9 @@ object TransferCodec {
         require(bundle.profiles.all { it.modeOverride == null || it.modeOverride in setOf("FULL_VPN", "PROXY") }) {
             "Неизвестный режим подключения в архиве"
         }
-        require(bundle.profiles.all { it.dnsPolicy in setOf("SYSTEM", "UNDERLAY", "PROFILE") }) {
+        // TUNNEL is the default on both platforms; «SYSTEM» is the older Windows «follow the global setting».
+        val dnsPolicies = app.lernet.config.model.DnsPolicy.entries.map { it.name }.toSet() + "SYSTEM"
+        require(bundle.profiles.all { it.dnsPolicy in dnsPolicies }) {
             "Неизвестный источник DNS в архиве"
         }
         val profileSet = profileIds.toSet()

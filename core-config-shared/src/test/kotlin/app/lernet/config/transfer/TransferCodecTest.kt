@@ -26,6 +26,16 @@ class TransferCodecTest {
         }
     }
 
+    @Test fun `archives with the default dns through the vpn are accepted`() {
+        listOf("TUNNEL", "UNDERLAY", "PROFILE", "SYSTEM").forEach { policy ->
+            val bundle = sample.copy(profiles = listOf(sample.profiles.single().copy(dnsPolicy = policy)))
+            assertEquals(policy, TransferCodec.decode(TransferCodec.encode(bundle)).profiles.single().dnsPolicy)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            TransferCodec.encode(sample.copy(profiles = listOf(sample.profiles.single().copy(dnsPolicy = "SOMETHING"))))
+        }
+    }
+
     @Test fun `rejects unknown schema version before import`() {
         assertThrows(IllegalArgumentException::class.java) { TransferCodec.encode(sample.copy(version = 99)) }
     }

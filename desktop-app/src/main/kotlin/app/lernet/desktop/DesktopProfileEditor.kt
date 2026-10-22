@@ -120,7 +120,7 @@ fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller:
                                 Text("Эти поля должны совпадать с настройками принимающего сервера.", color = editorWarning, fontSize = 12.sp)
                                 OutlinedTextField(server, { server = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Адрес сервера") }, isError = server.isBlank(), singleLine = true)
                                 OutlinedTextField(port, { port = it }, modifier = Modifier.width(210.dp), label = { Text("Порт") }, isError = parsedPort == null, singleLine = true)
-                                OutlinedTextField(sni, { sni = it }, modifier = Modifier.fillMaxWidth(), label = { Text("SNI / server_name") }, singleLine = true)
+                                OutlinedTextField(sni, { sni = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Имя сайта для маскировки (SNI)") }, singleLine = true)
                                 Text("Транспорт: ${original.transportType.ifBlank { "не указан" }}", color = editorMuted)
                                 if (original.hasTransport) {
                                     OutlinedTextField(path, { path = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Путь транспорта") }, singleLine = true)

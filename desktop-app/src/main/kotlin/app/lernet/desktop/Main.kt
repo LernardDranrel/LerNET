@@ -1055,7 +1055,7 @@ internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boole
                         if (it.port.isBlank()) it.server else "${it.server}:${it.port}"
                     }.orEmpty().ifBlank { "Не указан" })
                     ProfileDetail("Транспорт", endpoint?.transportType?.uppercase()?.ifBlank { "По умолчанию" } ?: "По умолчанию")
-                    ProfileDetail("SNI", endpoint?.sni?.ifBlank { "Не указан" } ?: "Не указан")
+                    ProfileDetail("Имя для маскировки (SNI)", endpoint?.sni?.ifBlank { "Не указан" } ?: "Не указан")
                     ProfileDetail("Режим", if (controller.effectiveMode(selected) == RunMode.PROXY) "Локальный прокси" else "Полный VPN")
                     ProfileDetail("DNS", when (selected.dnsPolicy) {
                         "SYSTEM" -> "Глобальная настройка"

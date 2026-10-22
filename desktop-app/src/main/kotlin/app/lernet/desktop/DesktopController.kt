@@ -132,8 +132,8 @@ class DesktopController(
     private val mutable = MutableStateFlow(
         DesktopUiState(
             saved = loaded.getOrDefault(StoredState()).withExplicitDns(),
-            message = loaded.exceptionOrNull()?.let { app.lernet.engine.text.UserText.withReason("Не удалось прочитать профили", it) }
-                ?: if (store.recoveredFromBackup) "Профили восстановлены из резервной копии"
+            message = loaded.exceptionOrNull()?.let { app.lernet.engine.text.UserText.withReason("Не удалось прочитать конфиги", it) }
+                ?: if (store.recoveredFromBackup) "Конфиги восстановлены из резервной копии"
                 else if (sessionMarks.previousSessionCrashed) DesktopSessionMarks.CRASH_NOTICE else "",
         ),
     )
@@ -438,7 +438,7 @@ class DesktopController(
             OutboundProbe.check(profile, saved, executable, store.workDirectory())
         }.getOrElse { OutboundProbeResult(message = app.lernet.engine.text.UserText.of(it, "Не удалось проверить связь через VPN")) }
         if (result.latencyMs == null) {
-            tunnel.logDiagnostic("Профиль «${profile.name}»: ${result.message}")
+            tunnel.logDiagnostic("Конфиг «${profile.name}»: ${result.message}")
             result.diagnostics.forEach(tunnel::logDiagnostic)
         }
         return result
@@ -484,7 +484,7 @@ class DesktopController(
             runCatching {
                 val bundle = app.lernet.config.transfer.TransferCodec.decode(raw)
                 check(change { DesktopTransfer.merge(it, raw) }) { "Не удалось сохранить импортированные данные" }
-                "Добавлено папок: ${bundle.groups.size}, профилей: ${bundle.profiles.size}, правил: ${bundle.rules.size}"
+                "Добавлено папок: ${bundle.groups.size}, конфигов: ${bundle.profiles.size}, правил: ${bundle.rules.size}"
             }.onSuccess { summary -> mutable.update { it.copy(busy = false, message = summary) } }
                 .onFailure { error -> mutable.update { it.copy(busy = false, message = app.lernet.engine.text.UserText.withReason("Импорт не выполнен", error)) } }
         }
@@ -556,7 +556,7 @@ class DesktopController(
     fun import(text: String, groupId: String? = null) {
         if (text.isBlank()) return
         if (loaded.isFailure) {
-            mutable.update { it.copy(message = "Файл профилей повреждён. Импорт не сохранён.") }
+            mutable.update { it.copy(message = "Файл конфигов повреждён. Импорт не сохранён.") }
             return
         }
         if (app.lernet.config.transfer.TransferCodec.isTransfer(text)) {
@@ -887,7 +887,7 @@ class DesktopController(
             rules = source.rules.filterNot { it.profileId == draftOwnerId } + draftRules
         ) else source
         val profile = draftProfile ?: saved.profiles.firstOrNull { it.id == profileId }
-            ?: return AssembledConfig("", "", listOf("Выберите профиль"))
+            ?: return AssembledConfig("", "", listOf("Выберите конфиг"))
         val outbound = profile.selectedOutbound
             ?: return AssembledConfig("", "", listOf("В конфиге нет подходящего сервера"))
         val activeRules = routingRules(saved, profile)
@@ -969,7 +969,7 @@ class DesktopController(
             return
         }
         if (loaded.isFailure) {
-            reportConnectionError("Файл профилей повреждён. Сохранение отключено до восстановления данных.")
+            reportConnectionError("Файл конфигов повреждён. Сохранение отключено до восстановления данных.")
             return
         }
         if (!connectBusy.compareAndSet(false, true)) return
@@ -1304,14 +1304,14 @@ class DesktopController(
 
     /** Called inside the shared import journal transaction; IDs must remain stable. */
     fun commitWorkspaceInventory(bundle: TransferBundle) {
-        check(change { DesktopTransfer.materializeWorkspace(it, bundle) }) { "Не удалось сохранить профили из рабочей области" }
+        check(change { DesktopTransfer.materializeWorkspace(it, bundle) }) { "Не удалось сохранить конфиги из рабочей области" }
     }
 
     /** A form must not overwrite a concurrent import, profile edit or selection. */
     fun commitWorkspaceInventoryIfUnchanged(before: TransferBundle, after: TransferBundle) {
         check(change { saved ->
             check(TransferCodec.decode(DesktopTransfer.export(saved)) == before) {
-                "Список профилей изменился. Обновите форму перед сохранением."
+                "Список конфигов изменился. Обновите форму перед сохранением."
             }
             DesktopTransfer.materializeWorkspace(saved, after)
         }) { "Не удалось сохранить внешний выход" }
@@ -1320,7 +1320,7 @@ class DesktopController(
     private fun change(block: (StoredState) -> StoredState): Boolean {
         synchronized(this) {
             if (loaded.isFailure) {
-                mutable.update { it.copy(message = "Файл профилей повреждён. Изменения не сохранены.") }
+                mutable.update { it.copy(message = "Файл конфигов повреждён. Изменения не сохранены.") }
                 return false
             }
             val next = block(mutable.value.saved).withExplicitDns()

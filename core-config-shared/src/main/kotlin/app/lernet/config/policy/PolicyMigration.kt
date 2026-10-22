@@ -86,7 +86,7 @@ object PolicyMigration {
 
     /** Legacy folder routes override a member's profile tree only when the folder has rules. */
     fun effectiveScope(bundle: TransferBundle, profileId: String): PolicyScope {
-        require(bundle.profiles.any { it.id == profileId }) { "Профиль отсутствует" }
+        require(bundle.profiles.any { it.id == profileId }) { "Конфиг отсутствует" }
         val folder = bundle.groups.firstOrNull { profileId in it.profileIds }
         return if (folder != null && bundle.rules.any { it.ownerId == "grp_${folder.id}" }) {
             PolicyScope.Folder(folder.id)

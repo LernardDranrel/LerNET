@@ -91,8 +91,8 @@ internal fun DesktopUpdatePrompt() {
             title = { Text("Доступен LerNET v${release.version}") },
             text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(if (DesktopUpdates.installed)
-                    "Установщик обновит приложение и сохранит ваши профили. При обновлении VPN временно отключится."
-                    else "Вы используете портативную версию. Скачайте новый ZIP на странице релиза, выйдите из LerNET через меню в трее и замените файлы. Профили сохранятся.")
+                    "Установщик обновит приложение и сохранит ваши конфиги. При обновлении VPN временно отключится."
+                    else "Вы используете портативную версию. Скачайте новый ZIP на странице релиза, выйдите из LerNET через меню в трее и замените файлы. Конфиги сохранятся.")
                 DesktopUpdateActions(release)
             } },
             confirmButton = { TextButton(onClick = { dismissed = release.version }) { Text("Позже") } })
