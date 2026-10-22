@@ -38,6 +38,7 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import app.lernet.engine.policy.LinkCheck
 import app.lernet.engine.policy.RecheckJitter
 import app.lernet.engine.policy.BlockingDetector
 import app.lernet.engine.policy.BlockingSign
@@ -452,54 +453,55 @@ class DesktopController(
                 val active = running && profile.id == state.value.saved.selectedProfileId
                 val access = (AppTraffic.route as? AppTraffic.Route.Through)?.access?.takeIf { running }
                 mutable.update { it.copy(probes = it.probes + (profile.id to ProbeResult(
-                    message = "Проверяем ${EndpointProbe.protocol(profile)}", checking = true,
+                    message = "Проверяем…", checking = true,
                     tunnelMessage = "Ожидает проверки", serverProtocol = EndpointProbe.protocol(profile),
                 ))) }
-                if (active) {
-                    // The running config is already connected: report the live tunnel check, open nothing new.
-                    val ui = state.value
-                    if (probeTickets[profile.id] != ticket) return@forEachIndexed
-                    mutable.update { it.copy(probes = it.probes + (profile.id to ProbeResult(
-                        latencyMs = ui.tunnelLatencyMs, message = "Подключён сейчас",
-                        tunnelLatencyMs = ui.tunnelLatencyMs, tunnelMessage = ui.healthMessage.ifBlank { "Работает" },
-                        serverProtocol = EndpointProbe.protocol(profile),
-                    ))) }
-                    return@forEachIndexed
-                }
-                when (BackupReach.route(access != null, EndpointProbe.isTcp(profile), userAsked = true)) {
-                    ReachRoute.TUNNEL -> {
-                        // Through the tunnel every check is one more connection via the active server.
+                // One algorithm with Android (LinkCheck): budget first, one by one, never a second core.
+                // Another config goes through the VPN only when LerNET's internal listener is there to carry it.
+                val plan = LinkCheck.plan(active, running && (active || access != null), EndpointProbe.isTcp(profile))
+                when (plan.server) {
+                    LinkCheck.Server.LIVE -> {
+                        // The running config: one fresh request through the VPN, budgeted like any connection.
                         if (!awaitBudgetShowing(profile.id, ticket, null)) return@forEachIndexed
-                        val result = EndpointProbe.checkThroughTunnel(profile, access!!)
+                        val health = WindowsTunnelHealth.check(saved.healthUrl, effectiveMode(profile), proxyAccess = state.value.localProxy)
                         if (probeTickets[profile.id] != ticket) return@forEachIndexed
-                        // A full-path check would start a second core that dials the server from this
-                        // network; with the VPN on we do not do that. It happens on switching.
-                        mutable.update { it.copy(probes = it.probes + (profile.id to result.copy(
-                            tunnelMessage = "Полный путь проверим при переключении",
+                        mutable.update { it.copy(probes = it.probes + (profile.id to ProbeResult(
+                            latencyMs = health.latencyMs, message = "Подключён сейчас",
+                            tunnelLatencyMs = health.latencyMs,
+                            tunnelMessage = if (health.latencyMs != null) "Работает" else health.error.ifBlank { "Не удалось проверить связь через VPN" },
+                            serverProtocol = EndpointProbe.protocol(profile),
                         ))) }
                     }
-                    else -> probeDirect(profile, ticket, saved)
+                    LinkCheck.Server.THROUGH_VPN -> {
+                        // Through the tunnel every check is one more connection via the active server.
+                        if (!awaitBudgetShowing(profile.id, ticket, null)) return@forEachIndexed
+                        val result = EndpointProbe.checkThroughTunnel(profile, access!!, timeoutMs = LinkCheck.TIMEOUT_MS)
+                        if (probeTickets[profile.id] != ticket) return@forEachIndexed
+                        mutable.update { it.copy(probes = it.probes + (profile.id to result.copy(
+                            tunnelMessage = LinkCheck.notMeasured(plan.fullPath).orEmpty(),
+                        ))) }
+                    }
+                    LinkCheck.Server.DIRECT -> probeDirect(profile, ticket, plan)
                 }
             }
         }
     }
 
-    /** «Проверить» without the tunnel: a handshake straight to the server, then a request through a second core. */
-    private fun probeDirect(profile: StoredProfile, ticket: Long, saved: StoredState) {
-        // Each of the two is one more connection to this server: both count against its budget.
+    /** «Проверить» straight to the server: one budgeted TCP connection; the full path waits for connect/switch. */
+    private fun probeDirect(profile: StoredProfile, ticket: Long, plan: LinkCheck.Plan) {
+        val later = LinkCheck.notMeasured(plan.fullPath).orEmpty()
+        if (!EndpointProbe.isTcp(profile)) {
+            // A silent UDP server cannot be told from a dead one in advance (same as Android); a TCP connect would always fail.
+            mutable.update { it.copy(probes = it.probes + (profile.id to ProbeResult(
+                message = "UDP-конфиг заранее не проверить", tunnelMessage = later, serverProtocol = EndpointProbe.protocol(profile),
+            ))) }
+            return
+        }
         val key = keyOf(profile)
         if (key != null && !awaitBudgetShowing(profile.id, ticket, key)) return
-        val tcp = EndpointProbe.check(profile)
+        val tcp = EndpointProbe.check(profile, timeoutMs = LinkCheck.TIMEOUT_MS, tlsHandshake = false)
         if (probeTickets[profile.id] != ticket) return
-        mutable.update {
-            it.copy(probes = it.probes + (profile.id to tcp.copy(checking = true, tunnelMessage = "Проверяем канал через узел…")))
-        }
-        if (key != null && !awaitBudgetShowing(profile.id, ticket, key)) return
-        val outbound = checkOutbound(profile, saved)
-        if (probeTickets[profile.id] != ticket) return
-        mutable.update {
-            it.copy(probes = it.probes + (profile.id to tcp.copy(tunnelLatencyMs = outbound.latencyMs, tunnelMessage = outbound.message)))
-        }
+        mutable.update { it.copy(probes = it.probes + (profile.id to tcp.copy(tunnelMessage = later))) }
     }
 
     private fun checkOutbound(profile: StoredProfile, saved: StoredState): OutboundProbeResult {

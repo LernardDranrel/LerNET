@@ -517,7 +517,7 @@ class HomeViewModel @Inject constructor(
         }
         // One by one with a random pause, not a burst of parallel handshakes to every server.
         // With the VPN on, servers are reached through it, so this network sees no new connections.
-        val probe = app.lernet.engine.net.TunnelFirstBackupProbe(AndroidProtectedDialer(), timeoutMs = 15_000)
+        val probe = app.lernet.engine.net.TunnelFirstBackupProbe(AndroidProtectedDialer(), timeoutMs = app.lernet.engine.policy.LinkCheck.TIMEOUT_MS)
         try {
             for ((index, id) in unique.withIndex()) {
                 if (index > 0) delay(app.lernet.engine.policy.BackupRotation.buttonGapMs())
@@ -525,14 +525,19 @@ class HomeViewModel @Inject constructor(
                 val connected = snapshot.state == ConnectionState.CONNECTED
                 val endpoint = profiles[id]?.selectedOutbound()?.singBoxJson?.let(OutboundEndpoint::parse)
                 val active = connected && snapshot.activeProfileId == id
+                // One algorithm with Windows (LinkCheck): budget first, one by one, never a second core.
+                val plan = app.lernet.engine.policy.LinkCheck.plan(active, connected,
+                    endpoint?.transport == app.lernet.engine.net.ProbeTransport.TCP)
                 val server = when {
                     endpoint == null -> ProfileProbe(reachable = false)
                     // The running config is already connected: measure it through the tunnel only.
-                    active -> ProfileProbe(reachable = true, tcpMs = snapshot.serverTcpMs)
+                    plan.server == app.lernet.engine.policy.LinkCheck.Server.LIVE ->
+                        ProfileProbe(reachable = true, tcpMs = snapshot.serverTcpMs)
                     else -> checkServer(probe, endpoint, profiles[id]?.selectedOutbound()?.singBoxJson, connected, id, requestId)
                 }
                 // A row that a newer check replaced (null) is left to that check.
-                val tunnel = if (active && awaitBudget(id, requestId, null)) {
+                val fullPathNow = plan.fullPath == app.lernet.engine.policy.LinkCheck.FullPath.RUNNING_VPN
+                val tunnel = if (fullPathNow && awaitBudget(id, requestId, null)) {
                     AndroidTunnelProbe.measure(LocalListeners.appProxy(snapshot.compiledJson))
                 } else {
                     null

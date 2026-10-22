@@ -39,8 +39,9 @@ object EndpointProbe {
         return if (tls?.get("enabled")?.jsonPrimitive?.booleanOrNull == true) "TLS" else "TCP"
     }
 
-    fun check(profile: StoredProfile, timeoutMs: Int = 30_000): ProbeResult {
-        val protocol = protocol(profile)
+    /** [tlsHandshake] false: a plain TCP connection, as «Проверить связь» does on both platforms (LinkCheck). */
+    fun check(profile: StoredProfile, timeoutMs: Int = 30_000, tlsHandshake: Boolean = true): ProbeResult {
+        val protocol = if (tlsHandshake) protocol(profile) else "TCP"
         val outbound = profile.selectedOutbound ?: return ProbeResult(message = "Нет выбранного сервера")
         val endpoint = OutboundPatch.read(outbound.singBoxJson)
         val port = endpoint.port.toIntOrNull()
