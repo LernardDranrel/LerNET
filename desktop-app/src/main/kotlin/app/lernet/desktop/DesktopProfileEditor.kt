@@ -94,7 +94,7 @@ fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller:
                                 Text("DNS", fontWeight = FontWeight.SemiBold)
                                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                                     FilterChip(dnsPolicy == "TUNNEL", onClick = { dnsPolicy = "TUNNEL" }, label = { Text("Через VPN") })
-                                    FilterChip(dnsPolicy == "UNDERLAY", onClick = { dnsPolicy = "UNDERLAY" }, label = { Text("DNS сети") })
+                                    FilterChip(dnsPolicy == "UNDERLAY", onClick = { dnsPolicy = "UNDERLAY" }, label = { Text("Напрямую") })
                                     FilterChip(dnsPolicy == "PROFILE", onClick = { dnsPolicy = "PROFILE" }, label = { Text("DNS конфига") })
                                 }
                                 preview?.userChanges?.takeIf { it.isNotEmpty() }?.let { changes ->

@@ -1061,7 +1061,7 @@ internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boole
                         "SYSTEM" -> "Глобальная настройка"
                         "PROFILE" -> "Из конфига"
                         "TUNNEL" -> "Через VPN"
-                        else -> "DNS сети (мимо VPN)"
+                        else -> "Напрямую (мимо VPN)"
                     })
                 }
                 Spacer(Modifier.height(14.dp))
@@ -1900,7 +1900,7 @@ internal fun Settings(saved: StoredState, controller: DesktopController, onReque
             SettingHeading("DNS", "Кто определяет адреса сайтов",
                 "DNS переводит имя сайта в IP-адрес. Выбор здесь получают новые конфиги; у уже добавленных DNS меняется в настройках конфига.")
             Box(Modifier.fillMaxWidth()) {
-                SegmentedChoice(listOf("TUNNEL" to "Через VPN", "UNDERLAY" to "DNS сети", "PROFILE" to "Из конфига"), dnsPolicy) { dnsPolicy = it }
+                SegmentedChoice(listOf("TUNNEL" to "Через VPN", "UNDERLAY" to "Напрямую", "PROFILE" to "Из конфига"), dnsPolicy) { dnsPolicy = it }
             }
             OutlinedTextField(directDns, { directDns = it }, modifier = Modifier.fillMaxWidth(),
                 label = { Text(if (dnsPolicy == "PROFILE") "Резервный DNS · IPv4" else "DNS-сервер · IPv4") },

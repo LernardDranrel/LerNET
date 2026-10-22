@@ -286,12 +286,12 @@
     <string name="cfg_effective">Как уйдёт: %1$s</string>
     <string name="cfg_overridden">переопределено системой</string>
     <string name="cfg_dns_tunnel">DNS через VPN (по умолчанию)</string>
-    <string name="cfg_keep_system">DNS вашей сети (Wi-Fi/оператора) — сеть видит имена сайтов</string>
+    <string name="cfg_keep_system">DNS напрямую, мимо VPN (сервер из настроек) — сеть видит имена сайтов</string>
     <string name="cfg_use_profile">DNS из конфига</string>
     <string name="cfg_dns_warning_title">DNS из конфига</string>
     <string name="cfg_dns_warning_body">Будут использованы серверы DNS из конфига как есть. Если они идут мимо туннеля, сеть видит имена сайтов. Если сайты перестанут открываться, верните «DNS через VPN».</string>
     <string name="cfg_dns_warning_confirm">Всё равно DNS конфига</string>
-    <string name="cfg_reason_dns_dropped">В режиме «DNS вашей сети» DNS конфига через туннель не используется. %1$s</string>
+    <string name="cfg_reason_dns_dropped">В режиме «DNS напрямую» DNS конфига через туннель не используется. %1$s</string>
     <string name="cfg_reason_detour">Лишний промежуточный выход убран — он ломал подключение. %1$s</string>
     <string name="cfg_reason_xmux">В конфиге не было своих настроек соединений к серверу (xmux), LerNET подставил общие. %1$s</string>
     <string name="cfg_reason_log">При подключении журнал становится подробнее, чтобы в нём были строки DNS.</string>

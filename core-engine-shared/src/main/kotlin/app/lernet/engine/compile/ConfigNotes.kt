@@ -22,7 +22,7 @@ object ConfigNotes {
         }
         proxiedDropped.find(note)?.let { m ->
             val tags = m.groupValues[1].split(',').filter { it.isNotBlank() }.joinToString(", ")
-            return "DNS-серверы $tags не используются: выбран DNS сети устройства. Чтобы их включить, выберите DNS конфига"
+            return "DNS-серверы $tags не используются: выбран DNS напрямую, мимо VPN. Чтобы их включить, выберите DNS конфига"
         }
         resolverRemapped.find(note)?.let { m ->
             val (from, to, tag) = m.destructured
