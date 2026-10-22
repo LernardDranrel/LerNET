@@ -94,7 +94,11 @@ internal fun androidRouteKind(type: Int) = when (type) {
     else -> "Неизвестный тип маршрута ($type)"
 }
 
-internal class AndroidNetworkCollector(private val reader: AndroidNetworkReader) {
+internal class AndroidNetworkCollector(
+    /** Wi-Fi and mobile details; first so that `AndroidNetworkCollector { records }` keeps meaning the network reader. */
+    private val radioReader: AndroidRadioReader? = null,
+    private val reader: AndroidNetworkReader,
+) {
     fun collect(now: () -> Long = System::currentTimeMillis): NetworkSnapshot {
         val started = now()
         val result = runCatching { reader.read() }
@@ -124,6 +128,13 @@ internal class AndroidNetworkCollector(private val reader: AndroidNetworkReader)
             ObservationSource("dns", "DNS и прокси", "Настройки адресов сайтов для каждой видимой сети. PAC-файлы не загружаются.", state,
                 records.map { r -> EvidenceRow(r.id, r.name, linkedMapOf("DNS" to r.dns.joinToString().ifBlank { "Не переданы системой" },
                     "Частный DNS" to r.privateDns, "Прокси" to r.proxy)) }, capturedAt = started, complete = linksComplete),
+            *listOfNotNull(radioReader?.let { radio ->
+                runCatching { AndroidRadioText.source(radio.read(), started) }.getOrElse {
+                    ObservationSource("wlan", "Wi-Fi и мобильная сеть", "Сеть, через которую телефон выходит в интернет.",
+                        if (it is SecurityException) SourceState.ACCESS_DENIED else SourceState.ERROR,
+                        detail = "Android не отдал сведения о Wi-Fi и мобильной сети", capturedAt = started, complete = false)
+                }
+            }).toTypedArray(),
             ObservationSource("vpn", "VPN", "Видимый VPN-адаптер не раскрывает настройки чужого приложения.", if (failure != null) state else if (records.none { it.vpn }) SourceState.EMPTY else SourceState.AVAILABLE,
                 records.filter { it.vpn }.map { r -> EvidenceRow(r.id, r.name, mapOf(
                     "Владелец" to if (r.ownerIsSelf) "LerNET · UID совпадает с приложением" else "Android не раскрыл владельца",

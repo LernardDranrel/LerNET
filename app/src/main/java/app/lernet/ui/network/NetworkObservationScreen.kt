@@ -57,8 +57,13 @@ fun NetworkObservationRoute(onBack: () -> Unit) {
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         uri?.let(vm::export)
     }
+    // Asked only when the user taps «Разрешить»: Android shows the Wi-Fi name only to apps with location access.
+    val location = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { vm.refresh() }
     NetworkObservationScreen(state, onBack, vm::refresh, vm::checkExternalIp,
-        onExport = { export.launch("LerNET-network-${state.snapshot?.finishedAt ?: System.currentTimeMillis()}.json") })
+        onExport = { export.launch("LerNET-network-${state.snapshot?.finishedAt ?: System.currentTimeMillis()}.json") },
+        onAllowLocation = {
+            location.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
+        })
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
@@ -69,6 +74,7 @@ internal fun NetworkObservationScreen(
     onRefresh: () -> Unit,
     onCheckIp: () -> Unit,
     onExport: () -> Unit,
+    onAllowLocation: () -> Unit = {},
 ) {
     val systemReducedMotion = rememberReduceMotion()
     var pauseMotion by remember { mutableStateOf(false) }
@@ -142,7 +148,7 @@ internal fun NetworkObservationScreen(
                     if (snapshot != null) item {
                         NetworkUnusualBanner(NetworkTable.unusualCount(table), snapshot.finishedAt)
                     }
-                    items(table, key = { it.title }) { section -> NetworkTableCard(section) }
+                    items(table, key = { it.title }) { section -> NetworkTableCard(section, onAllowLocation) }
                     if (snapshot != null) item {
                         Text("● собирается · ◐ система отдаёт, LerNET пока не собирает · ✕ скрыто от приложений. " +
                             "Оценка «обычно» есть только у полей со стандартным значением; имена, адреса и DNS-серверы — без оценки.",
@@ -213,7 +219,7 @@ internal fun NetworkObservationScreen(
                         }
                         OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("Найти в выбранном источнике") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                     }
-                    detail?.let { source -> item { SourcePanel(source, reduceMotion, query, snapshot) } }
+                    detail?.let { source -> item { SourcePanel(source, reduceMotion, query, snapshot, onAllowLocation) } }
                 }
                 2 -> {
                     item {
@@ -266,7 +272,7 @@ private fun NetworkUnusualBanner(count: Int, at: Long) {
 }
 
 @Composable
-private fun NetworkTableCard(section: NetworkParamSection) {
+private fun NetworkTableCard(section: NetworkParamSection, onAllowLocation: () -> Unit = {}) {
     OutlinedCard(Modifier.fillMaxWidth().testTag("network_section_${section.title}")) {
         Column(Modifier.padding(vertical = 10.dp)) {
             Text(section.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
@@ -291,7 +297,16 @@ private fun NetworkTableCard(section: NetworkParamSection) {
                     Text(row.usual, Modifier.weight(0.26f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+            if (section.rows.any { it.value == AndroidRadioText.NAME_NEEDS_PERMISSION }) AllowLocationButton(onAllowLocation)
         }
+    }
+}
+
+/** The honest ask: Android needs location access only to show the Wi-Fi name; the reason is in the row above. */
+@Composable
+private fun AllowLocationButton(onAllowLocation: () -> Unit) {
+    androidx.compose.material3.OutlinedButton(onClick = onAllowLocation, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp).testTag("network_allow_location")) {
+        Text("Разрешить, чтобы видеть имя Wi-Fi")
     }
 }
 
@@ -321,7 +336,8 @@ private fun PathConnector() {
 }
 
 @Composable
-private fun SourcePanel(source: ObservationSource, reduceMotion: Boolean, query: String = "", snapshot: NetworkSnapshot? = null) {
+private fun SourcePanel(source: ObservationSource, reduceMotion: Boolean, query: String = "", snapshot: NetworkSnapshot? = null,
+    onAllowLocation: () -> Unit = {}) {
     val rows = remember(source, query) { source.rows.filter { row -> query.isBlank() || "${row.title} ${row.fields}".contains(query, ignoreCase = true) } }
     var count by remember(source.id, query) { mutableStateOf(8) }
     var help by remember(source.id) { mutableStateOf(false) }
@@ -344,6 +360,7 @@ private fun SourcePanel(source: ObservationSource, reduceMotion: Boolean, query:
             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         rows.take(count).forEach { row -> MobileEvidenceRow(row, source.id, snapshot, reduceMotion) }
         if (rows.size > count) TextButton(onClick = { count += 8 }) { Text("Показать ещё ${minOf(8, rows.size - count)} записей") }
+        if (AndroidRadioText.needsPermission(source)) AllowLocationButton(onAllowLocation)
     }
 }
 

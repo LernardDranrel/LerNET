@@ -39,7 +39,7 @@ data class NetworkObservationUiState(
 
 class NetworkObservationViewModel @JvmOverloads constructor(
     application: Application,
-    private val collectSnapshot: () -> NetworkSnapshot = { AndroidNetworkCollector(ConnectivityNetworkReader(application)).collect() },
+    private val collectSnapshot: () -> NetworkSnapshot = { AndroidNetworkCollector(SystemRadioReader(application), ConnectivityNetworkReader(application)).collect() },
     private val openIpConnection: () -> HttpURLConnection = { URL(IP_URL).openConnection() as HttpURLConnection },
 ) : AndroidViewModel(application) {
     private val mutable = MutableStateFlow(NetworkObservationUiState())

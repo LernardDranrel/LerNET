@@ -81,6 +81,16 @@ class NetworkObservationScreenTest {
         rule.runOnIdle { assertThat(checks).isEqualTo(1) }
     }
 
+    @Test fun hiddenWifiNameOffersLocationOnlyByButton() {
+        var asks = 0
+        val withRadio = AndroidNetworkCollector(radioReader = { AndroidRadio(wifi = true, rssiDbm = -60, frequencyMhz = 2437) }) { emptyList() }.collect { 1000L }
+        rule.setContent { LerNetTheme { NetworkObservationScreen(NetworkObservationUiState(snapshot = withRadio), {}, {}, {}, {}, onAllowLocation = { asks++ }) } }
+        rule.runOnIdle { assertThat(asks).isEqualTo(0) }
+        rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Разрешить, чтобы видеть имя Wi-Fi"))
+        rule.onNodeWithText("Разрешить, чтобы видеть имя Wi-Fi").performClick()
+        rule.runOnIdle { assertThat(asks).isEqualTo(1) }
+    }
+
     private fun capture(name: String) {
         val file = File("build/reports/ui/$name")
         file.parentFile?.mkdirs()
