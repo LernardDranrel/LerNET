@@ -15,8 +15,9 @@
     <string name="state_reconnecting">Переподключаемся…</string>
     <string name="state_waiting_network">Нет сети · VPN держим, ждём, когда сеть вернётся</string>
     <!-- Same text as LinkJudge.holdMessage (Windows). Nothing restarts while these are shown. -->
-    <string name="state_hold_jammed">Связь глушат · держим соединение, ничего не перезапускаем</string>
-    <string name="state_hold_all_silent">Сеть есть, но ни один сервер не отвечает · возможно, оператор оставил только разрешённые сайты · проверяем изредка</string>
+    <string name="state_hold_jammed">Связь глушат · держим подключение</string>
+    <string name="state_hold_all_silent">Сеть есть, но серверы не отвечают · похоже, открыты только разрешённые сайты · проверяем изредка</string>
+    <string name="state_hold_all_silent_next">Сеть есть, но серверы не отвечают · похоже, открыты только разрешённые сайты · проверим снова через %1$s</string>
     <string name="state_failed">Не удалось подключиться</string>
     <string name="active_profile">Конфиг: %1$s</string>
     <string name="no_profile">Конфиг не выбран</string>

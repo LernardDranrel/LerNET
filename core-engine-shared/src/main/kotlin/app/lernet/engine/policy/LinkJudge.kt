@@ -92,8 +92,8 @@ object LinkJudge {
 
     /** Plain mode, «вы»: what the user sees while the connection is held without a restart. */
     fun holdMessage(hold: LinkHold, nextCheckLabel: String? = null): String = when (hold) {
-        LinkHold.JAMMED -> "Связь глушат · держим соединение, ничего не перезапускаем"
-        LinkHold.ALL_SILENT -> "Сеть есть, но ни один сервер не отвечает · возможно, оператор оставил только разрешённые сайты" +
-            nextCheckLabel?.let { " · проверим снова через $it" }.orEmpty()
+        LinkHold.JAMMED -> "Связь глушат · держим подключение"
+        LinkHold.ALL_SILENT -> "Сеть есть, но серверы не отвечают · похоже, открыты только разрешённые сайты" +
+            (nextCheckLabel?.let { " · проверим снова через $it" } ?: " · проверяем изредка")
     }
 }
