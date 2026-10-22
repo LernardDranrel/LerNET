@@ -324,7 +324,7 @@ internal fun ExpertExternalExitDetails(
             Text("Адаптер: ${request.binding?.name ?: "не передан"}", color = ExpertColors.text)
             Text("Номер: ${request.binding?.index ?: "не передан"}", color = ExpertColors.muted)
             Text("GUID: ${request.binding?.guid ?: "не передан"}", color = ExpertColors.muted, fontSize = 12.sp)
-            Text("DNS: ${request.dnsServer ?: "сохранённая настройка профиля"}", color = ExpertColors.muted)
+            Text("DNS: ${request.dnsServer ?: "сохранённая настройка конфига"}", color = ExpertColors.muted)
             ExpertMessage(
                 "Привязка сохраняется между устройствами",
                 "На другом Windows-устройстве выбери его подтверждённый адаптер. На Android эта привязка не создаёт системный VPN " +

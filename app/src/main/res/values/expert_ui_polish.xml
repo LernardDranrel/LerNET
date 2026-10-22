@@ -1,8 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="expert_schema_pending">Есть неприменённые изменения</string>
-    <string name="expert_schema_applied">Схема применена</string>
-    <string name="expert_schema_saved">Схема сохранена · заработает, когда включишь</string>
     <string name="expert_simulation_hide_editor">Скрыть параметры</string>
     <string name="expert_simulation_edit_parameters">Изменить параметры</string>
     <string name="expert_simulation_create_example">Создать пример</string>

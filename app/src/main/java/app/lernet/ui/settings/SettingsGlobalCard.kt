@@ -171,7 +171,7 @@ internal fun JournalDefaultsCard(state: SettingsUiState, onIntent: (SettingsInte
             onClick = { draft.toIntOrNull()?.let { onIntent(SettingsIntent.ProposeJournal(it)) } },
             enabled = draft.toIntOrNull() != null && draft.toIntOrNull() != saved,
             modifier = Modifier.fillMaxWidth(),
-        ) { Text(stringResource(R.string.settings_journal_apply)) }
+        ) { Text(stringResource(R.string.apply)) }
     }
     val pending = state.pendingJournalMb
     if (pending != null) {
@@ -180,7 +180,7 @@ internal fun JournalDefaultsCard(state: SettingsUiState, onIntent: (SettingsInte
             title = { Text(stringResource(R.string.settings_journal_confirm_title)) },
             text = { Text(stringResource(R.string.settings_journal_confirm_body, JournalCeiling.mb(pending))) },
             confirmButton = {
-                TextButton(onClick = { onIntent(SettingsIntent.ConfirmJournal) }) { Text(stringResource(R.string.settings_journal_apply)) }
+                TextButton(onClick = { onIntent(SettingsIntent.ConfirmJournal) }) { Text(stringResource(R.string.apply)) }
             },
             dismissButton = {
                 TextButton(onClick = { onIntent(SettingsIntent.DismissJournal) }) { Text(stringResource(R.string.cancel)) }

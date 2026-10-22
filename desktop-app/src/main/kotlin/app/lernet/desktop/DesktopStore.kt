@@ -95,8 +95,9 @@ data class StoredState(
     /** XHTTP connections per server when a config has no xmux of its own: 2, or 1 with «Один канал». */
     val xmuxChannels: Int = app.lernet.engine.compile.XhttpMode.DEFAULT_CHANNELS,
     val directDnsServer: String = "1.1.1.1",
-    val logLevel: String = "info",
-    val healthUrl: String = "https://www.gstatic.com/generate_204",
+    /** Same defaults as Android: fewer details about your connections in the journal, the same check address. */
+    val logLevel: String = "warn",
+    val healthUrl: String = app.lernet.engine.compile.ConfigAssembler.ANDROID_PROBE_URL,
     val defaultDnsPolicy: String = "TUNNEL",
     val journalMaxMb: Int = 100,
     /** VPN mode: Windows keeps traffic closed outside LerNET while the core restarts. */

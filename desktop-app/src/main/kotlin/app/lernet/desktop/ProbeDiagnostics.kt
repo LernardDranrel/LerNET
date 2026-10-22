@@ -16,7 +16,7 @@ internal object ProbeDiagnostics {
     private val profiles = Regex("(?i)(?:vless|vmess|trojan|ss|socks5?|hysteria2?|tuic)://[^\\s<>\\\"']+")
     private val bearer = Regex("(?i)\\bBearer\\s+[-A-Za-z0-9._~+/]+=*")
 
-    fun clean(line: String): String = urls.replace(sensitive.replace(bearer.replace(profiles.replace(ansi.replace(line, ""), "[ссылка профиля скрыта]"), "Bearer [скрыто]"), "$1[скрыто]")) { match ->
+    fun clean(line: String): String = urls.replace(sensitive.replace(bearer.replace(profiles.replace(ansi.replace(line, ""), "[ссылка конфига скрыта]"), "Bearer [скрыто]"), "$1[скрыто]")) { match ->
         runCatching {
             val uri = URI(match.value)
             URI(uri.scheme, null, uri.host, uri.port, uri.path, null, null).toASCIIString()

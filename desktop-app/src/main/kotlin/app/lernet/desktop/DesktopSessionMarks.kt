@@ -7,7 +7,7 @@ import java.nio.file.Path
  * Two small marks next to state.json:
  * - «session-open» lives while LerNET runs with the VPN switched on; finding it at start means LerNET itself
  *   crashed or was killed, and Windows removed the leak guard together with the process.
- * - «resume-vpn» says the user left the VPN on; only «Отключить» clears it. Autostart at sign-in uses it.
+ * - «resume-vpn» says the user left the basic VPN on; «Отключить» or switching to Expert clears it. Autostart at sign-in uses it.
  */
 class DesktopSessionMarks(private val directory: Path) {
     private val open get() = directory.resolve("session-open")

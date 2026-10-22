@@ -10,6 +10,11 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- «Включать VPN после перезагрузки»: bring back a VPN the user left on. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Network analysis: Wi-Fi signal and frequency. The Wi-Fi name additionally needs location access,
+         asked only by the «Разрешить» button; LerNET never reads or stores the location itself. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <!-- Core network monitoring attributes flows to arbitrary installed packages, including
          background-only apps, and lets users select them for routing/blocking. A fixed
          queries list cannot cover these user-selected security monitoring targets.

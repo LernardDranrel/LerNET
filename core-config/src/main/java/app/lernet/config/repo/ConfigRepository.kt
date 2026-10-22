@@ -379,11 +379,6 @@ class ConfigRepository(
         return entity.toModel(outboundDao.listForProfile(id))
     }
 
-    suspend fun selectOutbound(profileId: String, outboundId: String) {
-        val profile = profileDao.getProfile(profileId) ?: return
-        profileDao.updateProfile(profile.copy(selectedOutboundId = outboundId, updatedAtEpochMs = nowMs()))
-    }
-
     suspend fun renameProfile(profileId: String, name: String) {
         val profile = profileDao.getProfile(profileId) ?: return
         profileDao.updateProfile(profile.copy(name = name, updatedAtEpochMs = nowMs()))
@@ -516,8 +511,6 @@ class ConfigRepository(
         }
         return profileId to null
     }
-
-    suspend fun ensureOwnerRoutes(ownerId: String): List<RuleNodeRecord> = ensureDefaultElse(ownerId)
 
     /** New tree: one root «Иначе» on the auto pipe. Existing trees are left alone. */
     suspend fun ensureDefaultElse(ownerId: String): List<RuleNodeRecord> {

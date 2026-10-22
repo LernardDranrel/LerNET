@@ -58,7 +58,6 @@ import app.lernet.BuildConfig
 import app.lernet.LerNetApp
 import app.lernet.R
 import app.lernet.config.repo.RouteOwners
-import app.lernet.engine.ConnectionCause
 import app.lernet.engine.ConnectionState
 import app.lernet.engine.log.CrashTrail
 import app.lernet.log.LogShare
@@ -169,7 +168,6 @@ fun LerNetAppRoot() {
         onDismiss = { crashDialogOpen = false },
     )
     ObserveVpnPermission(homeViewModel)
-    ObserveEngineFailure(homeState)
     ObserveDeleteUndo(homeViewModel, snackbar)
     DebugNavBootstrap(navController)
     ModalNavigationDrawer(
@@ -352,18 +350,6 @@ private fun ObserveDeleteUndo(homeViewModel: HomeViewModel, snackbar: SnackbarHo
                 }
                 HomeEvent.RequestVpnPermission, HomeEvent.RequestNotificationPermission -> Unit
             }
-        }
-    }
-}
-
-@Composable
-private fun ObserveEngineFailure(homeState: HomeUiState) {
-    val context = LocalContext.current
-    val message = stringResource(R.string.engine_stub_toast)
-    LaunchedEffect(homeState.snapshot.state, homeState.snapshot.cause) {
-        val failed = homeState.snapshot.state == ConnectionState.FAILED
-        if (failed && homeState.snapshot.cause is ConnectionCause.EngineUnavailable) {
-            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
         }
     }
 }

@@ -139,9 +139,9 @@ class DesktopController(
     internal val sessionMarks = DesktopSessionMarks(store.workDirectory())
     private val mutable = MutableStateFlow(
         DesktopUiState(
-            saved = loaded.getOrDefault(StoredState()),
-            message = loaded.exceptionOrNull()?.let { app.lernet.engine.text.UserText.withReason("Не удалось прочитать профили", it) }
-                ?: if (store.recoveredFromBackup) "Профили восстановлены из резервной копии"
+            saved = loaded.getOrDefault(StoredState()).withExplicitDns(),
+            message = loaded.exceptionOrNull()?.let { app.lernet.engine.text.UserText.withReason("Не удалось прочитать конфиги", it) }
+                ?: if (store.recoveredFromBackup) "Конфиги восстановлены из резервной копии"
                 else if (sessionMarks.previousSessionCrashed) DesktopSessionMarks.CRASH_NOTICE else "",
         ),
     )
@@ -509,7 +509,7 @@ class DesktopController(
             OutboundProbe.check(profile, saved, executable, store.workDirectory())
         }.getOrElse { OutboundProbeResult(message = app.lernet.engine.text.UserText.of(it, "Не удалось проверить связь через VPN")) }
         if (result.latencyMs == null) {
-            tunnel.logDiagnostic("Профиль «${profile.name}»: ${result.message}")
+            tunnel.logDiagnostic("Конфиг «${profile.name}»: ${result.message}")
             result.diagnostics.forEach(tunnel::logDiagnostic)
         }
         return result
@@ -555,7 +555,7 @@ class DesktopController(
             runCatching {
                 val bundle = app.lernet.config.transfer.TransferCodec.decode(raw)
                 check(change { DesktopTransfer.merge(it, raw) }) { "Не удалось сохранить импортированные данные" }
-                "Добавлено папок: ${bundle.groups.size}, профилей: ${bundle.profiles.size}, правил: ${bundle.rules.size}"
+                "Добавлено папок: ${bundle.groups.size}, конфигов: ${bundle.profiles.size}, правил: ${bundle.rules.size}"
             }.onSuccess { summary -> mutable.update { it.copy(busy = false, message = summary) } }
                 .onFailure { error -> mutable.update { it.copy(busy = false, message = app.lernet.engine.text.UserText.withReason("Импорт не выполнен", error)) } }
         }
@@ -627,7 +627,7 @@ class DesktopController(
     fun import(text: String, groupId: String? = null) {
         if (text.isBlank()) return
         if (loaded.isFailure) {
-            mutable.update { it.copy(message = "Файл профилей повреждён. Импорт не сохранён.") }
+            mutable.update { it.copy(message = "Файл конфигов повреждён. Импорт не сохранён.") }
             return
         }
         if (app.lernet.config.transfer.TransferCodec.isTransfer(text)) {
@@ -944,11 +944,6 @@ class DesktopController(
         )
     }
 
-    fun saveRule(rule: StoredRule): Boolean = editRules { DesktopRouteTree.save(it, rule) }
-    fun deleteRule(ruleId: String): Boolean = editRules { DesktopRouteTree.delete(it, ruleId) }
-    fun moveRule(ruleId: String, delta: Int): Boolean = editRules { DesktopRouteTree.move(it, ruleId, delta) }
-    fun reorderRule(ruleId: String, targetId: String, after: Boolean): Boolean =
-        editRules { DesktopRouteTree.reorder(it, ruleId, targetId, after) }
     data class RuleDraft(val baseline: List<StoredRule>, val rules: List<StoredRule>)
     private val routeDrafts = mutableMapOf<String, RuleDraft>()
     fun routeDraft(ownerId: String): RuleDraft = synchronized(routeDrafts) {
@@ -978,18 +973,6 @@ class DesktopController(
             }
         }
     }
-    fun setRulePosition(ruleId: String, position: RulePosition) = change { saved ->
-        saved.copy(rulePositions = saved.rulePositions + (ruleId to position))
-    }
-
-    private fun editRules(block: (List<StoredRule>) -> DesktopRouteTree.Edit): Boolean {
-        val result = block(state.value.saved.rules)
-        if (result.error != null) {
-            mutable.update { it.copy(message = result.error) }
-            return false
-        }
-        return change { it.copy(rules = result.rules, rulePositions = it.rulePositions.filterKeys { id -> result.rules.any { rule -> rule.id == id } }) }
-    }
 
     fun preview(profileId: String? = state.value.saved.selectedProfileId, draftProfile: StoredProfile? = null,
                 draftRules: List<StoredRule>? = null, draftOwnerId: String? = null): AssembledConfig =
@@ -1002,7 +985,7 @@ class DesktopController(
             rules = source.rules.filterNot { it.profileId == draftOwnerId } + draftRules
         ) else source
         val profile = draftProfile ?: saved.profiles.firstOrNull { it.id == profileId }
-            ?: return AssembledConfig("", "", listOf("Выберите профиль"))
+            ?: return AssembledConfig("", "", listOf("Выберите конфиг"))
         val outbound = profile.selectedOutbound
             ?: return AssembledConfig("", "", listOf("В конфиге нет подходящего сервера"))
         val activeRules = routingRules(saved, profile)
@@ -1084,7 +1067,7 @@ class DesktopController(
             return
         }
         if (loaded.isFailure) {
-            reportConnectionError("Файл профилей повреждён. Сохранение отключено до восстановления данных.")
+            reportConnectionError("Файл конфигов повреждён. Сохранение отключено до восстановления данных.")
             return
         }
         if (!connectBusy.compareAndSet(false, true)) return
@@ -1553,6 +1536,8 @@ class DesktopController(
                 check(tunnel.stop(waitForExit = true)) {
                     "Предыдущее подключение ещё работает. Экспертный туннель не запущен."
                 }
+                // Expert owns the VPN now: the next sign-in must not bring the basic VPN back instead.
+                sessionMarks.vpnStopped()
                 releaseGuard()
             } catch (error: Exception) {
                 simpleRestoreLease = null
@@ -1579,6 +1564,7 @@ class DesktopController(
                     val previous = lease.connection
                     val ticket = connectGeneration.incrementAndGet()
                     desiredConnection = true
+                    sessionMarks.vpnWanted()
                     activeSimpleConnection = WindowsSimpleConnection(previous.launch, previous.profileId, previous.mode,
                         previous.desiredSnapshot, ticket)
                     try {
@@ -1595,16 +1581,11 @@ class DesktopController(
 
     fun workspaceDirectory(): Path = store.workDirectory()
 
-    /** Called inside the shared import journal transaction; IDs must remain stable. */
-    fun commitWorkspaceInventory(bundle: TransferBundle) {
-        check(change { DesktopTransfer.materializeWorkspace(it, bundle) }) { "Не удалось сохранить профили из рабочей области" }
-    }
-
     /** A form must not overwrite a concurrent import, profile edit or selection. */
     fun commitWorkspaceInventoryIfUnchanged(before: TransferBundle, after: TransferBundle) {
         check(change { saved ->
             check(TransferCodec.decode(DesktopTransfer.export(saved)) == before) {
-                "Список профилей изменился. Обновите форму перед сохранением."
+                "Список конфигов изменился. Обновите форму перед сохранением."
             }
             DesktopTransfer.materializeWorkspace(saved, after)
         }) { "Не удалось сохранить внешний выход" }
@@ -1613,10 +1594,10 @@ class DesktopController(
     private fun change(block: (StoredState) -> StoredState): Boolean {
         synchronized(this) {
             if (loaded.isFailure) {
-                mutable.update { it.copy(message = "Файл профилей повреждён. Изменения не сохранены.") }
+                mutable.update { it.copy(message = "Файл конфигов повреждён. Изменения не сохранены.") }
                 return false
             }
-            val next = block(mutable.value.saved)
+            val next = block(mutable.value.saved).withExplicitDns()
             runCatching { store.save(next) }.onFailure { error ->
                 mutable.update { it.copy(message = app.lernet.engine.text.UserText.withReason("Не удалось сохранить", error)) }
                 return false
@@ -1659,6 +1640,15 @@ internal fun guardProblemText(status: SimpleGuardStatus): String? = when (status
         if (status.networkClosed) SecurityTexts.GUARD_NETWORK_CLOSED else SecurityTexts.GUARD_PROBLEM
     else -> null
 }
+
+/**
+ * Every config carries its own DNS choice, as on Android. Older Windows builds stored «SYSTEM» (follow the global
+ * setting): it becomes the global value once, so changing the global setting later cannot silently move every
+ * config's DNS outside the VPN, and an archive taken to Android keeps the same DNS.
+ */
+internal fun StoredState.withExplicitDns(): StoredState =
+    if (profiles.none { it.dnsPolicy == "SYSTEM" }) this
+    else copy(profiles = profiles.map { if (it.dnsPolicy == "SYSTEM") it.copy(dnsPolicy = defaultDnsPolicy) else it })
 
 /** Import result line; unused parts of the config are named on screen, not only in the journal. */
 internal fun importMessage(added: Int, unusedParts: List<String>, skipped: String? = null): String = listOfNotNull(

@@ -26,7 +26,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -273,12 +272,4 @@ internal fun formatTraffic(bytes: Long): String = when {
     bytes < 1024 -> "$bytes Б"
     bytes < 1024 * 1024 -> "${"%.1f".format(bytes / 1024.0)} КБ"
     else -> "${"%.1f".format(bytes / (1024.0 * 1024.0))} МБ"
-}
-
-@Composable
-internal fun ExpertActions(primary: String, onPrimary: () -> Unit, secondary: String, onSecondary: () -> Unit, enabled: Boolean = true) {
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Button(onClick = onPrimary, enabled = enabled) { Text(primary) }
-        OutlinedButton(onClick = onSecondary) { Text(secondary) }
-    }
 }

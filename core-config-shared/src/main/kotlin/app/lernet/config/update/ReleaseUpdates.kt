@@ -10,7 +10,6 @@ import java.util.concurrent.TimeUnit
 data class ReleaseAsset(val name: String, val url: String, val size: Long, val sha256: String?)
 data class ClientRelease(val version: String, val pageUrl: String, val notes: String, val assets: List<ReleaseAsset>) {
     fun windowsInstaller() = assets.firstOrNull { it.name == "LerNET-$version-install.exe" && it.sha256 != null }
-    fun androidApk() = assets.firstOrNull { it.name == "LerNET-$version.apk" }
 }
 
 /** Shared release contract for both clients; no credentials or device report are sent. */

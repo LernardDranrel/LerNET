@@ -333,16 +333,16 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
                                         Text("Сохранить VPN «$name» как основной путь")
                                     }
                                     Text(if (keepVpn) "Пустая схема направит трафик через этот конфиг и его правила." else
-                                        "VPN будет отключён. Трафик пойдёт напрямую; заблокированные в вашей сети сайты могут перестать открываться.")
+                                        "VPN будет отключён. Трафик пойдёт напрямую; заблокированные в твоей сети сайты могут перестать открываться.")
                                 }
                                 if (expertHandover == null && expertUi?.saved?.device?.defaultTarget ==
                                     PolicyTarget.Direct) {
                                     Text("Основной путь схемы — напрямую. Если обычный VPN подключён, он будет отключён. " +
-                                        "Без отдельного правила сайты пойдут через вашу обычную сеть.")
+                                        "Без отдельного правила сайты пойдут через твою обычную сеть.")
                                 }
                                 if (!WindowsElevation.isElevated) {
                                     Text("Windows запросит права администратора и откроет новую копию LerNET. " +
-                                        "Текущее подключение будет остановлено. После этого откройте экспертный режим и подтвердите включение.")
+                                        "Текущее подключение будет остановлено. После этого открой экспертный режим и подтверди включение.")
                                 }
                                 if (tunnel.status in setOf(TunnelStatus.RUNNING, TunnelStatus.STARTING)) {
                                     Text("Обычное подключение LerNET будет остановлено перед переключением. " +
@@ -2172,9 +2172,16 @@ private fun SettingsForExperts(saved: StoredState, controller: DesktopController
                 label = { Text("Размер журнала, МБ") }, singleLine = true, isError = !journalValid,
                 supportingText = { Text("1–500") })
             Text("Подробность журнала", fontWeight = FontWeight.SemiBold)
-            SegmentedChoice(listOf("debug" to "Всё", "info" to "Обычная", "warn" to "Предупреждения", "error" to "Ошибки"), saved.logLevel) {
+            // Same three levels and words as on Android (audit-fixes); «Предупреждения» by default on both.
+            SegmentedChoice(listOf("warn" to "Предупреждения", "info" to "Инфо", "debug" to "Отладка"), saved.logLevel) {
                 controller.setDefaults(saved.tunMtu, saved.directDnsServer, it)
             }
+            Text(when (saved.logLevel) {
+                "info" -> "Основные события, предупреждения и ошибки. В журнале больше подробностей о ваших подключениях."
+                "debug" -> "Подробная запись для поиска ошибки. Сведений о подключениях больше всего."
+                "error" -> "Сейчас записываются только ошибки (настройка из прошлой версии). Выберите уровень, чтобы сменить."
+                else -> "По умолчанию. Только предупреждения и ошибки: в журнале меньше сведений о том, куда вы подключаетесь."
+            }, color = muted, fontSize = 12.sp)
         }
     }
 }

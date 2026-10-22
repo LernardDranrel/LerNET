@@ -108,18 +108,4 @@ object TunRoutePlan {
             bumped and 0xff,
         ).joinToString(".")
     }
-
-    fun hasIpv4Default(routes: List<CidrPrefix>): Boolean =
-        routes.any { it.address == "0.0.0.0" && it.prefix == 0 } ||
-            (
-                routes.any { it.address == "0.0.0.0" && it.prefix == 1 } &&
-                    routes.any { it.address == "128.0.0.0" && it.prefix == 1 }
-                )
-
-    fun hasIpv6Default(routes: List<CidrPrefix>): Boolean =
-        routes.any { it.address == "::" && it.prefix == 0 } ||
-            (
-                routes.any { it.address == "::" && it.prefix == 1 } &&
-                    routes.any { it.address == "8000::" && it.prefix == 1 }
-                )
 }

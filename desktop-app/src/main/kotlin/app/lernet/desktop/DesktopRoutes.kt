@@ -871,14 +871,14 @@ private fun RouteRuleEditor(draft: StoredRule, rules: List<StoredRule>, onClose:
                         onClick = { action = value; namedPipe = false }, label = { Text(actionLabelDesktop(value)) })
                 }
                 FilterChip(action == "PROXY" && namedPipe,
-                    onClick = { action = "PROXY"; namedPipe = true }, label = { Text("Отдельный канал") })
+                    onClick = { action = "PROXY"; namedPipe = true }, label = { Text("Отдельное соединение") })
             }
             if (action == "BLOCK") {
                 Text(BASIC_BLOCK_EXPERT_ONLY, color = routeAmber, fontSize = 12.sp)
             }
             if (action == "PROXY" && namedPipe) {
-                OutlinedTextField(pipeName, { pipeName = it }, label = { Text("Название канала") },
-                    supportingText = { Text("Одинаковое имя направляет правила в один канал") },
+                OutlinedTextField(pipeName, { pipeName = it }, label = { Text("Название соединения") },
+                    supportingText = { Text("Одинаковое имя — одно общее соединение. Каждое новое имя — ещё одно подключение к тому же серверу, оно заметно сети.") },
                     modifier = Modifier.fillMaxWidth(), singleLine = true)
                 val existingPipes = rules.map { it.pipeName }.filter(String::isNotBlank).distinct()
                 if (existingPipes.isNotEmpty()) {
@@ -1135,7 +1135,7 @@ private fun ruleBreadcrumb(parentId: String?, rules: List<StoredRule>): String {
 }
 private fun actionLabelDesktop(action: String) = when (action) { "DIRECT" -> "Напрямую"; "BLOCK" -> "Запретить"; else -> "Через VPN" }
 private fun actionLabelDesktop(rule: StoredRule): String =
-    if (rule.action == "PROXY" && rule.pipeName.isNotBlank()) "Канал: ${rule.pipeName}" else actionLabelDesktop(rule.action)
+    if (rule.action == "PROXY" && rule.pipeName.isNotBlank()) "Соединение: ${rule.pipeName}" else actionLabelDesktop(rule.action)
 private fun displayTitle(rule: StoredRule): String = rule.title.ifBlank { if (DesktopRouteTree.isElse(rule)) "Иначе" else "Правило ${rule.sortIndex + 1}" }
 private fun ruleSummary(rule: StoredRule): String = (rule.domains + rule.domainSuffixes.map { "*.$it" } + rule.cidrs + rule.countries + rule.processes)
     .take(3).joinToString(" · ").ifBlank { "Любой трафик" }
@@ -1152,7 +1152,7 @@ private fun RouteEmpty(title: String, description: String) {
 }
 
 internal const val BASIC_BLOCK_EXPERT_ONLY =
-    "Запрет работает только в Эксперте. Это старое правило пока действует как раньше, но новые запреты создаются только в Эксперте."
+    "Это правило запрета создано в прошлой версии и продолжает действовать: эти адреса закрыты. Новые запреты можно добавить только в режиме Эксперт."
 
 /** Basic-mode actions; «Запретить» is listed only for an old ban rule being edited. */
 internal fun basicDesktopActions(legacyBlock: Boolean): List<String> =

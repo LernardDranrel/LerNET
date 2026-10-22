@@ -49,7 +49,7 @@ object DesktopRouteTree {
             return Edit(all, "На одном уровне может быть только одно правило «Иначе»")
         }
         if (old != null && profile.any { it.parentId == rule.id } && rule.pipeName.isNotBlank()) {
-            return Edit(all, "У развилки нельзя указать отдельный канал")
+            return Edit(all, "У развилки нельзя указать отдельное соединение")
         }
         val firstChild = parent != null && profile.none { it.parentId == parent.id && it.id != rule.id }
         // Converting a terminal rule into a fork preserves its former outcome in

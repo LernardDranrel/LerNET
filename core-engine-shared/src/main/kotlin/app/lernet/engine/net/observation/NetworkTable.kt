@@ -77,9 +77,19 @@ object NetworkTable {
             add(NetworkParam("VPN-сети на устройстве", value, "Нет или только LerNET", unusual = foreign.isNotEmpty()))
             if (android) add(NetworkParam("Владелец чужого VPN", "Android не раскрывает", collected = Collected.HIDDEN))
         }
-        val wifi = if (android) listOf(
-            NetworkParam("Имя сети, сигнал, частота", "Android отдаёт с разрешением на геолокацию; LerNET пока не собирает", collected = Collected.NOT_YET),
-        ) else emptyList()
+        // Structured «wlan» rows (id wifi / cellular); hidden values say why. Windows publishes only the raw
+        // netsh text in localized form, so its Wi-Fi details stay on the source page, not in this table.
+        val wlan = snapshot.sources.firstOrNull { it.id == "wlan" }
+        val radioRows = wlan?.rows?.filter { it.id == "wifi" || it.id == "cellular" }.orEmpty()
+        val wifi = radioRows.flatMap { row ->
+            row.fields.entries.map { (name, value) ->
+                NetworkParam(if (radioRows.size > 1) "${row.title}: $name" else name, value,
+                    collected = if (value.startsWith("Скрыто")) Collected.HIDDEN else Collected.YES)
+            }
+        }.ifEmpty {
+            if (android && wlan == null) listOf(NetworkParam("Wi-Fi и мобильная сеть", "Не прочитаны в этом снимке", collected = Collected.NOT_YET))
+            else emptyList()
+        }
         return listOf(
             NetworkParamSection("Подключение", connection),
             NetworkParamSection("IP-адреса", addresses),
@@ -87,7 +97,7 @@ object NetworkTable {
             NetworkParamSection("Маршруты", routes),
             NetworkParamSection("Прокси", proxy),
             NetworkParamSection("Другие VPN", vpn),
-            NetworkParamSection("Wi-Fi", wifi),
+            NetworkParamSection(if (android) "Wi-Fi и мобильная сеть" else "Wi-Fi", wifi),
         ).filter { it.rows.isNotEmpty() }
     }
 
