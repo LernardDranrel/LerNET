@@ -40,10 +40,12 @@ class ExpertWorkspaceRenderTest {
             }
             try {
                 screenshot(scene, "workspace-$width-overview")
-                val heading = nodes(scene).first { "Управление сетью" in texts(it) }
+                // The pult subtitle sits right of the section column (N1: sections live in the left column).
+                val heading = nodes(scene).first { "Эксперт · твои правила для каждого соединения" in texts(it) }
                 assertThat(heading.boundsInRoot.left).isAtLeast(218f)
                 assertThat(heading.boundsInRoot.right).isAtMost(width - 22f)
-                listOf("Схема", "Проверка пути", "Выходы", "Соединения", "События", "Защита").forEach { title ->
+                // The v3 sections (m3): the same five as the phone, then «Защита и DNS» under «Настройки».
+                listOf("Схема", "Конфиги", "Проверка пути", "События", "Защита и DNS").forEach { title ->
                     val navigation = nodes(scene).first {
                         title in texts(it) && it.config.getOrNull(SemanticsActions.OnClick) != null
                     }

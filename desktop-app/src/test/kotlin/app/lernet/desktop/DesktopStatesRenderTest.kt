@@ -52,13 +52,24 @@ class DesktopStatesRenderTest {
         }
     }
 
-    private fun render(name: String, width: Int, height: Int, state: StoredState = sample(), preview: DesktopScreenPreview) {
+    private fun render(
+        name: String,
+        width: Int,
+        height: Int,
+        state: StoredState = sample(),
+        preview: DesktopScreenPreview,
+        setup: (DesktopController) -> Unit = {},
+    ) {
         val dir = Files.createTempDirectory("lernet-states")
         DesktopStore(dir).save(state)
         val controller = DesktopController(DesktopStore(dir))
+        setup(controller)
+        // The strip shows the same status as the real window (G1), computed from the same preview state.
+        val stripUi = preview.ui?.invoke(controller.state.value) ?: controller.state.value
+        val status = workspaceStatus(null, preview.tunnel ?: TunnelSnapshot(TunnelStatus.STOPPED), stripUi)
         val scene = ImageComposeScene(width, height, Density(1f), content = theme {
             Column(Modifier.fillMaxSize()) {
-                DesktopModeTabs(false, {}, reducedMotion = true)
+                DesktopModeTabs(false, {}, status = status, reducedMotion = true)
                 DesktopScreen(controller, {}, {}, preview = preview)
             }
         })
@@ -76,7 +87,8 @@ class DesktopStatesRenderTest {
             if (preview.page == null) {
                 // The state is written once on the home: under the button only.
                 val states = listOf("Отключено", "Подключено", "Подключаемся…", "Нет связи · VPN держим", "Не удалось подключиться", "Готово к подключению")
-                states.forEach { s -> assertThat(all.count { it == s }).isAtMost(1) }
+                // The strip on top repeats the state on purpose (G1); the home itself writes it once.
+                states.forEach { s -> assertThat(all.count { it == s }).isAtMost(2) }
                 // One action per state: while holding only «Выключить VPN», never a second «Отключить» caption.
                 if ("Нет связи · VPN держим" in all) {
                     assertThat(all.filter { it == "Отключить" }.map { "$name: $it" }).isEmpty()
@@ -108,6 +120,30 @@ class DesktopStatesRenderTest {
             { it.copy(tried = report, healthMessage = "Нет связи", healthFailures = 2) })
     }
 
+    private val jammed = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.RUNNING, "Подключено"), {
+        it.copy(probes = goodProbes, hold = app.lernet.engine.policy.LinkHold.JAMMED,
+            healthMessage = app.lernet.engine.policy.LinkJudge.holdMessage(app.lernet.engine.policy.LinkHold.JAMMED))
+    })
+    private val silent = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.RUNNING, "Подключено"), {
+        it.copy(probes = goodProbes, hold = app.lernet.engine.policy.LinkHold.ALL_SILENT,
+            healthMessage = app.lernet.engine.policy.LinkJudge.holdMessage(app.lernet.engine.policy.LinkHold.ALL_SILENT, "1 мин 35 с"))
+    })
+    private val budgetWait = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.RUNNING, "Подключено"), {
+        it.copy(probes = goodProbes + ("nl" to ProbeResult(latencyMs = 34, checking = true, budgetWaitMs = 42_000)),
+            healthMessage = "VPN отвечает · 128 мс", healthVerified = true, tunnelLatencyMs = 128)
+    })
+    private val errorBar = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.FAILED, "VPN не запустился"), {
+        it.copy(probes = goodProbes, message = "Сервер не принял подключение. Проверьте конфиг или выберите другой.",
+            connectionError = ConnectionError("Сервер не принял подключение. Проверьте конфиг или выберите другой.", "nl"))
+    })
+
+    @Test fun jammedWide() = render("win-hold-jammed-wide", 1440, 900, preview = jammed)
+    @Test fun silentWide() = render("win-hold-silent-wide", 1440, 900, preview = silent)
+    @Test fun silentNarrow() = render("win-hold-silent-1024", 1024, 720, preview = silent)
+    @Test fun budgetWaitWide() = render("win-budget-wait-wide", 1440, 900, preview = budgetWait)
+    @Test fun errorBarWide() = render("win-error-bar-wide", 1440, 900, preview = errorBar)
+    @Test fun deletedBar() = render("win-deleted-bar", 1440, 900, preview = off) { it.delete("solo") }
+    @Test fun journalTechnical() = render("win-journal-1024", 1024, 720, preview = connected.copy(page = "DIAGNOSTICS"))
     @Test fun offWide() = render("win-off-wide", 1440, 900, preview = off)
     @Test fun offNarrow() = render("win-off-1024", 1024, 720, preview = off)
     @Test fun off1100() = render("win-off-1100", 1100, 760, preview = off)
@@ -123,4 +159,29 @@ class DesktopStatesRenderTest {
     @Test fun journal() = render("win-journal", 1440, 900, preview = connected.copy(page = "DIAGNOSTICS"))
     @Test fun settings() = render("win-settings", 1440, 900, preview = off.copy(page = "SETTINGS"))
     @Test fun settingsNarrow() = render("win-settings-1024", 1024, 720, preview = off.copy(page = "SETTINGS"))
+
+    /** The TLS fingerprint field from the resilience branch, on the «Удалённый сервер» page of the config editor. */
+    @Test
+    fun editorFingerprint() {
+        val tlsJson = """{"type":"vless","tag":"proxy","server":"nl.example.net","server_port":443,""" +
+            """"uuid":"00000000-0000-4000-8000-000000000000","tls":{"enabled":true,"server_name":"www.example.com",""" +
+            """"utls":{"enabled":true,"fingerprint":"chrome"}}}"""
+        val profile = StoredProfile("nl", "Нидерланды", "VLESS", listOf(StoredOutbound("o-nl", "proxy", "vless", tlsJson)), "o-nl")
+        val state = StoredState(profiles = listOf(profile), selectedProfileId = "nl")
+        val dir = Files.createTempDirectory("lernet-editor")
+        DesktopStore(dir).save(state)
+        val controller = DesktopController(DesktopStore(dir))
+        val scene = ImageComposeScene(860, 760, Density(1f), content = theme {
+            DesktopProfileEditor(profile, controller.state.value.saved, controller, {}, embedded = true, startPage = EditorPage.REMOTE)
+        })
+        try {
+            var t = 0L
+            repeat(3) { scene.render(t).close(); t += 500_000_000L }
+            scene.render(t).use { image ->
+                val bytes = requireNotNull(image.encodeToData(EncodedImageFormat.PNG)).use { it.bytes }
+                File("build/ux-states").apply { mkdirs() }.resolve("win-editor-fingerprint.png").writeBytes(bytes)
+            }
+            assertThat(texts(scene).joinToString("\n")).contains("Отпечаток TLS")
+        } finally { scene.close(); controller.close() }
+    }
 }

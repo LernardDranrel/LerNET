@@ -22,16 +22,32 @@ import app.lernet.engine.compile.TlsHandshake
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 
-private enum class EditorPage(val title: String) { LOCAL("На устройстве"), REMOTE("Удалённый сервер"), JSON("Итоговый JSON") }
+internal enum class EditorPage(val title: String) { LOCAL("На устройстве"), REMOTE("Удалённый сервер"), JSON("Итоговый JSON") }
 private val editorMuted = Color(0xFFA1AEC4)
 private val editorWarning = Color(0xFFF5C16C)
 
 @Composable
-fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller: DesktopController, onClose: () -> Unit) {
+fun DesktopProfileEditor(
+    profile: StoredProfile,
+    saved: StoredState,
+    controller: DesktopController,
+    onClose: () -> Unit,
+) = DesktopProfileEditor(profile, saved, controller, onClose, embedded = false)
+
+/** [embedded] draws the same editor without its own window, for the screenshot tests. */
+@Composable
+internal fun DesktopProfileEditor(
+    profile: StoredProfile,
+    saved: StoredState,
+    controller: DesktopController,
+    onClose: () -> Unit,
+    embedded: Boolean,
+    startPage: EditorPage = EditorPage.LOCAL,
+) {
     val outbound = profile.selectedOutbound ?: return
     val original = remember(profile.id) { OutboundPatch.read(outbound.singBoxJson) }
     val originalDns = remember(profile.id) { DnsDraft.read(profile.dnsJson).firstOrNull() }
-    var page by remember(profile.id) { mutableStateOf(EditorPage.LOCAL) }
+    var page by remember(profile.id) { mutableStateOf(startPage) }
     var name by remember(profile.id) { mutableStateOf(profile.name) }
     var server by remember(profile.id) { mutableStateOf(original.server) }
     var port by remember(profile.id) { mutableStateOf(original.port) }
@@ -77,8 +93,7 @@ fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller:
         if (valid) runCatching { controller.preview(profile.id, candidate) }.getOrNull() else null
     }
 
-    DialogWindow(onCloseRequest = onClose, title = "Конфиг · ${profile.name}", state = rememberDialogState(size = DpSize(860.dp, 760.dp))) {
-        LaunchedEffect(window) { WindowsTitleBar.dark(window) }
+    val content: @Composable () -> Unit = {
         MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
             Surface(color = Color(0xFF101724), contentColor = desktopColors.onSurface) {
                 Column(Modifier.fillMaxSize().padding(22.dp)) {
@@ -174,6 +189,14 @@ fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller:
                     }
                 }
             }
+        }
+    }
+    if (embedded) {
+        content()
+    } else {
+        DialogWindow(onCloseRequest = onClose, title = "Конфиг · ${profile.name}", state = rememberDialogState(size = DpSize(860.dp, 760.dp))) {
+            LaunchedEffect(window) { WindowsTitleBar.dark(window) }
+            content()
         }
     }
 }

@@ -154,6 +154,7 @@ class ExpertHealthSettingsTest {
     }
 
     private fun render(scene: ImageComposeScene) {
+        println("DBGTEXTS: " + nodes(scene).flatMap { texts(it) })  // DBG
         repeat(3) { scene.render(0).close() }
     }
 
@@ -166,6 +167,7 @@ class ExpertHealthSettingsTest {
     }
 
     private fun screenshot(scene: ImageComposeScene, name: String) {
+        println("DBGTEXTS[$name]: " + nodes(scene).flatMap { texts(it) })  // DBG
         render(scene)
         scene.render(0).use { image ->
             val bytes = requireNotNull(image.encodeToData(EncodedImageFormat.PNG)).use { it.bytes }

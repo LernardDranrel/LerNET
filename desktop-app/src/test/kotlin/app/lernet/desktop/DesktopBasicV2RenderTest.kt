@@ -63,6 +63,7 @@ class DesktopBasicV2RenderTest {
     }
 
     private fun screenshot(scene: ImageComposeScene, name: String) {
+        println("DBGTEXTS[$name]: " + nodes(scene).flatMap { texts(it) })  // DBG
         var t = 0L
         repeat(4) { scene.render(t).close(); t += 500_000_000L }
         scene.render(t).use { image ->

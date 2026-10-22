@@ -123,6 +123,61 @@ class HomeStatesScreenshotTest {
 
     @Test
     @Config(qualifiers = "w390dp-h2000dp-xxhdpi")
+    fun jammedWholeScroll() = render("phone-hold-jammed-full", base(
+        ConnectionSnapshot.idle().copy(state = ConnectionState.CONNECTED, activeProfileId = "nl", serverTcpMs = 38,
+            hold = app.lernet.engine.policy.LinkHold.JAMMED),
+        mapOf("nl" to ProfileProbe(tcpMs = 38, reachable = true)),
+    ))
+
+    @Test
+    @Config(qualifiers = "w390dp-h2000dp-xxhdpi")
+    fun allSilentWholeScroll() = render("phone-hold-silent-full", base(
+        ConnectionSnapshot.idle().copy(state = ConnectionState.CONNECTED, activeProfileId = "nl",
+            hold = app.lernet.engine.policy.LinkHold.ALL_SILENT, nextCheckAtMs = System.currentTimeMillis() + 95_000),
+    ))
+
+    @Test
+    @Config(qualifiers = "w390dp-h2000dp-xxhdpi")
+    fun budgetWaitWholeScroll() = render("phone-budget-wait-full", base(
+        ConnectionSnapshot.idle().copy(state = ConnectionState.CONNECTED, activeProfileId = "nl", serverTcpMs = 38),
+        mapOf("nl" to ProfileProbe(running = true, tcpMs = 38, reachable = true, budgetWaitMs = 42_000)),
+    ))
+
+    /** The strip above every secondary screen in the hold states added by the resilience branch. */
+    @Test
+    fun holdStrips() {
+        val snapshots = listOf(
+            ConnectionSnapshot.idle().copy(state = ConnectionState.CONNECTED, activeProfileId = "nl", dnsOk = true),
+            ConnectionSnapshot.idle().copy(state = ConnectionState.CONNECTED, activeProfileId = "nl",
+                hold = app.lernet.engine.policy.LinkHold.JAMMED),
+            ConnectionSnapshot.idle().copy(state = ConnectionState.CONNECTED, activeProfileId = "nl",
+                hold = app.lernet.engine.policy.LinkHold.ALL_SILENT),
+            ConnectionSnapshot.idle().copy(state = ConnectionState.RECONNECTING, activeProfileId = "nl",
+                tried = app.lernet.engine.policy.FailoverReport("Работа", emptyList(), "30 с")),
+        )
+        rule.setContent {
+            LerNetTheme {
+                androidx.compose.material3.Surface {
+                    androidx.compose.foundation.layout.Column(
+                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(
+                            androidx.compose.ui.unit.Dp(12f)),
+                    ) {
+                        snapshots.forEach { snap ->
+                            app.lernet.ui.nav.StatusStrip(app.lernet.ui.nav.stripStatus(snap, "Нидерланды", null), onClick = {})
+                        }
+                    }
+                }
+            }
+        }
+        save("phone-strips-hold")
+        val texts = texts()
+        assertThat(texts).contains("Связь глушат · держим подключение")
+        assertThat(texts).contains("Серверы не отвечают · VPN держим")
+        assertThat(texts).contains("Нет связи · VPN держим")
+    }
+
+    @Test
+    @Config(qualifiers = "w390dp-h2000dp-xxhdpi")
     fun failedWholeScroll() = render("phone-error-full", base(ConnectionSnapshot.idle().copy(
         state = ConnectionState.FAILED, activeProfileId = "nl",
         cause = ConnectionCause.DialFailure("dial tcp 203.0.113.5:443: connect: connection refused"))))
