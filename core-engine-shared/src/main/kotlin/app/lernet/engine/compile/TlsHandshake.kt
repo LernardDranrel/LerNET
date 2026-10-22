@@ -34,6 +34,10 @@ enum class RealityKeyShare(val storage: String) {
  */
 object TlsHandshake {
     const val DEFAULT_FINGERPRINT = "firefox"
+
+    /** Fingerprints offered in the config editors; "" = [DEFAULT_FINGERPRINT]. Others typed in a profile are kept. */
+    val CHOICES = listOf("", "firefox", "chrome", "safari", "edge", "ios", "android", "random")
+
     /** TCP-TLS outbounds; QUIC-based ones (hysteria2, tuic) have no uTLS or record fragmentation. */
     private val TCP_TLS_TYPES = setOf("vless", "vmess", "trojan", "anytls", "http")
 

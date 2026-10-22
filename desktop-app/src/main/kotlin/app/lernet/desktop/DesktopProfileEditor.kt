@@ -18,6 +18,7 @@ import androidx.compose.ui.window.rememberDialogState
 import app.lernet.engine.compile.DnsDraft
 import app.lernet.engine.compile.DnsServerDraft
 import app.lernet.engine.compile.OutboundPatch
+import app.lernet.engine.compile.TlsHandshake
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 
@@ -37,6 +38,8 @@ fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller:
     var sni by remember(profile.id) { mutableStateOf(original.sni) }
     var path by remember(profile.id) { mutableStateOf(original.path) }
     var transportMode by remember(profile.id) { mutableStateOf(original.mode) }
+    var fingerprint by remember(profile.id) { mutableStateOf(original.fingerprint) }
+    var fingerprintOpen by remember { mutableStateOf(false) }
     var runMode by remember(profile.id) { mutableStateOf(profile.modeOverride ?: "SYSTEM") }
     var dnsPolicy by remember(profile.id) { mutableStateOf(profile.dnsPolicy) }
     var dnsType by remember(profile.id) { mutableStateOf(originalDns?.type?.ifBlank { "udp" } ?: "udp") }
@@ -48,8 +51,14 @@ fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller:
     val effectiveDnsPolicy = if (dnsPolicy == "SYSTEM") saved.defaultDnsPolicy else dnsPolicy
     val dnsValid = effectiveDnsPolicy != "PROFILE" || dnsServer.isNotBlank()
     val valid = name.isNotBlank() && server.isNotBlank() && parsedPort != null && dnsValid
-    val candidate = remember(name, server, port, sni, path, transportMode, runMode, dnsPolicy, dnsType, dnsServer, saved.defaultDnsPolicy) {
-        val patched = if (parsedPort != null) OutboundPatch.write(outbound.singBoxJson, server, parsedPort, sni, path, transportMode) else outbound.singBoxJson
+    val candidate = remember(name, server, port, sni, path, transportMode, fingerprint, runMode, dnsPolicy, dnsType, dnsServer, saved.defaultDnsPolicy) {
+        // Only a fingerprint changed here is written; an untouched profile keeps its TLS block as is.
+        val changedFingerprint = fingerprint.takeIf { it != original.fingerprint }
+        val patched = if (parsedPort != null) {
+            OutboundPatch.write(outbound.singBoxJson, server, parsedPort, sni, path, transportMode, changedFingerprint)
+        } else {
+            outbound.singBoxJson
+        }
         val dns = if (effectiveDnsPolicy == "PROFILE") DnsDraft.write(
             profile.dnsJson,
             listOf(DnsServerDraft(0, dnsType, originalDns?.tag?.ifBlank { "dns-profile" } ?: "dns-profile", dnsServer, originalDns?.detour.orEmpty())),
@@ -122,6 +131,20 @@ fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller:
                                 OutlinedTextField(server, { server = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Адрес сервера") }, isError = server.isBlank(), singleLine = true)
                                 OutlinedTextField(port, { port = it }, modifier = Modifier.width(210.dp), label = { Text("Порт") }, isError = parsedPort == null, singleLine = true)
                                 OutlinedTextField(sni, { sni = it }, modifier = Modifier.fillMaxWidth(), label = { Text("SNI / server_name") }, singleLine = true)
+                                if (original.hasTls) {
+                                    // Shown as written in the profile: «chrome» from an old import stays until changed here.
+                                    val defaultLabel = "По умолчанию LerNET · ${TlsHandshake.DEFAULT_FINGERPRINT}"
+                                    Box {
+                                        OutlinedButton(onClick = { fingerprintOpen = true }) { Text("Отпечаток TLS: ${fingerprint.ifBlank { defaultLabel }}") }
+                                        DropdownMenu(fingerprintOpen, onDismissRequest = { fingerprintOpen = false }) {
+                                            (TlsHandshake.CHOICES + fingerprint).distinct().forEach { value ->
+                                                DropdownMenuItem(text = { Text(value.ifBlank { defaultLabel }) }, onClick = { fingerprint = value; fingerprintOpen = false })
+                                            }
+                                        }
+                                    }
+                                    Text("Каким браузером представляется подключение. Если сервер не отвечает, попробуйте другой; «По умолчанию» подойдёт почти всегда.",
+                                        color = editorMuted, fontSize = 12.sp)
+                                }
                                 Text("Транспорт: ${original.transportType.ifBlank { "не указан" }}", color = editorMuted)
                                 if (original.hasTransport) {
                                     OutlinedTextField(path, { path = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Путь транспорта") }, singleLine = true)

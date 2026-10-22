@@ -50,6 +50,10 @@ data class ConfigEditorUiState(
     val mode: String = "",
     val hasTransport: Boolean = false,
     val transportType: String = "",
+    /** TLS outbound: the uTLS fingerprint applies and can be changed. */
+    val hasTls: Boolean = false,
+    /** uTLS fingerprint written in the profile; "" = LerNET's default. */
+    val fingerprint: String = "",
     val dnsPolicy: DnsPolicy = DnsPolicy.DEFAULT,
     val dnsServers: List<DnsServerDraft> = emptyList(),
     val fields: List<FieldView> = emptyList(),
@@ -81,6 +85,8 @@ sealed class ConfigEditorIntent {
     data class Path(val value: String) : ConfigEditorIntent()
 
     data class Mode(val value: String) : ConfigEditorIntent()
+
+    data class Fingerprint(val value: String) : ConfigEditorIntent()
 
     data class DnsServer(val index: Int, val value: String) : ConfigEditorIntent()
 
@@ -133,6 +139,7 @@ class ConfigEditorViewModel @Inject constructor(
             is ConfigEditorIntent.Sni -> edit { it.copy(sni = intent.value, fieldError = null) }
             is ConfigEditorIntent.Path -> edit { it.copy(path = intent.value, fieldError = null) }
             is ConfigEditorIntent.Mode -> edit { it.copy(mode = intent.value, fieldError = null) }
+            is ConfigEditorIntent.Fingerprint -> edit { it.copy(fingerprint = intent.value, fieldError = null) }
             is ConfigEditorIntent.DnsServer -> editDns(intent.index) { it.copy(server = intent.value) }
             is ConfigEditorIntent.DnsType -> editDns(intent.index) { it.copy(type = intent.value) }
             ConfigEditorIntent.TunnelDns -> edit {
@@ -181,6 +188,8 @@ class ConfigEditorViewModel @Inject constructor(
             mode = owned.mode,
             hasTransport = owned.hasTransport,
             transportType = owned.transportType,
+            hasTls = owned.hasTls,
+            fingerprint = owned.fingerprint,
             dnsPolicy = profile.dnsPolicy,
             dnsServers = DnsDraft.read(profile.dnsJson),
         )
@@ -261,7 +270,10 @@ class ConfigEditorViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val (json, dns) = withContext(Dispatchers.Default) {
-                    OutboundPatch.write(base.json, current.server, port, current.sni, current.path, current.mode) to
+                    OutboundPatch.write(
+                        base.json, current.server, port, current.sni, current.path, current.mode,
+                        changedFingerprint(base.json, current.fingerprint),
+                    ) to
                         DnsDraft.write(base.dnsJson, current.dnsServers)
                 }
                 repository.saveEditor(profileId, base.outboundId, json, dns, current.dnsPolicy)
@@ -309,7 +321,10 @@ class ConfigEditorViewModel @Inject constructor(
                 assembleError = "Укажите адрес DNS конфига"
             )
         }
-        val json = OutboundPatch.write(base.json, state.server, port, state.sni, state.path, state.mode)
+        val json = OutboundPatch.write(
+            base.json, state.server, port, state.sni, state.path, state.mode,
+            changedFingerprint(base.json, state.fingerprint),
+        )
         val dns = DnsDraft.write(base.dnsJson, state.dnsServers)
         val outbound = NormalizedOutbound(base.outboundId, base.tag, base.type, json)
         val preview = ConfigTruth.preview(
@@ -345,12 +360,17 @@ class ConfigEditorViewModel @Inject constructor(
         val defaults: EngineDefaults,
     )
 
+    /** Only a fingerprint the user changed is written; an untouched profile keeps its own TLS block as is. */
+    private fun changedFingerprint(json: String, fingerprint: String): String? =
+        fingerprint.takeIf { it != OutboundPatch.read(json).fingerprint }
+
     private data class DraftSnapshot(
         val server: String,
         val port: String,
         val sni: String,
         val path: String,
         val mode: String,
+        val fingerprint: String,
         val dnsPolicy: DnsPolicy,
         val dnsServers: List<DnsServerDraft>,
     ) {
@@ -361,6 +381,7 @@ class ConfigEditorViewModel @Inject constructor(
                 state.sni,
                 state.path,
                 state.mode,
+                state.fingerprint,
                 state.dnsPolicy,
                 state.dnsServers,
             )
