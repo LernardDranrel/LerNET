@@ -1243,6 +1243,8 @@ class DesktopController(
                 check(tunnel.stop(waitForExit = true)) {
                     "Предыдущее подключение ещё работает. Экспертный туннель не запущен."
                 }
+                // Expert owns the VPN now: the next sign-in must not bring the basic VPN back instead.
+                sessionMarks.vpnStopped()
                 releaseGuard()
             } catch (error: Exception) {
                 simpleRestoreLease = null
@@ -1269,6 +1271,7 @@ class DesktopController(
                     val previous = lease.connection
                     val ticket = connectGeneration.incrementAndGet()
                     desiredConnection = true
+                    sessionMarks.vpnWanted()
                     activeSimpleConnection = WindowsSimpleConnection(previous.launch, previous.profileId, previous.mode,
                         previous.desiredSnapshot, ticket)
                     try {

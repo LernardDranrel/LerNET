@@ -75,4 +75,15 @@ class WindowsAutostartTest {
     fun crashGuardHintSaysWhatHappensWhenLerNetItselfCrashes() {
         assertTrue(SecurityTexts.CRASH_GUARD_HINT.contains("Если аварийно закроется сам LerNET, Windows снимет эту защиту"))
     }
+
+    @Test
+    fun switchingToExpertMeansTheBasicVpnIsNotBroughtBackAtSignIn() {
+        val dir = java.nio.file.Files.createTempDirectory("lernet-expert-resume")
+        val controller = DesktopController(DesktopStore(dir))
+        controller.sessionMarks.vpnWanted()
+        controller.reserveExpertMode()
+        assertFalse(DesktopSessionMarks(dir).resumeWanted)
+        controller.releaseExpertMode()
+        controller.close()
+    }
 }
