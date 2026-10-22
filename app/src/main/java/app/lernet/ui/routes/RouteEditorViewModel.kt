@@ -47,7 +47,8 @@ data class RouteEditorUiState(
     val draftNodeIds: Set<String> = emptySet(),
     val confirmDeleteId: String? = null,
     val expandedIds: Set<String> = emptySet(),
-    val asList: Boolean = false,
+    // Audit R1: on a phone the list is easier to edit with a finger; the canvas is one tap away.
+    val asList: Boolean = true,
     val cycleRejected: Boolean = false,
     val terminalRejected: Boolean = false,
     val linkEpoch: Int = 0,

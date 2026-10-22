@@ -27,6 +27,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -71,13 +72,13 @@ internal fun NetworkObservationScreen(
     onExport: () -> Unit,
 ) {
     val systemReducedMotion = rememberReduceMotion()
-    var pauseMotion by remember { mutableStateOf(false) }
+    var pauseMotion by rememberSaveable { mutableStateOf(false) }
     val reduceMotion = systemReducedMotion || pauseMotion
-    var tab by remember { mutableIntStateOf(0) }
-    var selectedSource by remember { mutableStateOf("adapters") }
-    var confirmIp by remember { mutableStateOf(false) }
-    var expandedFinding by remember { mutableStateOf<String?>(null) }
-    var query by remember { mutableStateOf("") }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    var selectedSource by rememberSaveable { mutableStateOf("adapters") }
+    var confirmIp by rememberSaveable { mutableStateOf(false) }
+    var expandedFinding by rememberSaveable { mutableStateOf<String?>(null) }
+    var query by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     fun selectTab(index: Int) {

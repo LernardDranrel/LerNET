@@ -123,6 +123,8 @@ dependencies {
     implementation(files("../core-engine/libs/libbox.aar"))
 
     implementation(libs.androidx.core.ktx)
+    // Audit N16: QR code from a picture, offline; plain Java, no Play services.
+    implementation(libs.zxing.core)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)

@@ -1,5 +1,10 @@
 package app.lernet.ui.importcfg
 
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.layout.Row
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
@@ -214,8 +219,10 @@ private fun ImportForm(
             .padding(metrics.gutter),
         verticalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap),
     ) {
-        Text(stringResource(R.string.import_hint), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(R.string.import_hint), style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
         ImportFields(state, metrics.compact, onIntent, onPaste)
+        ImportSourceButtons(state, onIntent)
         ImportGuessLine(state.guess)
         Text(
             stringResource(R.string.import_override),
@@ -283,13 +290,14 @@ private fun ImportFeedback(
         )
     }
     state.errors.forEach { error ->
-        Text(importErrorText(error), color = MaterialTheme.colorScheme.error)
+        Text(importErrorText(error), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
     }
     AnimatedVisibility(visible = state.done) {
         Column(verticalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap)) {
-            Text(stringResource(R.string.import_saved, state.savedCount), color = MaterialTheme.colorScheme.secondary)
+            Text(stringResource(R.string.import_saved, state.savedCount), style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.secondary)
             ImportUnusedParts(state.unusedParts)
-            state.skipped?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            state.skipped?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error) }
         }
     }
 }
@@ -352,8 +360,52 @@ private fun modePlaceholder(mode: ImportMode?): String =
         ImportMode.JSON_URL -> stringResource(R.string.hint_json_url)
         ImportMode.JSON_PASTE -> stringResource(R.string.hint_json_paste)
         ImportMode.SUBSCRIPTION -> stringResource(R.string.hint_subscription)
-        null -> stringResource(R.string.import_hint)
+        null -> stringResource(R.string.import_input_example)
     }
+
+/** Audit N16: file through the system picker, QR code from a picture; both just fill the field. */
+@Composable
+private fun ImportSourceButtons(state: ImportUiState, onIntent: (ImportIntent) -> Unit) {
+    val context = LocalContext.current
+    var problem by remember { mutableStateOf<Int?>(null) }
+    fun take(result: ImportSources.Result) {
+        problem = when (result) {
+            is ImportSources.Result.Text -> { onIntent(ImportIntent.SetInput(result.value)); null }
+            ImportSources.Result.TooLarge -> R.string.import_file_too_large
+            ImportSources.Result.Unreadable -> R.string.import_file_unreadable
+            ImportSources.Result.NoQr -> R.string.import_qr_none
+        }
+    }
+    val file = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) take(ImportSources.readText(context.contentResolver, uri))
+    }
+    val picture = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) take(ImportSources.readQr(context.contentResolver, uri))
+    }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap)) {
+        OutlinedButton(
+            onClick = { file.launch(arrayOf("text/*", "application/json", "application/octet-stream")) },
+            enabled = !state.busy,
+            modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("import_from_file"),
+        ) {
+            Icon(LerNetSymbols.file(), contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.size(8.dp))
+            Text(stringResource(R.string.import_from_file), maxLines = 1)
+        }
+        OutlinedButton(
+            onClick = { picture.launch(arrayOf("image/*")) },
+            enabled = !state.busy,
+            modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("import_from_qr"),
+        ) {
+            Icon(LerNetSymbols.qrCode(), contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.size(8.dp))
+            Text(stringResource(R.string.import_from_qr), maxLines = 1)
+        }
+    }
+    Text(stringResource(R.string.import_sources_note), style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant)
+    problem?.let { Text(stringResource(it), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error) }
+}
 
 @Composable
 private fun importErrorText(error: FieldError): String {

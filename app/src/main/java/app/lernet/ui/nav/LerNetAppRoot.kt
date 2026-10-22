@@ -83,6 +83,7 @@ import app.lernet.ui.motion.motionTween
 import app.lernet.ui.motion.rememberReduceMotion
 import app.lernet.ui.routes.RouteEditorEvent
 import app.lernet.ui.routes.RouteEditorScreen
+import app.lernet.ui.routes.RouteOwnerChoice
 import app.lernet.ui.routes.RouteEditorViewModel
 import app.lernet.ui.settings.SettingsScreen
 import app.lernet.ui.settings.SettingsViewModel
@@ -483,12 +484,13 @@ private fun AppNavHost(
                 simpleActive = homeState.snapshot.state in setOf(ConnectionState.CONNECTED, ConnectionState.CONNECTING, ConnectionState.RECONNECTING),
             )
         }
-        secondaryDestinations(navController, onShareLogs, onImported, isExpert)
+        secondaryDestinations(navController, homeViewModel, onShareLogs, onImported, isExpert)
     }
 }
 
 private fun NavGraphBuilder.secondaryDestinations(
     navController: NavHostController,
+    homeViewModel: HomeViewModel,
     onShareLogs: () -> Unit,
     onImported: (List<String>) -> Unit,
     isExpert: () -> Boolean,
@@ -564,7 +566,21 @@ private fun NavGraphBuilder.secondaryDestinations(
                 }
             }
         }
-        RouteEditorScreen(state = state, onIntent = vm::onIntent, onBack = { navController.popBackStack() })
+        // Audit R4: whose rules these are is chosen in the editor header, as on Windows.
+        val home by homeViewModel.state.collectAsStateWithLifecycle()
+        val owners = home.profiles.map { RouteOwnerChoice(it.id, it.name) } +
+            home.groups.map { RouteOwnerChoice(RouteOwners.group(it.id), it.name, folder = true) }
+        RouteEditorScreen(
+            state = state,
+            onIntent = vm::onIntent,
+            onBack = { navController.popBackStack() },
+            owners = owners,
+            onOwner = { owner ->
+                if (owner != state.ownerId) {
+                    navController.navigate(Dest.Routes.of(owner)) { popUpTo(Dest.Routes.route) { inclusive = true } }
+                }
+            },
+        )
     }
     composable(
         Dest.Config.route,

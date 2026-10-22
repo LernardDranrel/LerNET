@@ -1,5 +1,8 @@
 package app.lernet.ui.routes
 
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.testTag
+import androidx.compose.foundation.clickable
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -59,15 +62,22 @@ fun RouteEditorScreen(
     state: RouteEditorUiState,
     onIntent: (RouteEditorIntent) -> Unit,
     onBack: () -> Unit,
+    owners: List<RouteOwnerChoice> = emptyList(),
+    onOwner: (String) -> Unit = {},
 ) {
     var confirmLeave by remember { mutableStateOf(false) }
-    val requestBack: () -> Unit = {
+    // Where to go after «Выйти» in the unsaved-changes dialog: back, or another owner's rules (R4).
+    var leaveTo by remember { mutableStateOf<String?>(null) }
+    val leave: () -> Unit = { leaveTo?.let(onOwner) ?: onBack() }
+    val requestLeave: (String?) -> Unit = { target ->
+        leaveTo = target
         when {
             state.saving -> Unit
             !state.loading && !state.routesLocked && !state.saved -> confirmLeave = true
-            else -> onBack()
+            else -> leave()
         }
     }
+    val requestBack: () -> Unit = { requestLeave(null) }
     BackHandler(enabled = state.saving || (!state.loading && !state.routesLocked && !state.saved)) { requestBack() }
     if (confirmLeave) {
         AlertDialog(
@@ -77,7 +87,7 @@ fun RouteEditorScreen(
             confirmButton = {
                 TextButton(onClick = {
                     confirmLeave = false
-                    onBack()
+                    leave()
                 }) {
                     Text(stringResource(R.string.routes_leave))
                 }
@@ -109,6 +119,9 @@ fun RouteEditorScreen(
         topBar = {
             RouteTopBar(
                 title = state.profileName,
+                owners = owners,
+                currentOwner = state.ownerId,
+                onOwner = { requestLeave(it) },
                 onBack = requestBack,
                 backEnabled = !state.saving,
                 onHelp = { helpOpen = true },
@@ -120,7 +133,8 @@ fun RouteEditorScreen(
                     expanded = addMenu,
                     onExpanded = { addMenu = it },
                     showElse = !levelHasElse(state),
-                    showPipe = !state.asList,
+                    // Audit R2: separate VPN channels are an Expert tool; existing ones still show and stay editable.
+                    showPipe = false,
                     onAddRule = {
                         onIntent(RouteEditorIntent.AddChild(newRuleParent(state), elseRule = false))
                     },
@@ -416,14 +430,45 @@ private fun pipeNameOf(nodes: List<RuleNodeRecord>, edge: SchemaEdge): String {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RouteTopBar(title: String, onBack: () -> Unit, backEnabled: Boolean, onHelp: () -> Unit) {
+private fun RouteTopBar(
+    title: String,
+    owners: List<RouteOwnerChoice>,
+    currentOwner: String,
+    onOwner: (String) -> Unit,
+    onBack: () -> Unit,
+    backEnabled: Boolean,
+    onHelp: () -> Unit,
+) {
+    var pick by remember { mutableStateOf(false) }
     TopAppBar(
         title = {
-            Text(
-                title.ifBlank { stringResource(R.string.routes_title) },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Column(
+                Modifier.clickable(enabled = owners.size > 1 && backEnabled, onClickLabel = stringResource(R.string.routes_owner_pick)) { pick = true }
+                    .testTag("routes_owner"),
+            ) {
+                Text(stringResource(R.string.routes_owner_label), style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        title.ifBlank { stringResource(R.string.routes_title) },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (owners.size > 1) Text(" ▾", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                DropdownMenu(pick, onDismissRequest = { pick = false }) {
+                    owners.forEach { owner ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(if (owner.folder) stringResource(R.string.routes_owner_folder, owner.name) else owner.name,
+                                    fontWeight = if (owner.id == currentOwner) FontWeight.SemiBold else null)
+                            },
+                            onClick = { pick = false; onOwner(owner.id) },
+                        )
+                    }
+                }
+            }
         },
         navigationIcon = {
             IconButton(onClick = onBack, enabled = backEnabled) {
@@ -595,3 +640,6 @@ private fun PipeNameDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
         },
     )
 }
+
+/** Audit R4: a config or a folder whose rules can be opened from the editor header. */
+data class RouteOwnerChoice(val id: String, val name: String, val folder: Boolean = false)
