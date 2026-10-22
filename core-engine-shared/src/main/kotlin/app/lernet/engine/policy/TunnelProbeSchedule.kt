@@ -148,10 +148,13 @@ class TunnelProbeSchedule(
 
     companion object {
         const val SILENCE_MS = 8_000L
+
         /** Connect and read limit of one tunnel check: a jammed handshake takes 5–20 s. */
         const val CHECK_TIMEOUT_MS = 15_000L
+
         /** Whole-request limit of one tunnel check. */
         const val CALL_TIMEOUT_MS = 20_000L
+
         /** More than a couple of TCP keep-alives: real requests that stayed unanswered. */
         const val MIN_UNANSWERED_UP_BYTES = 1_500L
     }

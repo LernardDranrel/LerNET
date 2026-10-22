@@ -83,7 +83,8 @@ class TunnelProbeScheduleTest {
     fun hintChecksSoonButRespectsTheCooldownAfterASuccess() {
         val s = schedule()
         s.onStart(0)
-        s.takeDue(5_000); s.onResult(5_000, ok = true)
+        s.takeDue(5_000)
+        s.onResult(5_000, ok = true)
         s.onHint(10_000)
         assertNull("cooldown after a passed check", s.takeDue(10_000))
         s.onHint(70_000)
@@ -97,8 +98,10 @@ class TunnelProbeScheduleTest {
     fun aHoldWaitsItsPauseAndSilenceDoesNotCutItShort() {
         val s = schedule()
         s.onStart(0)
-        s.takeDue(5_000); s.onResult(5_000, ok = false)
-        s.takeDue(9_000); assertEquals(TunnelProbeSchedule.Verdict.FAILED, s.onResult(9_000, ok = false))
+        s.takeDue(5_000)
+        s.onResult(5_000, ok = false)
+        s.takeDue(9_000)
+        assertEquals(TunnelProbeSchedule.Verdict.FAILED, s.onResult(9_000, ok = false))
         s.planHold(9_000, 120_000)
         var up = 0L
         for (t in 10_000L until 129_000L step 1_000L) {
@@ -125,8 +128,10 @@ class TunnelProbeScheduleTest {
     fun aFailedRoundStartsACooldownSoSilenceDoesNotRetestAtOnce() {
         val s = schedule()
         s.onStart(0)
-        s.takeDue(5_000); s.onResult(5_000, ok = false)
-        s.takeDue(9_000); s.onResult(9_000, ok = false)
+        s.takeDue(5_000)
+        s.onResult(5_000, ok = false)
+        s.takeDue(9_000)
+        s.onResult(9_000, ok = false)
         var up = 0L
         for (t in 10_000L until 69_000L step 1_000L) {
             up += 5_000

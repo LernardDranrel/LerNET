@@ -50,9 +50,11 @@ object ConfigAssembler {
     /** Internal listener for LerNET's own requests (updates, subscriptions, checks). Never without a password. */
     const val APP_PROXY_PORT = 2081
     const val ANDROID_PROBE_URL = "https://cp.cloudflare.com/generate_204"
+
     /** Same prefix as [app.lernet.engine.live.LiveVia]: standby checks never count as replies of the active config. */
     const val STANDBY_TAG_PREFIX = "standby-"
     const val MAX_STANDBY = 4
+
     /** Plain proxy outbounds only: nothing that brings its own interface, chain or endpoint. */
     private val STANDBY_TYPES = setOf("vless", "vmess", "trojan", "shadowsocks", "hysteria2", "tuic", "anytls")
 

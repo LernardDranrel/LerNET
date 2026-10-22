@@ -163,8 +163,11 @@ class ConnectionPolicyMachine {
         }
         val next = state.copy(proxiedReplies = proxied ?: state.proxiedReplies, snapshot = snapshot)
         if (!recovered) return next to emptyList()
-        return if (state.snapshot.state == ConnectionState.CONNECTED) worked(next, context) else
+        return if (state.snapshot.state == ConnectionState.CONNECTED) {
+            worked(next, context)
+        } else {
             next.copy(consecutiveFailures = 0) to emptyList()
+        }
     }
 
     private fun verified(state: MachineState, context: MachineContext): Pair<MachineState, List<PolicyCommand>> =

@@ -417,7 +417,10 @@ class ConnectionControllerTest {
         val controller = controller(
             this, engine, hardStopTimeoutMs = 2_500,
             reconnect = ReconnectSettings(maxAttempts = 3, watchdogTimeoutMs = 600_000),
-            tunnelHealthProbe = { checks++; Result.success(40L) },
+            tunnelHealthProbe = {
+                checks++
+                Result.success(40L)
+            },
         )
         controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
         runCurrent()
@@ -930,23 +933,36 @@ class ConnectionControllerTest {
             if (tag == "standby-2") Result.success(120) else Result.failure(java.net.SocketTimeoutException("timeout"))
         })
         val first = sampleProfile()
-        fun backup(n: Int) = first.copy(id = "p$n", name = "резерв $n", selectedOutboundId = "out-$n",
-            outbounds = first.outbounds.map { it.copy(id = "out-$n", singBoxJson = it.singBoxJson.replace("example.com", "b$n.example.com")) })
+        fun backup(n: Int) = first.copy(
+            id = "p$n", name = "резерв $n", selectedOutboundId = "out-$n",
+            outbounds = first.outbounds.map {
+                it.copy(id = "out-$n", singBoxJson = it.singBoxJson.replace("example.com", "b$n.example.com"))
+            }
+        )
         val dialed = mutableListOf<String>()
-        val controller = controller(this, engine, hardStopTimeoutMs = 2_500,
+        val controller = controller(
+            this, engine, hardStopTimeoutMs = 2_500,
             reconnect = ReconnectSettings(maxAttempts = 5, watchdogTimeoutMs = 600_000),
-            dialer = OutboundDialer { target, _ -> dialed += target.host; Result.success(Unit) })
+            dialer = OutboundDialer { target, _ ->
+                dialed += target.host
+                Result.success(Unit)
+            }
+        )
         var selected: String? = null
         controller.setFailoverHandlers(
-            resolve = { id -> when (id) {
-                "out-2" -> backup(2) to catchAllNodes().map { it.copy(profileId = "p2") }
-                "out-3" -> backup(3) to catchAllNodes().map { it.copy(profileId = "p3") }
-                else -> null
-            } },
+            resolve = { id ->
+                when (id) {
+                    "out-2" -> backup(2) to catchAllNodes().map { it.copy(profileId = "p2") }
+                    "out-3" -> backup(3) to catchAllNodes().map { it.copy(profileId = "p3") }
+                    else -> null
+                }
+            },
             onSelected = { selected = it },
         )
-        controller.updateSettings(ReconnectSettings(maxAttempts = 5, watchdogTimeoutMs = 600_000), failoverEnabled = true,
-            group = ManualFailoverGroup("g", "Резерв", listOf("out-1", "out-2", "out-3")))
+        controller.updateSettings(
+            ReconnectSettings(maxAttempts = 5, watchdogTimeoutMs = 600_000), failoverEnabled = true,
+            group = ManualFailoverGroup("g", "Резерв", listOf("out-1", "out-2", "out-3"))
+        )
         controller.connect(first, catchAllNodes(), RunMode.FULL_VPN)
         runCurrent()
         // The backups ride along in the core as standby outbounds, not used by any route.
@@ -972,16 +988,24 @@ class ConnectionControllerTest {
     fun whenNoBackupAnswersThroughTheCoreTheCoreIsKept() = runTest(dispatcher) {
         val engine = RecordingBoxEngine(standbyProbe = { Result.failure(java.net.SocketTimeoutException("timeout")) })
         val first = sampleProfile()
-        val second = first.copy(id = "p2", name = "резерв", selectedOutboundId = "out-2",
-            outbounds = first.outbounds.map { it.copy(id = "out-2", singBoxJson = it.singBoxJson.replace("example.com", "b2.example.com")) })
-        val controller = controller(this, engine, hardStopTimeoutMs = 2_500,
-            reconnect = ReconnectSettings(maxAttempts = 5, watchdogTimeoutMs = 600_000))
+        val second = first.copy(
+            id = "p2", name = "резерв", selectedOutboundId = "out-2",
+            outbounds = first.outbounds.map {
+                it.copy(id = "out-2", singBoxJson = it.singBoxJson.replace("example.com", "b2.example.com"))
+            }
+        )
+        val controller = controller(
+            this, engine, hardStopTimeoutMs = 2_500,
+            reconnect = ReconnectSettings(maxAttempts = 5, watchdogTimeoutMs = 600_000)
+        )
         controller.setFailoverHandlers(
             resolve = { id -> if (id == "out-2") second to catchAllNodes().map { it.copy(profileId = "p2") } else null },
             onSelected = {},
         )
-        controller.updateSettings(ReconnectSettings(maxAttempts = 5, watchdogTimeoutMs = 600_000), failoverEnabled = true,
-            group = ManualFailoverGroup("g", "Резерв", listOf("out-1", "out-2")))
+        controller.updateSettings(
+            ReconnectSettings(maxAttempts = 5, watchdogTimeoutMs = 600_000), failoverEnabled = true,
+            group = ManualFailoverGroup("g", "Резерв", listOf("out-1", "out-2"))
+        )
         controller.connect(first, catchAllNodes(), RunMode.FULL_VPN)
         runCurrent()
         engine.emit(EngineEvent.DnsAlive(answers = 1))
@@ -1006,7 +1030,10 @@ class ConnectionControllerTest {
         val controller = controller(
             this, engine, hardStopTimeoutMs = 2_500,
             reconnect = ReconnectSettings(maxAttempts = 3, watchdogTimeoutMs = 600_000),
-            tunnelHealthProbe = { checks++; Result.success(40L) },
+            tunnelHealthProbe = {
+                checks++
+                Result.success(40L)
+            },
         )
         controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
         runCurrent()

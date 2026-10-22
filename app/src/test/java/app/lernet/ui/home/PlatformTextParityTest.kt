@@ -3,9 +3,9 @@ package app.lernet.ui.home
 import app.lernet.engine.policy.BudgetNotice
 import app.lernet.engine.policy.LinkHold
 import app.lernet.engine.policy.LinkJudge
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import java.io.File
 
 /** Android keeps these words in resources, Windows in shared code; they must stay the same. */
 class PlatformTextParityTest {
