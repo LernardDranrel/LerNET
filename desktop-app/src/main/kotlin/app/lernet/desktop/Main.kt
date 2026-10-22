@@ -1067,7 +1067,10 @@ internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boole
                     }
                 }
                 Spacer(Modifier.height(14.dp))
-                val preview = remember(selected, saved.rules, saved.mode, saved.defaultDnsPolicy, saved.tunMtu, saved.xmuxChannels, saved.directDnsServer, saved.strictRoute) {
+                val preview = remember(
+                    selected, saved.rules, saved.mode, saved.defaultDnsPolicy, saved.tunMtu, saved.xmuxChannels, saved.directDnsServer,
+                    saved.strictRoute,
+                ) {
                     runCatching { controller.preview(selected.id) }.getOrNull()
                 }
                 Panel {
@@ -1495,8 +1498,13 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
                             else -> "" to muted
                         }
                         if (word.isNotEmpty()) {
-                            Text(word, color = tone, fontSize = 11.sp, maxLines = if (probe?.budgetWaitMs != null) 2 else 1,
-                                overflow = TextOverflow.Ellipsis)
+                            Text(
+                                word,
+                                color = tone,
+                                fontSize = 11.sp,
+                                maxLines = if (probe?.budgetWaitMs != null) 2 else 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                     }
                 }
@@ -1537,7 +1545,8 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
                     modifier = Modifier.size(28.dp).semantics { contentDescription = "Проверить связь" },
                     contentPadding = PaddingValues(0.dp)) { PingGlyph(blue) }
             }
-            if (!compact) probe?.budgetWaitMs?.let { wait ->
+            val wait = probe?.budgetWaitMs
+            if (!compact && wait != null) {
                 Text(app.lernet.engine.policy.BudgetNotice.short(wait), color = muted, fontSize = 11.sp)
             }
         }
@@ -1898,8 +1907,11 @@ internal fun Settings(saved: StoredState, controller: DesktopController, onReque
             ) {
                 Column(Modifier.weight(1f)) {
                     Text("Дополнительно", style = MaterialTheme.typography.titleLarge)
-                    Text("MTU, соединения XHTTP, журнал, рукопожатие TLS, адрес проверки связи, путь к ядру",
-                        color = muted, fontSize = 12.sp)
+                    Text(
+                        "MTU, соединения XHTTP, журнал, рукопожатие TLS, адрес проверки связи, путь к ядру",
+                        color = muted,
+                        fontSize = 12.sp,
+                    )
                 }
                 FolderChevron(advanced)
             }
@@ -1917,11 +1929,19 @@ internal fun Settings(saved: StoredState, controller: DesktopController, onReque
                 color = muted, fontSize = 12.sp, lineHeight = 18.sp)
             SettingAdvice("Как подобрать", "Начните с 1500. Если сайты или загрузки зависают, сравните 1400 и 1280 на тех же задачах после переподключения. Оставьте наибольшее значение со стабильной работой. Универсальной формулы для любого VPN нет; обычный пинг не измеряет MTU всего пути.")
             HorizontalDivider(Modifier.padding(vertical = 5.dp), color = desktopColors.outlineVariant)
-            SettingHeading("XHTTP", "Соединения с сервером",
-                "Сколько соединений с сервером держит XHTTP. По умолчанию два: все запросы идут по ним, новые соединения не открываются пачкой. Настройка применяется, только если конфиг не задаёт собственный XMUX.")
-            SecurityToggle("Один канал",
-                "Весь трафик пойдёт одним соединением. Включите, если в вашей сети глушат новые соединения. Минус: одна медленная загрузка может притормозить остальное. Вступит в силу при следующем подключении.",
-                saved.xmuxChannels == app.lernet.engine.compile.XhttpMode.SINGLE_CHANNEL, controller::setXmuxSingleChannel)
+            SettingHeading(
+                "XHTTP",
+                "Соединения с сервером",
+                "Сколько соединений с сервером держит XHTTP. По умолчанию два: все запросы идут по ним, " +
+                    "новые соединения не открываются пачкой. Настройка применяется, только если конфиг не задаёт собственный XMUX.",
+            )
+            SecurityToggle(
+                "Один канал",
+                "Весь трафик пойдёт одним соединением. Включите, если в вашей сети глушат новые соединения. " +
+                    "Минус: одна медленная загрузка может притормозить остальное. Вступит в силу при следующем подключении.",
+                saved.xmuxChannels == app.lernet.engine.compile.XhttpMode.SINGLE_CHANNEL,
+                controller::setXmuxSingleChannel,
+            )
             HorizontalDivider(Modifier.padding(vertical = 5.dp), color = desktopColors.outlineVariant)
             Text("Подробность журнала", fontWeight = FontWeight.SemiBold)
             Box(Modifier.fillMaxWidth()) {

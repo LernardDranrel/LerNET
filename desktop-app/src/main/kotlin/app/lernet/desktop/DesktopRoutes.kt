@@ -184,7 +184,9 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
     }
     val previewProfileId = if (activeOwner.startsWith("grp_"))
         saved.profiles.firstOrNull { it.groupId == activeOwner.removePrefix("grp_") }?.id else activeOwner
-    val preview = remember(rules, previewProfileId, saved.mode, saved.defaultDnsPolicy, saved.tunMtu, saved.xmuxChannels, saved.directDnsServer) {
+    val preview = remember(
+        rules, previewProfileId, saved.mode, saved.defaultDnsPolicy, saved.tunMtu, saved.xmuxChannels, saved.directDnsServer,
+    ) {
         previewProfileId?.let { runCatching { controller.preview(it, draftRules = rules, draftOwnerId = activeOwner) }.getOrNull() }
     }
 

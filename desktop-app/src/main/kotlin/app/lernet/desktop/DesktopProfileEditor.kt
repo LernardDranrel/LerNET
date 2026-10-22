@@ -39,7 +39,6 @@ fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller:
     var path by remember(profile.id) { mutableStateOf(original.path) }
     var transportMode by remember(profile.id) { mutableStateOf(original.mode) }
     var fingerprint by remember(profile.id) { mutableStateOf(original.fingerprint) }
-    var fingerprintOpen by remember { mutableStateOf(false) }
     var runMode by remember(profile.id) { mutableStateOf(profile.modeOverride ?: "SYSTEM") }
     var dnsPolicy by remember(profile.id) { mutableStateOf(profile.dnsPolicy) }
     var dnsType by remember(profile.id) { mutableStateOf(originalDns?.type?.ifBlank { "udp" } ?: "udp") }
@@ -51,7 +50,9 @@ fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller:
     val effectiveDnsPolicy = if (dnsPolicy == "SYSTEM") saved.defaultDnsPolicy else dnsPolicy
     val dnsValid = effectiveDnsPolicy != "PROFILE" || dnsServer.isNotBlank()
     val valid = name.isNotBlank() && server.isNotBlank() && parsedPort != null && dnsValid
-    val candidate = remember(name, server, port, sni, path, transportMode, fingerprint, runMode, dnsPolicy, dnsType, dnsServer, saved.defaultDnsPolicy) {
+    val candidate = remember(
+        name, server, port, sni, path, transportMode, fingerprint, runMode, dnsPolicy, dnsType, dnsServer, saved.defaultDnsPolicy,
+    ) {
         // Only a fingerprint changed here is written; an untouched profile keeps its TLS block as is.
         val changedFingerprint = fingerprint.takeIf { it != original.fingerprint }
         val patched = if (parsedPort != null) {
@@ -124,27 +125,18 @@ fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller:
                                         isError = !dnsValid, supportingText = { Text("Должен соответствовать выбранному типу DNS") })
                                 } else Text("Используется DNS устройства: ${saved.directDnsServer}. Значение задаётся в глобальных настройках.", color = editorWarning, fontSize = 12.sp)
                                 HorizontalDivider()
-                                Text("Глобальные значения: MTU ${saved.tunMtu} · XHTTP-соединений ${saved.xmuxChannels} · журнал ${saved.logLevel}", color = editorMuted, fontSize = 12.sp)
+                                Text(
+                                    "Глобальные значения: MTU ${saved.tunMtu} · XHTTP-соединений ${saved.xmuxChannels} · журнал ${saved.logLevel}",
+                                    color = editorMuted,
+                                    fontSize = 12.sp,
+                                )
                             }
                             EditorPage.REMOTE -> {
                                 Text("Эти поля должны совпадать с настройками принимающего сервера.", color = editorWarning, fontSize = 12.sp)
                                 OutlinedTextField(server, { server = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Адрес сервера") }, isError = server.isBlank(), singleLine = true)
                                 OutlinedTextField(port, { port = it }, modifier = Modifier.width(210.dp), label = { Text("Порт") }, isError = parsedPort == null, singleLine = true)
                                 OutlinedTextField(sni, { sni = it }, modifier = Modifier.fillMaxWidth(), label = { Text("SNI / server_name") }, singleLine = true)
-                                if (original.hasTls) {
-                                    // Shown as written in the profile: «chrome» from an old import stays until changed here.
-                                    val defaultLabel = "По умолчанию LerNET · ${TlsHandshake.DEFAULT_FINGERPRINT}"
-                                    Box {
-                                        OutlinedButton(onClick = { fingerprintOpen = true }) { Text("Отпечаток TLS: ${fingerprint.ifBlank { defaultLabel }}") }
-                                        DropdownMenu(fingerprintOpen, onDismissRequest = { fingerprintOpen = false }) {
-                                            (TlsHandshake.CHOICES + fingerprint).distinct().forEach { value ->
-                                                DropdownMenuItem(text = { Text(value.ifBlank { defaultLabel }) }, onClick = { fingerprint = value; fingerprintOpen = false })
-                                            }
-                                        }
-                                    }
-                                    Text("Каким браузером представляется подключение. Если сервер не отвечает, попробуйте другой; «По умолчанию» подойдёт почти всегда.",
-                                        color = editorMuted, fontSize = 12.sp)
-                                }
+                                if (original.hasTls) FingerprintChoice(fingerprint) { fingerprint = it }
                                 Text("Транспорт: ${original.transportType.ifBlank { "не указан" }}", color = editorMuted)
                                 if (original.hasTransport) {
                                     OutlinedTextField(path, { path = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Путь транспорта") }, singleLine = true)
@@ -185,4 +177,30 @@ fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller:
             }
         }
     }
+}
+
+/** uTLS fingerprint as written in the profile: «chrome» from an old import stays until changed here. */
+@Composable
+private fun FingerprintChoice(value: String, onSelect: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val defaultLabel = "По умолчанию LerNET · ${TlsHandshake.DEFAULT_FINGERPRINT}"
+    Box {
+        OutlinedButton(onClick = { open = true }) { Text("Отпечаток TLS: ${value.ifBlank { defaultLabel }}") }
+        DropdownMenu(open, onDismissRequest = { open = false }) {
+            (TlsHandshake.CHOICES + value).distinct().forEach { choice ->
+                DropdownMenuItem(
+                    text = { Text(choice.ifBlank { defaultLabel }) },
+                    onClick = {
+                        onSelect(choice)
+                        open = false
+                    },
+                )
+            }
+        }
+    }
+    Text(
+        "Каким браузером представляется подключение. Если сервер не отвечает, попробуйте другой; «По умолчанию» подойдёт почти всегда.",
+        color = editorMuted,
+        fontSize = 12.sp,
+    )
 }

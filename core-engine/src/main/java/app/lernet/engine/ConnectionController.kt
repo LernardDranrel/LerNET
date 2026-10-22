@@ -104,10 +104,13 @@ class ConnectionController(
     private var engineReady = false
     private var machineState = MachineState.idle()
     private var context = machineContext(ReconnectSettings(), app.lernet.engine.policy.FailoverSettings(), null)
+
     /** Server+SNI of every config this session knows, for the handshake budget. */
     private val outboundKeys = java.util.concurrent.ConcurrentHashMap<String, HandshakeKey>()
+
     /** Folder configs carried in the running core only to be checked: outbound id → tag. */
     @Volatile private var standbyTags: Map<String, String> = emptyMap()
+
     /** The core refused the config with standby outbounds once: run without them for this session. */
     @Volatile private var standbyRefused = false
     private var retryJob: Job? = null
@@ -804,9 +807,11 @@ class ConnectionController(
                     // The config that just failed goes first, with the reason the machine recorded.
                     _snapshot.value.let { failed ->
                         val name = failed.activeProfileId?.let(profileNames::get)
-                        if (name != null) attempts += app.lernet.engine.policy.FailoverAttempt(
-                            name, failedReason(failed.cause ?: ConnectionCause.TunnelHealthFailed("")), clock(),
-                        )
+                        if (name != null) {
+                            attempts += app.lernet.engine.policy.FailoverAttempt(
+                                name, failedReason(failed.cause ?: ConnectionCause.TunnelHealthFailed("")), clock(),
+                            )
+                        }
                     }
                     if (resolve != null) {
                         // Backups verified by the background checks go first: the switch takes seconds.
@@ -834,11 +839,13 @@ class ConnectionController(
                         }
                     }
                     dispatch(PolicyEvent.ProbeCompleted(winner?.let(::setOf) ?: emptySet(), checked))
-                    if (winner == null && attempts.size > 0) mutex.withLock {
-                        val wait = _snapshot.value.nextCheckAtMs?.let { (it - clock()).coerceAtLeast(0L) }?.let(RecheckJitter::label)
-                        _snapshot.value = _snapshot.value.copy(
-                            tried = app.lernet.engine.policy.FailoverReport.merge(_snapshot.value.tried, null, attempts, wait),
-                        )
+                    if (winner == null && attempts.size > 0) {
+                        mutex.withLock {
+                            val wait = _snapshot.value.nextCheckAtMs?.let { (it - clock()).coerceAtLeast(0L) }?.let(RecheckJitter::label)
+                            _snapshot.value = _snapshot.value.copy(
+                                tried = app.lernet.engine.policy.FailoverReport.merge(_snapshot.value.tried, null, attempts, wait),
+                            )
+                        }
                     }
                 }
             }
@@ -1439,6 +1446,7 @@ class ConnectionController(
         private const val ACTIVE_PROBE_TIMEOUT_MS = 8_000
         private const val UNDERLAY_RETURN_RETRY_MS = 1_000L
         const val L7_PROBE_URL = "https://cp.cloudflare.com/generate_204"
+
         /** One real check of a folder config: a jammed handshake takes 5–20 s ([TunnelProbeSchedule.CHECK_TIMEOUT_MS]). */
         const val CANDIDATE_CHECK_TIMEOUT_MS = 15_000
         private const val CANDIDATE_BUDGET_WAIT_MS = app.lernet.engine.policy.LinkJudge.CANDIDATE_BUDGET_WAIT_MS

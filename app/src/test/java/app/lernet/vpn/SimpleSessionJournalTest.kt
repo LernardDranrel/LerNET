@@ -12,8 +12,10 @@ import org.junit.rules.TemporaryFolder
 
 class SimpleSessionJournalTest {
     @get:Rule val folder = TemporaryFolder()
-    private fun config() = SimpleSessionConfig("profile", "outbound", "{\"secret\":\"effective\"}",
-        RunMode.FULL_VPN, "warn", EngineDefaults(1400, 1, "9.9.9.9"), "proxy", DnsPolicy.UNDERLAY)
+    private fun config() = SimpleSessionConfig(
+        "profile", "outbound", "{\"secret\":\"effective\"}",
+        RunMode.FULL_VPN, "warn", EngineDefaults(1400, 1, "9.9.9.9"), "proxy", DnsPolicy.UNDERLAY
+    )
 
     @Test fun restartReadsExactEffectiveSessionAndManualStopPersistsAcrossNewInstance() {
         val path = folder.root.toPath().resolve("session.json")

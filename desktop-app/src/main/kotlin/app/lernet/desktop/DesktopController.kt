@@ -20,6 +20,7 @@ import app.lernet.engine.compile.ConfigAssembler
 import app.lernet.engine.compile.EnginePlatform
 import app.lernet.engine.compile.EngineDefaults
 import app.lernet.engine.compile.OutboundPatch
+import app.lernet.engine.compile.XhttpMode
 import app.lernet.routing.GeoRuleSets
 import app.lernet.routing.ConditionBlock
 import app.lernet.routing.ConditionCodec
@@ -171,6 +172,7 @@ class DesktopController(
     private val observedConnections = LinkedHashMap<String, LiveConnection>()
     private val mutableHistory = MutableStateFlow<List<LiveConnection>>(emptyList())
     val connectionHistory: StateFlow<List<LiveConnection>> = mutableHistory
+
     /** Configs that died rest 2 → 10 → 30 min; kept in the work folder, so the list survives a restart. */
     internal val penalties = ConfigPenalties().also { list ->
         val file = store.workDirectory().resolve(PENALTIES_FILE)
@@ -180,13 +182,18 @@ class DesktopController(
                 .onFailure { tunnel.logDiagnostic("Не удалось сохранить список отдыхающих конфигов: ${it.javaClass.simpleName}") }
         }
     }
+
     /** LerNET's own new connections per server+SNI: at most 3 per minute ([HandshakeBudget]). */
     private val handshakeBudget = HandshakeBudget()
+
     /** Rounds in a row in which neither the active config nor any folder config answered. */
     private val silentRounds = java.util.concurrent.atomic.AtomicInteger(0)
+
     @Volatile private var lastRestartAt = 0L
+
     /** Asks the monitor loop for one tunnel check (within its cooldown). */
     private val hintRequest = AtomicBoolean(false)
+
     /** Asks the monitor loop to hold and look again after this many ms; -1 = none. */
     private val holdRequest = AtomicLong(-1L)
     private val failoverRunner = FailoverRunner()
@@ -286,7 +293,9 @@ class DesktopController(
                             } else {
                                 // One more request through the node: it opens a connection, so it is budgeted too.
                                 val nodeAlive = takeActiveBudget() &&
-                                    runCatching { coreApi.delay(tag, saved.healthUrl, TunnelProbeSchedule.CHECK_TIMEOUT_MS.toInt()) }.isSuccess
+                                    runCatching {
+                                        coreApi.delay(tag, saved.healthUrl, TunnelProbeSchedule.CHECK_TIMEOUT_MS.toInt())
+                                    }.isSuccess
                                 if (ticket == connectGeneration.get() && tunnel.state.value.status == TunnelStatus.RUNNING) {
                                     failedChecks = if (verdict == TunnelProbeSchedule.Verdict.FAILED) 2 else 1
                                     val reason = if (nodeAlive) "Узел отвечает, но путь Windows через VPN не работает"
@@ -727,10 +736,12 @@ class DesktopController(
     fun setDefaults(mtu: Int, dnsServer: String, logLevel: String) = change {
         it.copy(tunMtu = mtu.coerceIn(1280, 9000), directDnsServer = dnsServer.trim(), logLevel = logLevel)
     }
+
     /** «Один канал»: XHTTP carries everything over one connection instead of two. */
     fun setXmuxSingleChannel(enabled: Boolean) = change {
-        it.copy(xmuxChannels = if (enabled) app.lernet.engine.compile.XhttpMode.SINGLE_CHANNEL else app.lernet.engine.compile.XhttpMode.DEFAULT_CHANNELS)
+        it.copy(xmuxChannels = if (enabled) XhttpMode.SINGLE_CHANNEL else XhttpMode.DEFAULT_CHANNELS)
     }
+
     fun updateProfile(profile: StoredProfile) = change { saved ->
         saved.copy(profiles = saved.profiles.map { if (it.id == profile.id) profile else it })
     }
@@ -1001,11 +1012,13 @@ class DesktopController(
         val tag = if (attempt > SimpleRecovery.QUICK_ATTEMPTS || rounds > 0) "recheck" else "core-failed"
         tunnel.logDiagnostic(RestartLog.line(tag, attempt, pause))
         val hold = if (rounds >= SimpleRecovery.ALL_SILENT_ROUNDS) LinkHold.ALL_SILENT else null
-        mutable.update { it.copy(
-            message = hold?.let { h -> LinkJudge.holdMessage(h, RecheckJitter.label(pause)) }
-                ?: SimpleRecovery.message(simpleGuard.isEngaged(), pause, reason),
-            hold = hold,
-        ) }
+        mutable.update {
+            it.copy(
+                message = hold?.let { h -> LinkJudge.holdMessage(h, RecheckJitter.label(pause)) }
+                    ?: SimpleRecovery.message(simpleGuard.isEngaged(), pause, reason),
+                hold = hold,
+            )
+        }
         thread(name = "lernet-windows-retry", isDaemon = true) {
             try { Thread.sleep(pause) } catch (_: InterruptedException) { return@thread }
             if (desiredConnection && !expertReserved.get() && connectGeneration.get() == ticket &&
@@ -1043,9 +1056,13 @@ class DesktopController(
 
     private fun holdJammed() {
         mutable.update {
-            if (it.hold == LinkHold.ALL_SILENT) it else it.copy(
-                healthMessage = LinkJudge.holdMessage(LinkHold.JAMMED), healthVerified = false, hold = LinkHold.JAMMED,
-            )
+            if (it.hold == LinkHold.ALL_SILENT) {
+                it
+            } else {
+                it.copy(
+                    healthMessage = LinkJudge.holdMessage(LinkHold.JAMMED), healthVerified = false, hold = LinkHold.JAMMED,
+                )
+            }
         }
     }
 
@@ -1075,7 +1092,13 @@ class DesktopController(
     private fun awaitBudgetShowing(profileId: String, ticket: Long, key: HandshakeKey?): Boolean {
         fun show(waitMs: Long?) = mutable.update { ui ->
             val probe = ui.probes[profileId]
-            if (probe != null && probeTickets[profileId] == ticket) ui.copy(probes = ui.probes + (profileId to probe.copy(budgetWaitMs = waitMs))) else ui
+            if (probe != null &&
+                probeTickets[profileId] == ticket
+            ) {
+                ui.copy(probes = ui.probes + (profileId to probe.copy(budgetWaitMs = waitMs)))
+            } else {
+                ui
+            }
         }
         while (true) {
             val budgetKey = key ?: activeProfileKey() ?: break
@@ -1140,7 +1163,6 @@ class DesktopController(
         holdRequest.set(delay)
         mutable.update { it.copy(hold = hold, healthMessage = LinkJudge.holdMessage(hold, RecheckJitter.label(delay))) }
     }
-
 
     /**
      * Same rule as Android (shared LinkJudge): no network → keep the tunnel and wait;
