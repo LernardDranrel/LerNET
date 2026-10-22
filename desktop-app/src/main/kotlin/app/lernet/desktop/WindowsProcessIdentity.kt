@@ -22,6 +22,7 @@ internal object WindowsProcessIdentity {
     private val cache = ConcurrentHashMap<String, ProcessIdentity>()
     private val helperNames = setOf("msedgewebview2.exe", "webview2.exe", "java.exe", "javaw.exe")
     private val deviceRoots by lazy {
+        if (!System.getProperty("os.name").startsWith("Windows")) return@lazy emptyList()
         File.listRoots().mapNotNull { drive ->
             val dosName = drive.path.trimEnd('\\')
             val buffer = CharArray(1024)

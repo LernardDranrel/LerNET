@@ -157,7 +157,7 @@ class HomeStatesScreenshotTest {
         )
         rule.setContent {
             LerNetTheme {
-                androidx.compose.material3.Surface {
+                androidx.compose.material3.Surface(androidx.compose.ui.Modifier.fillMaxSize()) {
                     androidx.compose.foundation.layout.Column(
                         verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(
                             androidx.compose.ui.unit.Dp(12f)),

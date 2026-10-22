@@ -28,7 +28,7 @@ class PlatformTextParityTest {
         assertEquals(LinkJudge.holdMessage(LinkHold.ALL_SILENT), strings.getValue("state_hold_all_silent"))
         assertEquals(
             LinkJudge.holdMessage(LinkHold.ALL_SILENT, "2 мин"),
-            strings.getValue("state_hold_all_silent_next").replace("%1\$s", "2 мин"),
+            strings.getValue("state_hold_all_silent_next").replace("%1\$s", "2\u00A0мин"),
         )
     }
 }

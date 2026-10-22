@@ -619,8 +619,12 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
                 }
             }
             val progress = ui.busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RECONNECTING)
-            if (ui.message.isNotBlank() && ui.message != statusLine && ui.message !in plainStates && !(tab == Tab.PROFILES && progress))
-                Text(ui.message, color = if (ui.connectionError != null) desktopColors.error else muted, maxLines = 2)
+            // A connection error is told once, in the InfoBar below; the line here is for other news.
+            if (ui.message.isNotBlank() && ui.message != statusLine && ui.message !in plainStates && !(tab == Tab.PROFILES && progress) &&
+                ui.connectionError == null
+            ) {
+                Text(ui.message, color = muted, maxLines = 2)
+            }
                 if (ui.networkWarning.isNotBlank()) Text(ui.networkWarning, color = Color(0xFFF1CC80), fontSize = 12.sp, maxLines = 3)
             ui.guardProblem?.let { Text(it, color = desktopColors.error, fontSize = 12.sp, maxLines = 3) }
             // Audit N15: a failure is an InfoBar on the page, not a window over it.
@@ -650,6 +654,7 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
             when (tab) {
                 Tab.PROFILES -> ProfileHome(ui.saved, tunnel, ui.busy, ui.probes, ui.tunnelLatencyMs, trace, controller,
                     detail = homeDetail(ui, tunnel, holding),
+                    linkHold = ui.hold.takeIf { tunnel.status == TunnelStatus.RUNNING && !holding },
                     onImport = { groupId -> importGroupId = groupId; importOpen = true },
                     localProxy = ui.localProxy.takeIf { tunnel.status == TunnelStatus.RUNNING },
                     tried = ui.tried.takeIf { holding }, diagnostics = diagnostics,
@@ -705,10 +710,11 @@ private fun NavSymbol(tab: Tab, selected: Boolean) {
                 }
             }
             Tab.DIAGNOSTICS -> {
-                drawLine(color, Offset(0f, size.height * .85f), Offset(size.width, size.height * .85f), stroke)
-                drawRect(color, topLeft = Offset(size.width * .12f, size.height * .5f), size = androidx.compose.ui.geometry.Size(size.width * .16f, size.height * .34f))
-                drawRect(color, topLeft = Offset(size.width * .42f, size.height * .2f), size = androidx.compose.ui.geometry.Size(size.width * .16f, size.height * .64f))
-                drawRect(color, topLeft = Offset(size.width * .72f, size.height * .4f), size = androidx.compose.ui.geometry.Size(size.width * .16f, size.height * .44f))
+                // Audit N8: the request journal is a list, not a chart (the same symbol as on the phone).
+                listOf(.25f, .5f, .75f).forEach { y ->
+                    drawCircle(color, radius = 1.6.dp.toPx(), center = Offset(size.width * .14f, size.height * y))
+                    drawLine(color, Offset(size.width * .32f, size.height * y), Offset(size.width * .9f, size.height * y), stroke)
+                }
             }
             Tab.SETTINGS -> {
                 drawLine(color, Offset(size.width * .12f, size.height * .3f), Offset(size.width * .88f, size.height * .3f), stroke)
@@ -960,7 +966,8 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
 internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, probes: Map<String, ProbeResult>, tunnelLatencyMs: Long?, trace: TraceSnapshot,
     controller: DesktopController, onImport: (String?) -> Unit,
     localProxy: LocalProxyAccess?, tried: FailoverReport?, diagnostics: CoreDiagnostics,
-    onOpenRules: (String) -> Unit, onOpenJournal: () -> Unit, detail: String? = null) {
+    onOpenRules: (String) -> Unit, onOpenJournal: () -> Unit, detail: String? = null,
+    linkHold: app.lernet.engine.policy.LinkHold? = null) {
     val selected = saved.profiles.firstOrNull { it.id == saved.selectedProfileId }
     LaunchedEffect(selected?.id) { selected?.let { controller.probe(listOf(it.id)) } }
     var editProfile by remember { mutableStateOf<StoredProfile?>(null) }
@@ -989,6 +996,8 @@ internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boole
     val group = saved.groups.firstOrNull { it.id == selected.groupId }
     val (statusTitle, statusTone) = when {
         holding -> "Нет связи · VPN держим" to hold
+        // The same headline as the phone while LerNET holds a running tunnel (resilience hold states).
+        linkHold != null -> (detail?.takeIf { it.isNotBlank() } ?: app.lernet.engine.policy.LinkJudge.holdMessage(linkHold)) to hold
         tunnel.status == TunnelStatus.RUNNING -> "Подключено" to green
         active -> "Подключаемся…" to blue
         tunnel.status == TunnelStatus.FAILED -> "Не удалось подключиться" to desktopColors.error
@@ -1010,7 +1019,7 @@ internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boole
                         if (active) controller.disconnect() else controller.connect()
                     })
                 Text(statusTitle, style = MaterialTheme.typography.titleLarge, color = statusTone, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.testTag("home_state"))
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.testTag("home_state"))
                 // Holding: «Выключить VPN» with its explanation is in the attention zone, so no second action here.
                 if (!holding) Text(if (active) "Нажмите, чтобы отключить" else "Нажмите, чтобы подключить", color = muted, fontSize = 13.sp)
                 detail?.takeIf { it.isNotBlank() && it != statusTitle }?.let {
@@ -1630,11 +1639,17 @@ internal fun journalMatches(row: LiveConnection, appLabel: String, query: String
  * details in a side panel. Status, speed and the path are on the main screen and in the strip, not repeated here.
  */
 @Composable
-private fun Diagnostics(tunnel: TunnelSnapshot, diagnostics: CoreDiagnostics, history: List<LiveConnection>, controller: DesktopController) {
+internal fun Diagnostics(
+    tunnel: TunnelSnapshot,
+    diagnostics: CoreDiagnostics,
+    history: List<LiveConnection>,
+    controller: DesktopController,
+    initialSelectedId: String? = null,
+) {
     var display by rememberSaveable { mutableStateOf("requests") }
     var query by rememberSaveable { mutableStateOf("") }
     var kind by rememberSaveable { mutableStateOf(JournalKind.ALL) }
-    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedId by rememberSaveable { mutableStateOf(initialSelectedId) }
     val rows = remember(history, diagnostics.connections) {
         (diagnostics.connections + history).distinctBy { it.id }.sortedByDescending { it.lastSeenAt.takeIf { t -> t > 0 } ?: Long.MAX_VALUE }
     }

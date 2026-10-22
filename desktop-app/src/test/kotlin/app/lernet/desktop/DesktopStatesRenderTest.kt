@@ -2,6 +2,8 @@ package app.lernet.desktop
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -120,12 +122,14 @@ class DesktopStatesRenderTest {
             { it.copy(tried = report, healthMessage = "Нет связи", healthFailures = 2) })
     }
 
+    // While held, the live check through the VPN has no answer: no «работает · 128 мс» in these previews.
+    private val heldProbes = goodProbes + ("nl" to ProbeResult(latencyMs = 34, tunnelMessage = "Нет ответа"))
     private val jammed = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.RUNNING, "Подключено"), {
-        it.copy(probes = goodProbes, hold = app.lernet.engine.policy.LinkHold.JAMMED,
+        it.copy(probes = heldProbes, healthVerified = false, hold = app.lernet.engine.policy.LinkHold.JAMMED,
             healthMessage = app.lernet.engine.policy.LinkJudge.holdMessage(app.lernet.engine.policy.LinkHold.JAMMED))
     })
     private val silent = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.RUNNING, "Подключено"), {
-        it.copy(probes = goodProbes, hold = app.lernet.engine.policy.LinkHold.ALL_SILENT,
+        it.copy(probes = heldProbes, healthVerified = false, hold = app.lernet.engine.policy.LinkHold.ALL_SILENT,
             healthMessage = app.lernet.engine.policy.LinkJudge.holdMessage(app.lernet.engine.policy.LinkHold.ALL_SILENT, "1 мин 35 с"))
     })
     private val budgetWait = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.RUNNING, "Подключено"), {
@@ -182,6 +186,44 @@ class DesktopStatesRenderTest {
                 File("build/ux-states").apply { mkdirs() }.resolve("win-editor-fingerprint.png").writeBytes(bytes)
             }
             assertThat(texts(scene).joinToString("\n")).contains("Отпечаток TLS")
+        } finally { scene.close(); controller.close() }
+    }
+
+    /** The request journal with rows, a filter and the side panel (J7, J8): the empty journal says little. */
+    @Test
+    fun journalWithRows() {
+        val dir = Files.createTempDirectory("lernet-journal")
+        DesktopStore(dir).save(sample())
+        val controller = DesktopController(DesktopStore(dir))
+        val now = System.currentTimeMillis()
+        val history = listOf(
+            LiveConnection("1", "mail.corp.example", "10.0.0.1:443", "chrome.exe", "rule", listOf("proxy"),
+                12_000, 480_000, "", "tcp", lastSeenAt = now),
+            LiveConnection("2", "bank.example", "10.0.0.2:443", "msedge.exe", "rule", listOf("direct"), 3_000, 52_000, "", "tcp",
+                lastSeenAt = now - 4_000),
+            LiveConnection("3", "ads.example", "10.0.0.3:443", "Telegram.exe", "rule", listOf("block"), 0, 0, "", "tcp",
+                active = false, lastSeenAt = now - 9_000),
+            LiveConnection("4", "api.example", "10.0.0.4:443", "", "final", listOf("proxy"), 900, 4_100, "", "udp",
+                lastSeenAt = now - 15_000),
+        )
+        val scene = ImageComposeScene(1180, 760, Density(1f), content = theme {
+            Column(Modifier.fillMaxSize().padding(22.dp)) {
+                Diagnostics(TunnelSnapshot(TunnelStatus.RUNNING), CoreDiagnostics(connections = history), history, controller,
+                    initialSelectedId = "1")
+            }
+        })
+        try {
+            var t = 0L
+            repeat(3) { scene.render(t).close(); t += 500_000_000L }
+            scene.render(t).use { image ->
+                val bytes = requireNotNull(image.encodeToData(EncodedImageFormat.PNG)).use { it.bytes }
+                File("build/ux-states").apply { mkdirs() }.resolve("win-journal-rows.png").writeBytes(bytes)
+            }
+            val all = texts(scene)
+            assertThat(all).contains("mail.corp.example")
+            // «TCP» допустим только в карточке выбранной строки (как «Вид связи» на телефоне), не в самом списке.
+            assertThat(all).contains("Вид связи")
+            listOf("Exception", "null.").forEach { word -> assertThat(all.filter { word in it }).isEmpty() }
         } finally { scene.close(); controller.close() }
     }
 }

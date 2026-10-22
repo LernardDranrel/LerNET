@@ -95,6 +95,7 @@ object LinkJudge {
         LinkHold.JAMMED -> "Связь глушат · держим подключение"
         LinkHold.ALL_SILENT ->
             "Сеть есть, но серверы не отвечают · похоже, открыты только разрешённые сайты" +
-                (nextCheckLabel?.let { " · проверим снова через $it" } ?: " · проверяем изредка")
+                // A no-break space keeps «1 мин 35 с» on one line.
+                (nextCheckLabel?.let { " · проверим снова через ${it.replace(' ', '\u00A0')}" } ?: " · проверяем изредка")
     }
 }
