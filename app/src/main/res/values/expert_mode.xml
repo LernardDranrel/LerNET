@@ -15,7 +15,7 @@
     <string name="expert_stopping">Выключаем…</string>
     <string name="expert_failed">Ошибка</string>
     <string name="expert_stop">Остановить</string>
-    <string name="expert_switch_body">Текущее VPN-подключение будет остановлено. Экспертный режим направит трафик по сохранённой схеме; по умолчанию — напрямую.</string>
+    <string name="expert_switch_body">Текущее VPN-подключение будет остановлено. Эксперт направит трафик по сохранённой схеме; по умолчанию — напрямую.</string>
     <string name="expert_permission_denied">Android не разрешил создание VPN. Схема сохранена; туннель не включён.</string>
     <string name="expert_loading">Читаем настройки и конфиги…</string>
     <string name="expert_rule_disabled">Правило отключено вручную.</string>

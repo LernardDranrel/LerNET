@@ -52,7 +52,7 @@ internal class WindowsExpertPreflight(
         private val DESTINATIONS = listOf("1.1.1.1", "129.1.1.1", "2606:4700:4700::1111")
         private const val LIMITATION =
             "Это локальный снимок: сторонний VPN или его фильтры могут отсутствовать в перечне Windows. " +
-                "Перед включением можно открыть «Сеть устройства» для подробного анализа."
+                "Перед включением можно открыть «Анализ сети» для подробного анализа."
 
         internal fun unavailable(reason: String): ExpertPreflightResult = ExpertPreflightResult(
             System.currentTimeMillis(), "Предварительный анализ неполный", emptyList(), listOf(reason, LIMITATION), false,

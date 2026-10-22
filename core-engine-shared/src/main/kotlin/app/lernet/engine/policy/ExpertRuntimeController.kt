@@ -273,7 +273,7 @@ class ExpertRuntimeController(
                     phase = ExpertSessionPhase.STOPPED, desiredEnabled = false,
                     errors = errorsWithPersistence(listOf("Ядро не подтвердило постоянный TUN и независимые выходы.")),
                 )
-                reason(ExpertReasonLevel.ERROR, "Экспертный режим недоступен: перезапуск обычного VPN не сохраняет общий TUN.")
+                reason(ExpertReasonLevel.ERROR, "Эксперт недоступен: перезапуск обычного VPN не сохраняет общий TUN.")
                 return
             }
             val program = PolicyProgramCompiler.compile(session.saved, inventory, platform)
@@ -427,7 +427,7 @@ class ExpertRuntimeController(
                 mutableState.value = mutableState.value.copy(
                     phase = ExpertSessionPhase.STOPPED, tun = null, errors = errorsWithPersistence(emptyList()),
                 )
-                reason(ExpertReasonLevel.INFO, "Экспертный режим остановлен. Общий TUN освобождён.")
+                reason(ExpertReasonLevel.INFO, "Эксперт остановлен. Общий TUN освобождён.")
                 publish()
             }
         } catch (cancelled: CancellationException) {

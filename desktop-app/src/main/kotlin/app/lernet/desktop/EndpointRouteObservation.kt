@@ -21,7 +21,7 @@ internal data class EndpointRouteObservation(val detail: String, val warning: St
             val detail = "Путь Windows к $endpoint: «$alias», интерфейс $index, $description. Проверка без собственного TUN следует этому пути."
             val likelyTunnel = Regex("(?i)\\btun\\b|tunnel|tun2socks|\\btap\\b|tap-windows|wireguard|wintun|\\bvpn\\b").containsMatchIn(description)
             val warning = if (likelyTunnel && !WindowsRouteInspector.isLerNetInterface(alias))
-                "Последняя проверка маршрута: путь к серверу через «$alias». Проверка LerNET может зависеть от другого VPN. Подробнее — «Сеть устройства»." else ""
+                "Последняя проверка маршрута: путь к серверу через «$alias». Проверка LerNET может зависеть от другого VPN. Подробнее — «Анализ сети»." else ""
             return EndpointRouteObservation(detail, warning)
         }
     }

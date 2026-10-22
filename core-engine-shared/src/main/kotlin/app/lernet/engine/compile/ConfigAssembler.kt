@@ -98,7 +98,7 @@ object ConfigAssembler {
         if (ExternalExitProfiles.INTERFACE_FIELD in outboundObj) {
             return AssembledConfig("", outbound.tag, listOf(
                 "Подтверждённый интерфейс Windows используется только в экспертном режиме. " +
-                    "Выберите его целью правила в «Экспертном режиме»; обычный VPN этот выход не запускает.",
+                    "Выберите его целью правила в «Эксперте»; обычный VPN этот выход не запускает.",
             ))
         }
         val routingPlatform = if (platform == EnginePlatform.WINDOWS) RoutePlatform.WINDOWS else RoutePlatform.ANDROID

@@ -80,7 +80,7 @@ internal fun DesktopNetworkWindow(onClose: () -> Unit, useLerNetProxy: () -> Loc
             history = history.recorded(events)
         }
     }
-    Window(onCloseRequest = onClose, title = "Сеть устройства · LerNET", icon = painterResource("lernet-icon.png"),
+    Window(onCloseRequest = onClose, title = "Анализ сети · LerNET", icon = painterResource("lernet-icon.png"),
         state = rememberWindowState(size = DpSize(1220.dp, 840.dp))) {
         LaunchedEffect(window) { WindowsTitleBar.dark(window) }
         MaterialTheme(colorScheme = desktopColors, typography = desktopTypography,

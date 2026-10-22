@@ -136,7 +136,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
         simple.simpleModeRestriction = {
             if (guardEnabled || mutable.value.protection.systemGuardEnforced) {
                 "Системная защита экспертного режима блокирует обычный VPN. " +
-                    "Открой «Экспертный режим → Защита» и восстанови сеть перед переключением."
+                    "Открой «Эксперт → Защита и DNS» и восстанови сеть перед переключением."
             } else {
                 null
             }

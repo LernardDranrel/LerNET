@@ -1536,7 +1536,7 @@ class DesktopController(
             desiredConnection = false
             try {
                 check(tunnel.stop(waitForExit = true)) {
-                    "Предыдущее подключение ещё работает. Экспертный туннель не запущен."
+                    "Предыдущее подключение ещё работает. Эксперт не запущен."
                 }
                 // Expert owns the VPN now: the next sign-in must not bring the basic VPN back instead.
                 sessionMarks.vpnStopped()
@@ -1571,7 +1571,7 @@ class DesktopController(
                         previous.desiredSnapshot, ticket)
                     try {
                         tunnel.start(previous.launch)
-                        mutable.update { it.copy(message = "Экспертный режим не запущен · восстанавливаем предыдущее подключение") }
+                        mutable.update { it.copy(message = "Эксперт не запущен · восстанавливаем предыдущее подключение") }
                     } catch (error: Exception) {
                         desiredConnection = false
                         reportConnectionError(app.lernet.engine.text.UserText.withReason("Не удалось восстановить предыдущее подключение", error))
