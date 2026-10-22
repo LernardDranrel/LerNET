@@ -104,16 +104,15 @@ internal fun DesktopUpdateCard() {
     val monitor = remember { DesktopUpdates.monitor }
     val state by monitor.state.collectAsState()
     val scope = rememberCoroutineScope()
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        // Same heading as the other settings cards.
-        SettingHeading("ВЕРСИЯ", "Обновления LerNET", state.message)
+    // The phone's two rows: the daily check as a switch, then the status with «Проверить сейчас».
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SettingsSwitch(app.lernet.engine.text.SettingsWords.UPDATES, "", state.automatic, monitor::automatic)
         Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Checkbox(state.automatic, onCheckedChange = monitor::automatic)
-            Text("Проверять при запуске, не чаще раза в сутки", fontSize = 13.sp)
+            Text(state.message, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            TextButton(onClick = { scope.launch { monitor.check(manual = true) } }, enabled = !state.checking) {
+                Text(app.lernet.engine.text.SettingsWords.UPDATES_NOW)
+            }
         }
-        Text("Запрос идёт на GitHub. Конфиги и данные диагностики не отправляются.", color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 12.sp)
-        OutlinedButton(onClick = { scope.launch { monitor.check(manual = true) } }, enabled = !state.checking) { Text("Проверить обновления") }
         state.release?.let { DesktopUpdateActions(it) }
     }
 }

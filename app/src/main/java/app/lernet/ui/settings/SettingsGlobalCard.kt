@@ -47,7 +47,6 @@ internal fun DnsDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) 
     PanelCard {
         Text(stringResource(R.string.settings_dns_section), style = MaterialTheme.typography.titleMedium)
         SettingHelp(stringResource(R.string.settings_dns_explained))
-        SettingHelp(stringResource(R.string.settings_dns_default_help))
         OutlinedTextField(
             value = draft,
             onValueChange = { draft = it.trim().take(45) },
@@ -172,6 +171,7 @@ internal fun JournalDefaultsCard(state: SettingsUiState, onIntent: (SettingsInte
             enabled = draft.toIntOrNull() != null && draft.toIntOrNull() != saved,
             modifier = Modifier.fillMaxWidth(),
         ) { Text(stringResource(R.string.apply)) }
+        LogLevelRows(state, onIntent)
     }
     val pending = state.pendingJournalMb
     if (pending != null) {

@@ -28,7 +28,7 @@ internal object SecurityTexts {
             "Если оставить поля пустыми, при каждом подключении создаются новые случайные логин и пароль."
     const val PROXY_RULES =
         "До 64 символов, латиница, цифры и знаки, без пробелов и двоеточия. Действует со следующего подключения."
-    const val PROXY_ADDRESS = "Адрес"
+    const val PROXY_ADDRESS = "Адрес прокси"
     const val PROXY_LOGIN = "Логин"
     const val PROXY_PASSWORD = "Пароль"
     const val COPY = "Копировать"

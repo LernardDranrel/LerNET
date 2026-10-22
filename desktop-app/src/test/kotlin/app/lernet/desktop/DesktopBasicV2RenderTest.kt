@@ -1,5 +1,6 @@
 package app.lernet.desktop
 
+import app.lernet.engine.text.SettingsWords
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -41,11 +42,11 @@ class DesktopBasicV2RenderTest {
             }
             click(scene, "Настройки")
             screenshot(scene, "windows-basic-v2-settings")
-            assertThat(nodes(scene).any { "MTU, байт" in texts(it) }).isFalse()
+            assertThat(nodes(scene).any { SettingsWords.MTU_TITLE in texts(it) }).isFalse()
             // S1: the advanced knobs are a separate «Для опытных» page.
             click(scene, "Для опытных")
             screenshot(scene, "windows-basic-v2-settings-advanced")
-            assertThat(nodes(scene).any { "MTU, байт" in texts(it) }).isTrue()
+            assertThat(nodes(scene).any { SettingsWords.MTU_TITLE in texts(it) }).isTrue()
         } finally {
             scene.close()
             controller.close()

@@ -69,6 +69,8 @@ import app.lernet.ui.status.silenceBanner
 import app.lernet.ui.status.silenceTitle
 import app.lernet.ui.theme.LerNetDimens
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -194,7 +196,9 @@ fun DiagScreen(
                 )
             }
             item {
-                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Scrolls sideways on a narrow phone instead of breaking «Без ответа» into letters.
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     JournalFilter.entries.forEach { option ->
                         FilterChip(filter == option, { filter = option }, label = { Text(stringResource(option.label)) },
                             modifier = Modifier.testTag("journal_filter_${option.name.lowercase()}"))
@@ -300,8 +304,7 @@ private fun JournalDetails(row: LiveConn, title: String, ping: String?, onPing: 
         val transport = listOfNotNull(model.transport, model.ipVersion?.let { "IPv$it" }).joinToString(" · ")
         if (transport.isNotEmpty()) DetailLine(stringResource(R.string.journal_kind), transport)
         model.protocol?.let { DetailLine(stringResource(R.string.journal_app_protocol), it) }
-        if (model.routeChain.isNotEmpty()) Text(stringResource(R.string.diag_route_chain, model.routeChain.joinToString(" → ")),
-            style = MaterialTheme.typography.bodySmall, color = muted)
+        if (model.routeChain.isNotEmpty()) DetailLine(stringResource(R.string.journal_chain), model.routeChain.joinToString(" → "))
         model.uid?.let { Text("uid $it", style = MaterialTheme.typography.bodySmall, color = muted) }
         model.pid?.let { PidLine(it) }
         if (model.hasCapturedContent) {

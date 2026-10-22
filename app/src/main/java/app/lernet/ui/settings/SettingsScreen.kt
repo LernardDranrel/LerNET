@@ -146,8 +146,8 @@ private fun SettingsList(
                 )
             }
             Text(
-                stringResource(R.string.settings_mode_profile_note) +
-                    if (state.sessionActive) " " + stringResource(R.string.settings_mode_next_connection) else "",
+                // Same two sentences as on Windows, whether or not a session is running.
+                stringResource(R.string.settings_mode_profile_note) + " " + stringResource(R.string.settings_mode_next_connection),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (state.settings.mode == RunMode.PROXY) {
@@ -212,6 +212,7 @@ private fun ExpertsPage(state: SettingsUiState, onIntent: (SettingsIntent) -> Un
         MtuDefaultsCard(state, onIntent)
         TlsHandshakeCard(state, onIntent)
         JournalDefaultsCard(state, onIntent)
+        // Only the phone has these numbers today (a question for the owner); they come after the shared cards.
         PanelCard {
             Text(stringResource(R.string.settings_connection), style = MaterialTheme.typography.titleMedium)
             SettingNumberRow(stringResource(R.string.max_attempts), reconnect.maxAttempts, stringResource(R.string.settings_attempts_help)) {
@@ -224,21 +225,30 @@ private fun ExpertsPage(state: SettingsUiState, onIntent: (SettingsIntent) -> Un
                 onIntent(SettingsIntent.SetBackoffCapSeconds(it))
             }
         }
-        PanelCard {
-            Text(stringResource(R.string.log_level), style = MaterialTheme.typography.titleMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("warn" to R.string.log_warn, "info" to R.string.log_info, "debug" to R.string.log_debug).forEach { (level, label) ->
-                    FilterChip(
-                        selected = state.settings.logLevel == level,
-                        onClick = { onIntent(SettingsIntent.SetLogLevel(level)) },
-                        label = { Text(stringResource(label)) },
-                        modifier = Modifier.lernetButton(),
-                    )
-                }
-            }
-            Text(stringResource(R.string.log_redact_hint), color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** Inside the «Журнал» card, as on Windows: how detailed, what each level means, what is cut out. */
+@Composable
+internal fun LogLevelRows(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
+    Text(stringResource(R.string.log_level), style = MaterialTheme.typography.labelLarge)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf("warn" to R.string.log_warn, "info" to R.string.log_info, "debug" to R.string.log_debug).forEach { (level, label) ->
+            FilterChip(
+                selected = state.settings.logLevel == level,
+                onClick = { onIntent(SettingsIntent.SetLogLevel(level)) },
+                label = { Text(stringResource(label)) },
+                modifier = Modifier.lernetButton(),
+            )
         }
     }
+    Text(stringResource(when (state.settings.logLevel) {
+        "info" -> R.string.log_info_help
+        "debug" -> R.string.log_debug_help
+        else -> R.string.log_warn_help
+    }), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(stringResource(R.string.log_redact_hint), style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable
@@ -289,6 +299,8 @@ private fun BootRestoreRow() {
     ) {
         Column(Modifier.weight(1f)) {
             Text(stringResource(R.string.settings_boot_row), style = MaterialTheme.typography.bodyLarge)
+            Text(stringResource(R.string.settings_boot_hint), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Switch(checked = enabled, onCheckedChange = null, modifier = Modifier.testTag("settings_boot_restore"))
     }

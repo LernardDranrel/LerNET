@@ -1,5 +1,6 @@
 package app.lernet.desktop
 
+import app.lernet.engine.text.SettingsWords
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -118,7 +119,7 @@ class DesktopHomeV3RenderTest {
         try {
             shot(scene, "windows-v3-settings-proxy")
             val all = texts(scene)
-            listOf("Режим работы", "Локальный прокси", "127.0.0.1:2080", "lernet-a1b2", "Копировать").forEach { assertThat(all).contains(it) }
+            listOf(SettingsWords.MODE, SettingsWords.MODE_PROXY, "127.0.0.1:2080", "lernet-a1b2", "Копировать").forEach { assertThat(all).contains(it) }
         } finally { scene.close(); controller.close() }
     }
 

@@ -97,7 +97,7 @@
     <string name="settings_boot_row">Включать VPN после перезагрузки</string>
     <string name="settings_dns_row">DNS (адреса сайтов)</string>
     <string name="settings_dns_tunnel_short">через VPN</string>
-    <string name="settings_dns_system_short">сеть устройства</string>
+    <string name="settings_dns_system_short">напрямую</string>
     <string name="settings_dns_profile_short">из конфига</string>
     <string name="settings_leaks_row">Блокировать соединения без VPN</string>
     <string name="settings_leaks_value">в настройках Android</string>
@@ -141,7 +141,7 @@
     <string name="journal_copy">Скопировать журнал</string>
     <string name="journal_share">Отправить журнал</string>
     <string name="journal_save_record">Сохранить запись</string>
-    <string name="journal_hint">Нажмите строку — подробности в нижнем листе. В ⋮: скопировать, отправить журнал, сохранить запись, анализ сети.</string>
+    <string name="journal_hint">Нажмите строку — откроются подробности. В ⋮: скопировать, отправить журнал, сохранить запись, анализ сети.</string>
     <string name="journal_nothing_found">Ничего не найдено. Измените поиск или фильтр.</string>
     <string name="journal_details">Подробнее</string>
     <string name="journal_check">Проверить отклик адреса</string>

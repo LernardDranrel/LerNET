@@ -206,11 +206,11 @@
     <string name="failover_pick">Папка для переключения</string>
     <string name="failover_members">%1$d в папке</string>
     <string name="no_groups">Нет папок конфигов. Создайте папку в меню конфигов.</string>
-    <string name="log_level">Уровень лога</string>
+    <string name="log_level">Подробность журнала</string>
     <string name="log_warn">Предупреждения</string>
     <string name="log_info">Инфо</string>
     <string name="log_debug">Отладка</string>
-    <string name="log_redact_hint">Секреты (UUID, ключи, vless://) вырезаются до записи в файл и системный журнал. Отчёт никуда сам не уходит.</string>
+    <string name="log_redact_hint">Ключи, пароли и ссылки на серверы вырезаются до записи в журнал. Журнал никуда сам не уходит.</string>
     <string name="settings_logs">Журнал</string>
     <string name="share_logs">Отправить журнал</string>
     <string name="share_last_log">Отправить последний журнал</string>
@@ -255,8 +255,8 @@
     <string name="diag_copy_text">Копировать текст</string>
     <string name="diag_dns_ok">DNS работает</string>
     <string name="diag_dns_dead">DNS не отвечает</string>
-    <string name="diag_need_vpn">Включите VPN — здесь появятся соединения</string>
-    <string name="diag_empty">Соединений пока нет</string>
+    <string name="diag_need_vpn">Включите VPN — здесь появятся запросы.</string>
+    <string name="diag_empty">Запросов пока не было.</string>
     <string name="diag_hint">Нажмите строку, чтобы проверить отклик адреса.</string>
     <string name="diag_ping">Отклик: %1$s</string>
     <string name="diag_ping_fail">не отвечает</string>
@@ -336,7 +336,7 @@
     <string name="settings_direct_dns">Резервный DNS по умолчанию</string>
     <string name="settings_direct_dns_help">IPv4-адрес DNS в исходной сети. Подставляется, когда конфиг не задаёт прямой DNS.</string>
     <string name="settings_xmux_default">XHTTP · соединения с сервером</string>
-    <string name="settings_xmux_default_help">Подставляется только если серверный конфиг не задаёт xmux.</string>
+    <string name="settings_xmux_default_help">Подставляется, только если конфиг сервера не задаёт своё.</string>
     <string name="settings_mtu_help">Наибольший размер пакета в VPN. Меняйте, только если сайты открываются частично.</string>
     <string name="import_guess_vless">ссылка VLESS</string>
     <string name="import_guess_json">JSON sing-box</string>
@@ -432,7 +432,7 @@
     <string name="diag_uid">Приложение (uid %1$d)</string>
     <string name="diag_pid">pid %1$s</string>
     <string name="diag_status_open">идёт</string>
-    <string name="diag_status_ok">ок</string>
+    <string name="diag_status_ok">завершено</string>
     <string name="diag_status_silent">нет ответа</string>
     <string name="diag_row_path">%1$s → %2$s → %3$s → %4$s</string>
     <string name="diag_row_path_no_rule">%1$s → %2$s → %3$s</string>
@@ -456,7 +456,7 @@
     <string name="else_err_extra">На уровне может быть только одно «Иначе».</string>
     <string name="else_err_blank">У правила нет условия. Пустое условие остаётся только у «Иначе».</string>
     <string name="else_err_pipe_fork">Выберите отдельное соединение или вложенные правила.</string>
-    <string name="settings_journal_help">Обрезка локального журнала. Не влияет на DNS или туннель.</string>
+    <string name="settings_journal_help">Сколько места может занять журнал на устройстве. На работу VPN не влияет.</string>
     <string name="import_field_uuid">UUID</string>
     <string name="import_field_server">Сервер</string>
     <string name="import_field_link">Ссылка</string>
@@ -505,7 +505,7 @@
     <string name="diag_route_chain">Цепочка выходов: %1$s</string>
     <string name="diag_payload_show">Показать содержимое</string>
     <string name="diag_payload_hide">Скрыть содержимое</string>
-    <string name="diag_payload_encrypted">Содержимое запроса не доступно: TLS/QUIC шифрует путь, заголовки и тело. Здесь видны только метаданные соединения.</string>
+    <string name="diag_payload_encrypted">Содержимое зашифрованных соединений не видно — ни LerNET, ни кому-либо по пути.</string>
     <string name="diag_payload_unavailable">Содержимое запроса не сохраняется.</string>
     <string name="diag_body_truncated">Показаны первые 16 384 символа тела.</string>
     <string name="diag_snap_protocol">Протокол приложения: %1$s</string>
@@ -516,7 +516,7 @@
     <string name="diag_snap_path">HTTP-запрос: %1$s</string>
     <string name="diag_snap_headers">Заголовки: %1$s</string>
     <string name="diag_snap_body">Тело: %1$s</string>
-    <string name="settings_journal">Размер журнала, МБ</string>
+    <string name="settings_journal">Журнал</string>
     <string name="settings_journal_confirm_title">Изменить предел журнала</string>
     <string name="settings_journal_confirm_body">Журнал будет занимать не больше %1$d МБ. Если сейчас он больше, самые старые записи удалятся.</string>
     <string name="group_grip">Перетащить</string>
@@ -525,10 +525,15 @@
     <string name="settings_tls_title">Рукопожатие TLS</string>
     <string name="settings_tls_help">Для сетей, где фильтр режет или теряет первое сообщение защищённого соединения. Действует для узлов VLESS, VMess, Trojan с TLS или Reality. Значения, записанные в самом конфиге, важнее. Вступит в силу при следующем подключении.</string>
     <string name="settings_tls_fragment">Дробить первое сообщение TLS</string>
-    <string name="settings_tls_fragment_help">Разбивает приветствие на несколько записей TLS (record_fragment). Помогает, если соединение рвётся или молчит сразу после начала рукопожатия. Немного замедляет подключение. По умолчанию выключено.</string>
+    <string name="settings_tls_fragment_help">Разбивает приветствие на несколько частей. Помогает, если соединение рвётся или молчит сразу после начала рукопожатия. Немного замедляет подключение. По умолчанию выключено.</string>
     <string name="settings_reality_key_share">Обмен ключами Reality</string>
     <string name="settings_key_share_auto">Как в отпечатке</string>
     <string name="settings_key_share_hybrid">Гибридный</string>
     <string name="settings_key_share_classical">Короткий</string>
     <string name="settings_key_share_help">«Короткий» убирает большой постквантовый ключ из приветствия — оно меньше и реже теряется. Работает только с серверами Xray старше 26.9.8; с новыми серверами связь не установится.</string>
+    <string name="settings_boot_hint">Если VPN был включён, LerNET подключит его снова. Кнопка «Отключить» отменяет это до следующего подключения.</string>
+    <string name="log_warn_help">По умолчанию. Только предупреждения и ошибки: в журнале меньше сведений о том, куда вы подключаетесь.</string>
+    <string name="log_info_help">Основные события, предупреждения и ошибки. В журнале больше подробностей о ваших подключениях.</string>
+    <string name="log_debug_help">Подробная запись для поиска ошибки. Сведений о подключениях больше всего.</string>
+    <string name="journal_chain">Цепочка выходов</string>
 </resources>

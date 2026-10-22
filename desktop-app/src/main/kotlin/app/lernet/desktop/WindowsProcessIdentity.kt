@@ -44,7 +44,7 @@ internal object WindowsProcessIdentity {
     }
 
     fun resolve(pathOrName: String): ProcessIdentity {
-        if (pathOrName.isBlank()) return ProcessIdentity("Процесс не определён ядром", null)
+        if (pathOrName.isBlank()) return ProcessIdentity(app.lernet.engine.text.JournalWords.UNKNOWN_APP, null)
         return cache.computeIfAbsent(pathOrName) { source -> resolveUncached(source) }
     }
 

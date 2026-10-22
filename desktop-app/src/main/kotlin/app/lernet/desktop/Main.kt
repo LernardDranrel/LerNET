@@ -3,6 +3,8 @@
 package app.lernet.desktop
 
 import app.lernet.engine.text.HomeWords
+import app.lernet.engine.text.JournalWords
+import app.lernet.engine.text.SettingsWords
 import app.lernet.config.net.LocalProxyAccess
 
 import app.lernet.engine.policy.ExpertVpnHandover
@@ -126,6 +128,9 @@ internal val desktopColors = darkColorScheme(
     primary = blue, onPrimary = background,
     primaryContainer = Color(0xFF293B62), onPrimaryContainer = Color(0xFFE1E8FF),
     secondary = green, secondaryContainer = Color(0xFF23473F), onSecondaryContainer = Color(0xFFD2F8EA),
+    // The phone's LerNetWarn: notes like «переподключите VPN» and the «напрямую» badge are amber on both
+    // (the Material default here was pink).
+    tertiary = Color(0xFFF5C16C), onTertiary = background,
     background = background, onBackground = Color(0xFFF5F7FB),
     surface = Color(0xFF101724), onSurface = Color(0xFFECF0F8),
     surfaceVariant = panel, onSurfaceVariant = muted,
@@ -1640,7 +1645,9 @@ private fun ProbeMiniMetric(label: String, status: String, value: String, health
     }
 }
 /** Audit J7: the same filters as on the phone. */
-internal enum class JournalKind(val label: String) { ALL("Все"), VPN("Через VPN"), DIRECT("Напрямую"), SILENT("Без ответа") }
+internal enum class JournalKind(val label: String) {
+    ALL(JournalWords.ALL), VPN(JournalWords.VPN), DIRECT(JournalWords.DIRECT), SILENT(JournalWords.SILENT)
+}
 
 internal enum class JournalRoute { VPN, DIRECT, BLOCK }
 
@@ -1699,7 +1706,7 @@ internal fun Diagnostics(
                     java.awt.Toolkit.getDefaultToolkit().systemClipboard
                         .setContents(java.awt.datatransfer.StringSelection(controller.journalForClipboard()), null)
                     controller.showMessage("Последние строки журнала скопированы")
-                }) { Text("Скопировать") }
+                }) { Text("Скопировать журнал") }
                 TextButton(onClick = {
                     val dialog = FileDialog(null as Frame?, "Сохранить журнал", FileDialog.SAVE)
                     dialog.file = "LerNET-журнал-" + java.time.LocalDate.now() + ".txt"
@@ -1724,7 +1731,7 @@ internal fun Diagnostics(
             return@Column
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text("Приложение или сайт") },
+            OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text(JournalWords.SEARCH) },
                 modifier = Modifier.width(300.dp).testTag("journal_search"))
             JournalKind.entries.forEach { option ->
                 FilterChip(kind == option, onClick = { kind = option }, label = { Text(option.label) },
@@ -1738,9 +1745,9 @@ internal fun Diagnostics(
             LazyColumn(Modifier.weight(1f).fillMaxHeight().testTag("journal_list"), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 if (visible.isEmpty()) item {
                     Text(when {
-                        rows.isEmpty() && tunnel.status != TunnelStatus.RUNNING -> "Подключите конфиг, чтобы видеть запросы."
-                        rows.isEmpty() -> "Запросов пока не было."
-                        else -> "Ничего не найдено. Измените поиск или фильтр."
+                        rows.isEmpty() && tunnel.status != TunnelStatus.RUNNING -> JournalWords.NEED_VPN
+                        rows.isEmpty() -> JournalWords.EMPTY
+                        else -> JournalWords.NOTHING_FOUND
                     }, color = muted, modifier = Modifier.padding(12.dp))
                 }
                 items(visible, key = { it.id }) { row ->
@@ -1754,9 +1761,9 @@ internal fun Diagnostics(
                                 Spacer(Modifier.width(10.dp))
                             }
                             Column(Modifier.weight(1f)) {
-                                Text(process.label.ifBlank { "Системный процесс" }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(process.label.ifBlank { JournalWords.SYSTEM }, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(listOfNotNull(row.host.ifBlank { row.destination },
-                                    if (journalSilent(row)) "нет ответа" else row.rule.takeIf { it.isNotBlank() }?.let { "правило «$it»" })
+                                    if (journalSilent(row)) JournalWords.NO_REPLY else row.rule.takeIf { it.isNotBlank() }?.let(JournalWords::rule))
                                     .joinToString(" · "), color = muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             JournalBadge(journalRoute(row))
@@ -1773,9 +1780,10 @@ internal fun Diagnostics(
 @Composable
 private fun JournalBadge(route: JournalRoute) {
     val (label, tone) = when (route) {
-        JournalRoute.VPN -> "VPN" to blue
-        JournalRoute.DIRECT -> "напрямую" to green
-        JournalRoute.BLOCK -> "запрет" to desktopColors.error
+        // The phone's colours: VPN blue, direct amber (green means «works» elsewhere), block red.
+        JournalRoute.VPN -> JournalWords.BADGE_VPN to blue
+        JournalRoute.DIRECT -> JournalWords.BADGE_DIRECT to desktopColors.tertiary
+        JournalRoute.BLOCK -> JournalWords.BADGE_BLOCK to desktopColors.error
     }
     Text(label, color = tone, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
         modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(tone.copy(alpha = .14f)).padding(horizontal = 8.dp, vertical = 3.dp))
@@ -1787,30 +1795,30 @@ private fun JournalDetails(row: LiveConnection, onClose: () -> Unit) {
     val process = remember(row.process) { WindowsProcessIdentity.resolve(row.process) }
     Panel(Modifier.width(360.dp).fillMaxHeight().testTag("journal_details")) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(process.label.ifBlank { "Системный процесс" }, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+            Text(process.label.ifBlank { JournalWords.SYSTEM }, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
             TextButton(onClick = onClose) { Text("Закрыть") }
         }
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            JournalDetail("Куда", row.destination)
-            if (row.host.isNotBlank()) JournalDetail("Сайт", row.host)
-            JournalDetail("Как", when (journalRoute(row)) {
-                JournalRoute.VPN -> "через VPN"
-                JournalRoute.DIRECT -> "напрямую, без VPN"
-                JournalRoute.BLOCK -> "запрет"
+            JournalDetail(JournalWords.WHERE, row.destination)
+            if (row.host.isNotBlank()) JournalDetail(JournalWords.SITE, row.host)
+            JournalDetail(JournalWords.HOW, when (journalRoute(row)) {
+                JournalRoute.VPN -> JournalWords.VIA_VPN
+                JournalRoute.DIRECT -> JournalWords.VIA_DIRECT
+                JournalRoute.BLOCK -> JournalWords.BADGE_BLOCK
             })
-            JournalDetail("Правило", row.rule.ifBlank { "ядро не сообщило" })
-            JournalDetail("Состояние", when {
-                row.active -> "открыто"
-                journalSilent(row) -> "нет ответа"
-                else -> "завершено"
+            JournalDetail(JournalWords.RULE, row.rule.ifBlank { JournalWords.RULE_UNKNOWN })
+            JournalDetail(JournalWords.STATE, when {
+                row.active -> JournalWords.STATE_OPEN
+                journalSilent(row) -> JournalWords.STATE_SILENT
+                else -> JournalWords.STATE_DONE
             })
-            JournalDetail("Передано", "↑ ${bytesText(row.upload)} · ↓ ${bytesText(row.download)}")
-            if (row.network.isNotBlank()) JournalDetail("Вид связи", row.network.uppercase())
-            if (row.chains.isNotEmpty()) JournalDetail("Цепочка", row.chains.joinToString(" → "))
+            JournalDetail(JournalWords.BYTES, "↑ ${bytesText(row.upload)} · ↓ ${bytesText(row.download)}")
+            if (row.network.isNotBlank()) JournalDetail(JournalWords.KIND, row.network.uppercase())
+            if (row.chains.isNotEmpty()) JournalDetail(JournalWords.CHAIN, row.chains.joinToString(" → "))
             process.parent?.let { JournalDetail("Запущено из", it) }
             if (row.process.isNotBlank()) JournalDetail("Путь", row.process)
-            Text("Содержимое зашифрованных соединений не видно — ни LerNET, ни кому-либо по пути.", color = muted, fontSize = 12.sp)
+            Text(JournalWords.ENCRYPTED, color = muted, fontSize = 12.sp)
         }
     }
 }
@@ -2021,9 +2029,10 @@ internal fun Settings(saved: StoredState, controller: DesktopController, onReque
         ProgramsThroughVpn(saved, controller) { appsPage = false }
         return
     }
+    // The phone's rows and words (SettingsWords); only leak protection, rights and the journal file are Windows' own.
     Column(Modifier.fillMaxWidth().widthIn(max = 860.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SettingsGroupTitle("Подключение")
+        SettingsGroupTitle(SettingsWords.GROUP_CONNECTION)
         Panel(Modifier.testTag("settings_run_mode")) {
             SettingsRunMode(saved, controller, onRequestElevation, localProxy, locked)
             // S2: the proxy password belongs to the proxy mode and is shown only there.
@@ -2031,37 +2040,36 @@ internal fun Settings(saved: StoredState, controller: DesktopController, onReque
                 HorizontalDivider(color = desktopColors.outlineVariant)
                 ProxyPasswordSettings(saved, controller)
             }
-        }
-        Panel {
-            SecurityToggle("Запускать при входе в систему",
-                "LerNET запустится в трее и, если VPN был включён, сам подключит его снова. Кнопка «Отключить» отменяет это до следующего подключения.",
-                saved.autostart, controller::setAutostart)
             HorizontalDivider(color = desktopColors.outlineVariant)
-            SettingsLink("Программы через VPN",
-                if (saved.bypassApps.isEmpty()) "Все программы идут через VPN" else "Все, кроме ${saved.bypassApps.size}: " + saved.bypassApps.take(3).joinToString() +
-                    if (saved.bypassApps.size > 3) "…" else "",
-                onClick = { onOpenApps?.invoke() ?: run { appsPage = true } })
+            SettingsLink(SettingsWords.APPS, "",
+                value = if (saved.bypassApps.isEmpty()) SettingsWords.APPS_ALL else SettingsWords.appsSome(saved.bypassApps.size),
+                tag = "settings_apps", onClick = { onOpenApps?.invoke() ?: run { appsPage = true } })
             HorizontalDivider(color = desktopColors.outlineVariant)
-            Text("DNS (адреса сайтов)", fontWeight = FontWeight.SemiBold)
-            SegmentedChoice(listOf("TUNNEL" to "Через VPN", "UNDERLAY" to "Напрямую", "PROFILE" to "Из конфига"), saved.defaultDnsPolicy) {
+            SettingsSwitch(SettingsWords.BOOT, SettingsWords.BOOT_HINT, saved.autostart, controller::setAutostart)
+            HorizontalDivider(color = desktopColors.outlineVariant)
+            Text(SettingsWords.DNS, fontWeight = FontWeight.SemiBold)
+            SegmentedChoice(listOf("TUNNEL" to SettingsWords.DNS_TUNNEL_SHORT, "UNDERLAY" to SettingsWords.DNS_DIRECT_SHORT,
+                "PROFILE" to SettingsWords.DNS_PROFILE_SHORT).map { (key, word) -> key to word.replaceFirstChar(Char::uppercaseChar) },
+                saved.defaultDnsPolicy) {
                 controller.setDefaultDnsPolicy(DnsPolicy.valueOf(it))
             }
             Text(when (saved.defaultDnsPolicy) {
-                "PROFILE" -> "Если в конфиге есть DNS, используются его серверы и правила. Если нет — DNS-сервер из «Для опытных»."
-                "TUNNEL" -> "По умолчанию. Адреса сайтов запрашиваются через VPN: сеть не видит, какие сайты вы открываете."
-                else -> "Адреса сайтов запрашиваются напрямую, мимо VPN: сеть и провайдер видят имена сайтов."
-            }, color = muted, fontSize = 12.sp, lineHeight = 18.sp)
+                "PROFILE" -> SettingsWords.DNS_PROFILE
+                "UNDERLAY" -> SettingsWords.DNS_DIRECT
+                else -> SettingsWords.DNS_TUNNEL
+            } + ". " + SettingsWords.DNS_DEFAULT_HELP, color = muted, fontSize = 12.sp, lineHeight = 18.sp)
         }
-        SettingsGroupTitle("Защита от утечек")
+        SettingsGroupTitle(SettingsWords.GROUP_LEAKS)
         Panel {
             Text(SecurityTexts.PANEL_BODY, color = muted, fontSize = 12.sp)
             SecurityToggle(SecurityTexts.CRASH_GUARD, SecurityTexts.CRASH_GUARD_HINT, saved.crashGuard, controller::setCrashGuard)
             SecurityToggle(SecurityTexts.STRICT_ROUTE, SecurityTexts.STRICT_ROUTE_HINT, saved.strictRoute, controller::setStrictRoute)
             Text(SecurityTexts.APPLIES_ON_RECONNECT, color = muted, fontSize = 12.sp)
         }
-        SettingsGroupTitle("Помощь")
+        SettingsGroupTitle(SettingsWords.GROUP_HELP)
         Panel {
-            SettingsLink("Сохранить журнал", "Файл для разработчика; ключи и пароли из него убраны", onClick = {
+            // Android hands the journal to another app; Windows saves it as a file.
+            SettingsLink("Сохранить журнал для разработчика", "Ключи и пароли из него убраны", onClick = {
                 val dialog = FileDialog(null as Frame?, "Сохранить журнал", FileDialog.SAVE)
                 dialog.file = "LerNET-журнал-" + java.time.LocalDate.now() + ".txt"
                 dialog.isVisible = true
@@ -2070,25 +2078,26 @@ internal fun Settings(saved: StoredState, controller: DesktopController, onReque
             })
             if (onOpenNetwork != null) {
                 HorizontalDivider(color = desktopColors.outlineVariant)
-                SettingsLink("Анализ сети", "Адаптеры, DNS и пути Windows в одной таблице", onOpenNetwork)
+                SettingsLink(SettingsWords.NETWORK, "", tag = "settings_network", onClick = onOpenNetwork)
             }
         }
-        SettingsGroupTitle("Приложение")
-        Panel { DesktopUpdateCard() }
-        Panel {
+        SettingsGroupTitle(SettingsWords.GROUP_APP)
+        Panel(Modifier.testTag("settings_advanced")) {
+            DesktopUpdateCard()
+            HorizontalDivider(color = desktopColors.outlineVariant)
+            SettingsLink(SettingsWords.EXPERTS, "DNS-сервер, MTU, соединения XHTTP, TLS, журнал, адрес проверки",
+                tag = "settings_advanced_toggle", onClick = { expertPage = true })
+            HorizontalDivider(color = desktopColors.outlineVariant)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("LerNET $APP_VERSION · ядро sing-box-lx " + WindowsBoxProcess.PINNED_CORE_VERSION, fontWeight = FontWeight.SemiBold)
-                    Text("Встроенное проверенное ядро, одинаковое на Android и Windows.", color = muted, fontSize = 12.sp)
+                    Text(SettingsWords.VERSION + " " + APP_VERSION)
+                    Text(SettingsWords.CORE + " sing-box-lx " + WindowsBoxProcess.PINNED_CORE_VERSION, color = muted, fontSize = 12.sp)
                 }
                 // S8: an explicit copy button instead of a hidden gesture.
                 TextButton(onClick = { copyToClipboard("LerNET $APP_VERSION · sing-box-lx ${WindowsBoxProcess.PINNED_CORE_VERSION}") }) {
-                    Text("Скопировать")
+                    Text(SettingsWords.COPY)
                 }
             }
-        }
-        Panel(Modifier.testTag("settings_advanced")) {
-            SettingsLink("Для опытных", "DNS, MTU, соединения XHTTP, рукопожатие TLS, адрес проверки, журнал", onClick = { expertPage = true })
         }
     }
 }
@@ -2099,14 +2108,28 @@ private fun SettingsGroupTitle(title: String) {
 }
 
 @Composable
-private fun SettingsLink(title: String, subtitle: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(vertical = 6.dp),
+private fun SettingsLink(title: String, subtitle: String, value: String = "", tag: String? = null, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick)
+        .then(if (tag != null) Modifier.testTag(tag) else Modifier).padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = muted, fontSize = 12.sp)
+            if (subtitle.isNotBlank()) Text(subtitle, color = muted, fontSize = 12.sp)
         }
-        Text("›", color = muted, fontSize = 20.sp)
+        Text(if (value.isEmpty()) "›" else "$value ›", color = muted, fontSize = if (value.isEmpty()) 20.sp else 14.sp)
+    }
+}
+
+/** A row with a switch, as the phone's «Включать VPN после перезагрузки». */
+@Composable
+internal fun SettingsSwitch(title: String, hint: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { onChange(!checked) }.padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.SemiBold)
+            if (hint.isNotBlank()) Text(hint, color = muted, fontSize = 12.sp, lineHeight = 18.sp)
+        }
+        Switch(checked, onCheckedChange = onChange)
     }
 }
 
@@ -2135,22 +2158,20 @@ private fun ProgramsThroughVpn(saved: StoredState, controller: DesktopController
     }
     Column(Modifier.fillMaxWidth().widthIn(max = 860.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("← Настройки") }
-            Text("Программы через VPN", style = MaterialTheme.typography.titleLarge)
+            TextButton(onClick = onBack) { Text("← " + SettingsWords.TITLE) }
+            Text(SettingsWords.APPS, style = MaterialTheme.typography.titleLarge)
         }
-        Text("Отмеченные программы идут через VPN. Снимите галочку — программа пойдёт напрямую, мимо VPN. " +
-            "Действует в режиме VPN со следующего подключения. В Эксперте программы задаются правилами схемы.",
-            color = muted, fontSize = 13.sp, lineHeight = 19.sp)
-        if (changed) Text("Чтобы изменения подействовали, переподключите VPN.", color = desktopColors.tertiary, fontSize = 13.sp)
+        Text(SettingsWords.APPS_HELP, color = muted, fontSize = 13.sp, lineHeight = 19.sp)
+        if (changed) Text(SettingsWords.APPS_RECONNECT, color = desktopColors.tertiary, fontSize = 13.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(query, { query = it }, Modifier.weight(1f), singleLine = true, placeholder = { Text("Поиск по имени программы") })
+            OutlinedTextField(query, { query = it }, Modifier.weight(1f), singleLine = true, placeholder = { Text(SettingsWords.APPS_SEARCH) })
             OutlinedTextField(added, { added = it.take(120) }, Modifier.weight(1f), singleLine = true,
-                placeholder = { Text("Имя программы, например game.exe") })
+                placeholder = { Text("Файл приложения, например game.exe") })
             OutlinedButton(onClick = { set(bypass + added.trim()); added = "" }, enabled = added.trim().isNotEmpty()) { Text("Пустить мимо VPN") }
         }
-        if (bypass.isNotEmpty()) TextButton(onClick = { set(emptyList()) }) { Text("Все через VPN") }
+        if (bypass.isNotEmpty()) TextButton(onClick = { set(emptyList()) }) { Text(SettingsWords.APPS_ALL_ON) }
         Panel(Modifier.weight(1f, fill = false)) {
-            if (names.isEmpty()) Text("Программ не найдено.", color = muted)
+            if (names.isEmpty()) Text("Приложений не найдено.", color = muted)
             androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 560.dp)) {
                 items(names, key = { it.lowercase() }) { name ->
                     val through = bypass.none { it.equals(name, ignoreCase = true) }
@@ -2168,13 +2189,14 @@ private fun ProgramsThroughVpn(saved: StoredState, controller: DesktopController
     }
 }
 
-/** «Для опытных»: the technical settings on their own page (the phone has the same page). */
+/** «Для опытных»: the phone's page with the same cards in the same order; «Адрес проверки» is Windows' own, last. */
 @Composable
 private fun SettingsForExperts(saved: StoredState, controller: DesktopController, onBack: () -> Unit) {
     var mtu by remember(saved.tunMtu) { mutableStateOf(saved.tunMtu.toString()) }
     var directDns by remember(saved.directDnsServer) { mutableStateOf(saved.directDnsServer) }
     var healthUrl by remember(saved.healthUrl) { mutableStateOf(saved.healthUrl) }
     var journalMb by remember(saved.journalMaxMb) { mutableStateOf(saved.journalMaxMb.toString()) }
+    var confirmJournal by remember { mutableStateOf<Int?>(null) }
     val mtuValid = mtu.toIntOrNull()?.let { it in 1280..9000 } == true
     val dnsValid = EngineDefaults.validIpv4(directDns.trim())
     val healthValid = healthUrl.trim().startsWith("https://") && healthUrl.trim().length > 8
@@ -2182,58 +2204,69 @@ private fun SettingsForExperts(saved: StoredState, controller: DesktopController
     AutoApply(mtu, mtuValid, mtu != saved.tunMtu.toString()) { controller.setDefaults(mtu.toInt(), saved.directDnsServer, saved.logLevel) }
     AutoApply(directDns, dnsValid, directDns.trim() != saved.directDnsServer) { controller.setDefaults(saved.tunMtu, directDns.trim(), saved.logLevel) }
     AutoApply(healthUrl, healthValid, healthUrl.trim() != saved.healthUrl) { controller.setHealthUrl(healthUrl) }
-    AutoApply(journalMb, journalValid, journalMb != saved.journalMaxMb.toString()) { controller.setJournalMaxMb(journalMb.toInt()) }
-    Column(Modifier.fillMaxWidth().widthIn(max = 860.dp).verticalScroll(rememberScrollState()),
+    Column(Modifier.fillMaxWidth().widthIn(max = 860.dp).verticalScroll(rememberScrollState()).testTag("settings_experts"),
         verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("← Настройки") }
-            Text("Для опытных", style = MaterialTheme.typography.titleLarge)
+            TextButton(onClick = onBack) { Text("← " + SettingsWords.TITLE) }
+            Text(SettingsWords.EXPERTS, style = MaterialTheme.typography.titleLarge)
         }
-        Text("Значение применяется, как только оно верное, и действует со следующего подключения. Настройки самого конфига важнее этих.",
-            color = muted, fontSize = 12.sp)
+        Text(SettingsWords.EXPERTS_SCOPE + " " + SettingsWords.AUTO_APPLY, color = muted, fontSize = 12.sp)
         Panel {
-            SettingHeading("", "DNS-сервер", "Кто определяет адреса сайтов, выбирается в «Подключение» → «DNS».")
-            OutlinedTextField(directDns, { directDns = it }, modifier = Modifier.fillMaxWidth(),
-                label = { Text(if (saved.defaultDnsPolicy == "PROFILE") "Резервный DNS · IPv4" else "DNS-сервер · IPv4") },
-                placeholder = { Text("1.1.1.1") }, isError = !dnsValid, singleLine = true,
-                supportingText = { Text(if (!dnsValid) "Введите один IPv4-адрес, например 1.1.1.1." else "Один IPv4-адрес.") })
-        }
-        Panel {
-            SettingHeading("", "MTU: размер пакета VPN",
-                "Максимальный размер IP-пакета в виртуальном адаптере, в байтах. Влияет только на режим VPN.")
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(mtu, { mtu = it.filter(Char::isDigit).take(4) }, modifier = Modifier.width(160.dp),
-                    label = { Text("MTU, байт") }, isError = !mtuValid, singleLine = true,
-                    supportingText = { Text(if (mtuValid) "1280–9000" else "Допустимо 1280–9000") })
-                TextButton(onClick = { mtu = "1500" }) { Text("По умолчанию: 1500") }
-            }
-            SettingAdvice("Как подобрать", "Начните с 1500. Если сайты или загрузки зависают, сравните 1400 и 1280 после переподключения и оставьте наибольшее значение со стабильной работой.")
+            SettingHeading("", SettingsWords.DNS_SECTION, SettingsWords.DNS_EXPLAINED)
+            OutlinedTextField(directDns, { directDns = it.trim().take(45) }, modifier = Modifier.fillMaxWidth(),
+                label = { Text(SettingsWords.DIRECT_DNS) }, placeholder = { Text("1.1.1.1") },
+                isError = directDns.isNotEmpty() && !dnsValid, singleLine = true,
+                supportingText = { Text(SettingsWords.DIRECT_DNS_HELP) })
+            Text(SettingsWords.DNS_MULTIPLE_HELP, color = muted, fontSize = 12.sp, lineHeight = 18.sp)
         }
         Panel {
-            SettingHeading("", "Соединения с сервером (XHTTP)",
-                "По умолчанию два соединения, все запросы идут по ним. Действует, только если конфиг не задаёт своё.")
-            SecurityToggle("Один канал",
-                "Весь трафик пойдёт одним соединением. Включите, если в вашей сети глушат новые соединения. Минус: одна медленная загрузка может притормозить остальное. Вступит в силу при следующем подключении.",
+            SettingHeading("", SettingsWords.XHTTP_TITLE, SettingsWords.XHTTP_EXPLAINED)
+            SettingsSwitch(SettingsWords.XHTTP_SINGLE, "",
                 saved.xmuxChannels == app.lernet.engine.compile.XhttpMode.SINGLE_CHANNEL, controller::setXmuxSingleChannel)
+            Text(SettingsWords.XHTTP_TUNING, color = muted, fontSize = 12.sp, lineHeight = 18.sp)
+            Text(SettingsWords.XHTTP_DEFAULT_HELP, color = muted, fontSize = 12.sp, lineHeight = 18.sp)
         }
         Panel {
-            SettingHeading("", "Рукопожатие TLS",
-                "Для сетей, где фильтр режет первое сообщение защищённого соединения.")
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Дробить первое сообщение TLS", Modifier.weight(1f))
-                Switch(saved.tlsRecordFragment, onCheckedChange = {
-                    controller.setTlsHandshake(it, app.lernet.engine.compile.RealityKeyShare.fromStorage(saved.realityKeyShare))
-                })
+            SettingHeading("", SettingsWords.MTU_TITLE, SettingsWords.MTU_HELP)
+            OutlinedTextField(mtu, { mtu = it.filter(Char::isDigit).take(4) }, modifier = Modifier.width(260.dp),
+                label = { Text(SettingsWords.MTU) }, suffix = { Text(SettingsWords.BYTES) },
+                isError = mtu.isNotEmpty() && !mtuValid, singleLine = true,
+                supportingText = { Text(SettingsWords.MTU_RANGE) })
+            Text(SettingsWords.MTU_TUNING, color = muted, fontSize = 12.sp, lineHeight = 18.sp)
+        }
+        Panel {
+            SettingHeading("", SettingsWords.TLS_TITLE, SettingsWords.TLS_HELP)
+            SettingsSwitch(SettingsWords.TLS_FRAGMENT, "", saved.tlsRecordFragment) {
+                controller.setTlsHandshake(it, app.lernet.engine.compile.RealityKeyShare.fromStorage(saved.realityKeyShare))
             }
-            Text("Помогает, если соединение рвётся сразу после начала рукопожатия. Немного замедляет подключение.",
-                color = muted, fontSize = 12.sp, lineHeight = 18.sp)
-            Text("Обмен ключами Reality", fontWeight = FontWeight.SemiBold)
-            SegmentedChoice(listOf("" to "Как в отпечатке", "hybrid" to "Гибридный", "classical" to "Короткий"),
+            Text(SettingsWords.TLS_FRAGMENT_HELP, color = muted, fontSize = 12.sp, lineHeight = 18.sp)
+            Text(SettingsWords.KEY_SHARE, fontWeight = FontWeight.SemiBold)
+            SegmentedChoice(listOf("" to SettingsWords.KEY_SHARE_AUTO, "hybrid" to SettingsWords.KEY_SHARE_HYBRID,
+                "classical" to SettingsWords.KEY_SHARE_CLASSICAL),
                 app.lernet.engine.compile.RealityKeyShare.fromStorage(saved.realityKeyShare).storage) {
                 controller.setTlsHandshake(saved.tlsRecordFragment, app.lernet.engine.compile.RealityKeyShare.fromStorage(it))
             }
-            Text("«Короткий» убирает большой постквантовый ключ из приветствия. Работает только с серверами Xray старше 26.9.8.",
-                color = muted, fontSize = 12.sp, lineHeight = 18.sp)
+            Text(SettingsWords.KEY_SHARE_HELP, color = muted, fontSize = 12.sp, lineHeight = 18.sp)
+        }
+        Panel {
+            SettingHeading("", SettingsWords.JOURNAL, SettingsWords.JOURNAL_HELP)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(journalMb, { journalMb = it.filter(Char::isDigit).take(3) }, modifier = Modifier.width(260.dp),
+                    label = { Text(SettingsWords.JOURNAL_LIMIT) }, suffix = { Text(SettingsWords.MEGABYTES) }, singleLine = true,
+                    isError = journalMb.isNotEmpty() && !journalValid, supportingText = { Text("1–500") })
+                // As on the phone: the only setting with a button, because a smaller limit deletes old records.
+                OutlinedButton(onClick = { confirmJournal = journalMb.toInt() },
+                    enabled = journalValid && journalMb != saved.journalMaxMb.toString()) { Text(SettingsWords.APPLY) }
+            }
+            Text(SettingsWords.LOG_LEVEL, fontWeight = FontWeight.SemiBold)
+            // Same three levels and words as on Android (audit-fixes); «Предупреждения» by default on both.
+            SegmentedChoice(listOf("warn" to SettingsWords.LOG_WARN, "info" to SettingsWords.LOG_INFO, "debug" to SettingsWords.LOG_DEBUG),
+                saved.logLevel) {
+                controller.setDefaults(saved.tunMtu, saved.directDnsServer, it)
+            }
+            Text(if (saved.logLevel == "error") "Сейчас записываются только ошибки (настройка из прошлой версии). Выберите уровень, чтобы сменить."
+                else SettingsWords.logHelp(saved.logLevel), color = muted, fontSize = 12.sp)
+            Text(SettingsWords.LOG_REDACT, color = muted, fontSize = 12.sp)
         }
         Panel {
             SettingHeading("", "Адрес проверки связи",
@@ -2242,65 +2275,52 @@ private fun SettingsForExperts(saved: StoredState, controller: DesktopController
                 singleLine = true, isError = !healthValid,
                 supportingText = { Text(if (healthValid) "Небольшой HTTPS-ресурс, доступный через VPN" else "Адрес должен начинаться с https://") })
         }
-        Panel {
-            SettingHeading("", "Журнал", "Журнал хранится в папке данных LerNET. Объём делится между двумя файлами.")
-            OutlinedTextField(journalMb, { journalMb = it.filter(Char::isDigit).take(3) }, modifier = Modifier.width(200.dp),
-                label = { Text("Размер журнала, МБ") }, singleLine = true, isError = !journalValid,
-                supportingText = { Text("1–500") })
-            Text("Подробность журнала", fontWeight = FontWeight.SemiBold)
-            // Same three levels and words as on Android (audit-fixes); «Предупреждения» by default on both.
-            SegmentedChoice(listOf("warn" to "Предупреждения", "info" to "Инфо", "debug" to "Отладка"), saved.logLevel) {
-                controller.setDefaults(saved.tunMtu, saved.directDnsServer, it)
-            }
-            Text(when (saved.logLevel) {
-                "info" -> "Основные события, предупреждения и ошибки. В журнале больше подробностей о ваших подключениях."
-                "debug" -> "Подробная запись для поиска ошибки. Сведений о подключениях больше всего."
-                "error" -> "Сейчас записываются только ошибки (настройка из прошлой версии). Выберите уровень, чтобы сменить."
-                else -> "По умолчанию. Только предупреждения и ошибки: в журнале меньше сведений о том, куда вы подключаетесь."
-            }, color = muted, fontSize = 12.sp)
-        }
+    }
+    confirmJournal?.let { mb ->
+        AlertDialog(onDismissRequest = { confirmJournal = null },
+            title = { Text(SettingsWords.JOURNAL_CONFIRM_TITLE) },
+            text = { Text(SettingsWords.journalConfirm(mb)) },
+            confirmButton = { TextButton(onClick = { controller.setJournalMaxMb(mb); confirmJournal = null }) { Text(SettingsWords.APPLY) } },
+            dismissButton = { TextButton(onClick = { confirmJournal = null }) { Text("Отмена") } })
     }
 }
 
-/** v2: the VPN/proxy choice moved off the home screen; full VPN stays the default. */
+/** v2: the VPN/proxy choice moved off the home screen; full VPN stays the default. Words as on the phone. */
 @Composable
 internal fun SettingsRunMode(saved: StoredState, controller: DesktopController, onRequestElevation: () -> Unit,
     localProxy: LocalProxyAccess?, locked: Boolean) {
     val selected = saved.profiles.firstOrNull { it.id == saved.selectedProfileId }
-    SettingHeading("РЕЖИМ", "Режим работы",
-        "Полный VPN (по умолчанию) направляет весь трафик устройства через VPN. Прокси работает только для приложений, настроенных на 127.0.0.1:2080 с логином и паролем.")
-    SegmentedChoice(
-        listOf(RunMode.FULL_VPN.name to "VPN · весь трафик", RunMode.PROXY.name to "Локальный прокси"),
-        saved.mode, enabled = !locked,
-    ) { value ->
-        if (value == RunMode.FULL_VPN.name && !WindowsElevation.isElevated) {
-            if (controller.prepareVpnElevation(null)) onRequestElevation()
-        } else controller.switchMode(null, RunMode.valueOf(value))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(SettingsWords.MODE, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(120.dp))
+        Box(Modifier.weight(1f)) {
+            SegmentedChoice(
+                listOf(RunMode.FULL_VPN.name to SettingsWords.MODE_VPN, RunMode.PROXY.name to SettingsWords.MODE_PROXY),
+                saved.mode, enabled = !locked,
+            ) { value ->
+                if (value == RunMode.FULL_VPN.name && !WindowsElevation.isElevated) {
+                    if (controller.prepareVpnElevation(null)) onRequestElevation()
+                } else controller.switchMode(null, RunMode.valueOf(value))
+            }
+        }
     }
-    Text(
-        when {
-            saved.mode == RunMode.FULL_VPN.name && !WindowsElevation.isElevated ->
-                "Для полного VPN нужны права администратора: Windows спросит их при выборе VPN или при запуске. Если доступ не дан, LerNET работает как локальный прокси."
-            saved.mode == RunMode.FULL_VPN.name -> "Права администратора подтверждены. Трафик устройства идёт по правилам LerNET."
-            else -> "LerNET запускается без прав администратора. Системный трафик идёт напрямую, через VPN идут только приложения с этим прокси."
-        },
-        color = muted, fontSize = 12.sp, lineHeight = 18.sp,
-    )
+    Text(SettingsWords.MODE_NOTE + " " + SettingsWords.MODE_NEXT, color = muted, fontSize = 12.sp, lineHeight = 18.sp)
+    // Windows' own fact: a full VPN needs administrator rights.
+    if (saved.mode == RunMode.FULL_VPN.name && !WindowsElevation.isElevated) Text(
+        "Для полного VPN нужны права администратора: Windows спросит их при выборе VPN или при запуске. Если доступ не дан, LerNET работает как прокси.",
+        color = muted, fontSize = 12.sp, lineHeight = 18.sp)
     if (locked) Text("Дождитесь завершения переключения.", color = blue, fontSize = 12.sp)
     if (selected?.modeOverride != null) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("У конфига «${selected.name}» свой режим: " +
-                (if (controller.effectiveMode(selected) == RunMode.PROXY) "локальный прокси" else "полный VPN"),
+                (if (controller.effectiveMode(selected) == RunMode.PROXY) "прокси" else "полный VPN"),
                 color = muted, fontSize = 12.sp, modifier = Modifier.weight(1f))
             TextButton(onClick = { controller.clearModeOverride(selected.id) }, enabled = !locked) { Text("Как для всех") }
         }
     }
     if (controller.effectiveMode(selected) == RunMode.PROXY) {
         if (localProxy != null) LocalProxyCard(localProxy)
-        else Text("Адрес, логин и пароль прокси появятся здесь после подключения. Логин и пароль можно задать ниже.",
-            color = muted, fontSize = 12.sp)
+        else Text(SettingsWords.PROXY_NOT_RUNNING, color = muted, fontSize = 12.sp)
     }
-    Text("Режим применяется при следующем подключении.", color = muted, fontSize = 12.sp)
 }
 
 @Composable
@@ -2324,7 +2344,7 @@ private fun LocalProxyCard(access: LocalProxyAccess) {
 @Composable
 private fun ProxyLine(label: String, value: String) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(label, color = muted, fontSize = 13.sp, modifier = Modifier.width(64.dp))
+        Text(label, color = muted, fontSize = 13.sp, modifier = Modifier.width(110.dp))
         Text(value, fontSize = 13.sp)
     }
 }
@@ -2336,16 +2356,17 @@ private fun ProxyPasswordSettings(saved: StoredState, controller: DesktopControl
     val clearing = user.isBlank() && password.isEmpty()
     val valid = clearing || (LocalProxyAccess.valid(user.trim()) && LocalProxyAccess.valid(password))
     val changed = user.trim() != saved.proxyUsername || password != saved.proxyPassword
-    SettingHeading(SecurityTexts.PROXY_TAG, SecurityTexts.PROXY_TITLE, SecurityTexts.PROXY_BODY)
+    // S5, as on the phone: applied by itself once both fields are valid, no «Сохранить».
+    AutoApply(user + "\u0000" + password, valid, changed) { controller.setProxyCredentials(user, password) }
+    SettingHeading("", SettingsWords.PROXY_ACCESS, SettingsWords.PROXY_HELP)
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(user, { user = it.take(64) }, modifier = Modifier.width(220.dp), singleLine = true,
-            label = { Text(SecurityTexts.PROXY_LOGIN) }, isError = user.isNotEmpty() && !LocalProxyAccess.valid(user.trim()))
+            label = { Text(SettingsWords.LOGIN) }, isError = user.isNotEmpty() && !LocalProxyAccess.valid(user.trim()))
         OutlinedTextField(password, { password = it.take(64) }, modifier = Modifier.width(220.dp), singleLine = true,
-            label = { Text(SecurityTexts.PROXY_PASSWORD) }, isError = password.isNotEmpty() && !LocalProxyAccess.valid(password),
+            label = { Text(SettingsWords.PASSWORD) }, isError = password.isNotEmpty() && !LocalProxyAccess.valid(password),
             visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
-        Button(onClick = { controller.setProxyCredentials(user, password) }, enabled = valid && changed) { Text(SecurityTexts.SAVE) }
     }
-    Text(SecurityTexts.PROXY_RULES, color = muted, fontSize = 12.sp)
+    Text(SettingsWords.PROXY_RULES, color = muted, fontSize = 12.sp)
 }
 
 @Composable
