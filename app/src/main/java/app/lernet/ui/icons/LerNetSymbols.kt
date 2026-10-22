@@ -75,7 +75,7 @@ object LerNetSymbols {
     fun swapVert(): Painter = painterResource(SymbolR.drawable.materialsymbols_ic_swap_vert_outlined)
 
     @Composable
-    fun probe(): Painter = swapVert()
+    fun probe(): Painter = painterResource(SymbolR.drawable.materialsymbols_ic_ecg_outlined)
 
     @Composable
     fun autoSwap(): Painter = rememberVectorPainter(Icons.Default.Autorenew)
@@ -88,4 +88,14 @@ object LerNetSymbols {
 
     @Composable
     fun share(): Painter = painterResource(SymbolR.drawable.materialsymbols_ic_share_outlined)
+
+    /** Audit N8: the request journal is a list, not a chart. */
+    @Composable
+    fun journal(): Painter = painterResource(SymbolR.drawable.materialsymbols_ic_list_alt_outlined)
+
+    @Composable
+    fun qrCode(): Painter = painterResource(SymbolR.drawable.materialsymbols_ic_qr_code_scanner_outlined)
+
+    @Composable
+    fun file(): Painter = painterResource(SymbolR.drawable.materialsymbols_ic_upload_file_outlined)
 }

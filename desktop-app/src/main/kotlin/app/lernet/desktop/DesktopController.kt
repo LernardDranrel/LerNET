@@ -839,6 +839,10 @@ class DesktopController(
     fun setDefaultDnsPolicy(policy: DnsPolicy) = change { it.copy(defaultDnsPolicy = policy.name) }
     fun setTlsHandshake(recordFragment: Boolean, keyShare: app.lernet.engine.compile.RealityKeyShare) =
         change { it.copy(tlsRecordFragment = recordFragment, realityKeyShare = keyShare.storage) }
+    /** Audit R3: names are kept as typed (Windows compares program names without case), sorted, no repeats. */
+    fun setBypassApps(names: Collection<String>) = change { state ->
+        state.copy(bypassApps = names.map(String::trim).filter(String::isNotEmpty).distinctBy(String::lowercase).sortedBy(String::lowercase))
+    }
     fun setJournalMaxMb(value: Int) = change { it.copy(journalMaxMb = value.coerceIn(1, 500)) }
     fun setDefaults(mtu: Int, dnsServer: String, logLevel: String) = change {
         it.copy(tunMtu = mtu.coerceIn(1280, 9000), directDnsServer = dnsServer.trim(), logLevel = logLevel)

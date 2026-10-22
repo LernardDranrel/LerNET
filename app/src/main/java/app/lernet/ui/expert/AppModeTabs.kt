@@ -45,6 +45,21 @@ fun AppModeTabs(expert: Boolean, onVpn: () -> Unit, onExpert: () -> Unit, modifi
     }
 }
 
+/** The same segmented button for any two or three choices (settings «Режим», events switch). */
+@Composable
+fun LerSegmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        modifier.clip(RoundedCornerShape(50)).border(1.dp, scheme.outlineVariant, RoundedCornerShape(50))
+            .padding(3.dp).selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        options.forEachIndexed { index, label ->
+            ModeSegment(label, index == selected, { onSelect(index) }, Modifier.weight(1f))
+        }
+    }
+}
+
 @Composable
 private fun ModeSegment(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier) {
     val scheme = MaterialTheme.colorScheme

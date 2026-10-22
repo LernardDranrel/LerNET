@@ -86,6 +86,7 @@ import app.lernet.ui.routes.RouteEditorScreen
 import app.lernet.ui.routes.RouteEditorViewModel
 import app.lernet.ui.settings.SettingsScreen
 import app.lernet.ui.settings.SettingsViewModel
+import app.lernet.ui.settings.AppsThroughVpnScreen
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -106,6 +107,7 @@ fun LerNetAppRoot() {
     // Audit G3: the Expert section is remembered for the whole session, a mode change does not reset it.
     var expertSection by rememberSaveable { mutableStateOf(ExpertSection.OVERVIEW) }
     LaunchedEffect(expertMode) { expertContext = expertMode }
+    val expertNow = androidx.compose.runtime.rememberUpdatedState(expertMode)
     val homeViewModel: HomeViewModel = hiltViewModel()
     val homeState by homeViewModel.state.collectAsStateWithLifecycle()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -225,6 +227,7 @@ fun LerNetAppRoot() {
                 homeState = homeState,
                 onOpenDrawer = { scope.launch { drawerState.open() } },
                 expertSection = expertSection, onExpertSection = { expertSection = it },
+                isExpert = { expertNow.value },
                 onShareLogs = shareLogs,
                 onImported = { ids ->
                     pendingImportGroupId?.let { homeViewModel.assignImportedToGroup(it, ids) }
@@ -425,6 +428,7 @@ private fun AppNavHost(
     showCrashBanner: Boolean,
     expertSection: ExpertSection,
     onExpertSection: (ExpertSection) -> Unit,
+    isExpert: () -> Boolean = { false },
 ) {
     val reduceMotion = rememberReduceMotion()
     val expertViewModel: ExpertViewModel = hiltViewModel()
@@ -479,7 +483,7 @@ private fun AppNavHost(
                 simpleActive = homeState.snapshot.state in setOf(ConnectionState.CONNECTED, ConnectionState.CONNECTING, ConnectionState.RECONNECTING),
             )
         }
-        secondaryDestinations(navController, onShareLogs, onImported)
+        secondaryDestinations(navController, onShareLogs, onImported, isExpert)
     }
 }
 
@@ -487,6 +491,7 @@ private fun NavGraphBuilder.secondaryDestinations(
     navController: NavHostController,
     onShareLogs: () -> Unit,
     onImported: (List<String>) -> Unit,
+    isExpert: () -> Boolean,
 ) {
     composable(Dest.Import.route) {
         val vm: ImportViewModel = hiltViewModel()
@@ -509,6 +514,18 @@ private fun NavGraphBuilder.secondaryDestinations(
             onBack = { navController.popBackStack() },
             onShareLogs = onShareLogs,
             onOpenDiag = { navController.navigate(Dest.Diag.route) },
+            onOpenNetwork = { navController.navigate(Dest.Network.route) { launchSingleTop = true } },
+            onOpenApps = { navController.navigate(Dest.Apps.route) { launchSingleTop = true } },
+            fromExpert = isExpert(),
+        )
+    }
+    composable(Dest.Apps.route) {
+        val vm: SettingsViewModel = hiltViewModel()
+        val state by vm.state.collectAsStateWithLifecycle()
+        AppsThroughVpnScreen(
+            bypass = state.settings.engineDefaults.bypassApps.toSet(),
+            onChange = { vm.onIntent(app.lernet.ui.settings.SettingsIntent.SetBypassApps(it)) },
+            onBack = { navController.popBackStack() },
         )
     }
     composable(Dest.Diag.route) {

@@ -112,6 +112,8 @@ data class StoredState(
     val tlsRecordFragment: Boolean = false,
     /** Reality key exchange: "" (as the fingerprint), "hybrid" or "classical". */
     val realityKeyShare: String = "",
+    /** Audit R3: programs (chrome.exe) that go past the VPN in VPN mode, chosen in «Программы через VPN». */
+    val bypassApps: List<String> = emptyList(),
 )
 
 /** One place that turns stored preferences into assembler defaults (VPN, Expert and probes alike). */
@@ -119,6 +121,7 @@ fun StoredState.engineDefaults(strict: Boolean = strictRoute) = app.lernet.engin
     tunMtu = tunMtu, xmuxChannels = xmuxChannels.coerceIn(1, 2), directDnsServer = directDnsServer, strictRoute = strict,
     tlsRecordFragment = tlsRecordFragment,
     realityKeyShare = app.lernet.engine.compile.RealityKeyShare.fromStorage(realityKeyShare).storage,
+    bypassApps = bypassApps,
 )
 
 class DesktopStore(private val directory: Path = defaultDirectory()) {

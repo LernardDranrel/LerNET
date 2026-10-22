@@ -14,6 +14,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -126,7 +127,11 @@ fun HomeScreen(
         topBar = {
             Column {
                 HomeTopBar(onOpenDrawer, onOpenSettings, onOpenDiag)
-                onOpenExpert?.let { app.lernet.ui.expert.AppModeTabs(false, {}, it) }
+                // Audit N19 (mockup m1): the mode switch is a segmented button, not folder tabs.
+                onOpenExpert?.let {
+                    app.lernet.ui.expert.AppModeTabs(false, {}, it,
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("home_mode_switch"))
+                }
                 if (expertActive && onOpenExpert != null) TextButton(onClick = onOpenExpert, modifier = Modifier.fillMaxWidth()) {
                     Text(stringResource(R.string.expert_active_on_simple))
                 }
@@ -139,6 +144,7 @@ fun HomeScreen(
             onOpenDrawer = onOpenDrawer,
             onOpenRoutes = onOpenRoutes,
             onRefreshHop = onRefreshHop,
+            onOpenDiag = onOpenDiag,
             showCrashBanner = showCrashBanner,
             modifier = Modifier.padding(padding),
         )
@@ -152,6 +158,7 @@ private fun HomeBody(
     onOpenDrawer: () -> Unit,
     onOpenRoutes: (String) -> Unit,
     onRefreshHop: () -> Unit,
+    onOpenDiag: () -> Unit,
     showCrashBanner: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -160,22 +167,14 @@ private fun HomeBody(
     val shareFailed = stringResource(R.string.logs_share_failed)
     val metrics = rememberCompactMetrics()
     val liveMode = if (isSessionActive(snapshot.state)) snapshot.mode else state.effectiveMode
+    // Mockup m1: button and state without a frame, one config line, one attention zone, one «Связь» card, the journal row.
     Column(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = metrics.gutter, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(LerNetDimens.sectionGap),
+        verticalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap),
     ) {
-        if (showCrashBanner && state.offerLastLogs) {
-            LastLogsBanner(
-                onShare = {
-                    shareSessionLogs(context, shareFailed)
-                    onIntent(HomeIntent.DismissLastLogs)
-                },
-                onDismiss = { onIntent(HomeIntent.DismissLastLogs) },
-            )
-        }
         ConnectionHero(
             connection = snapshot.state,
             status = when {
@@ -187,80 +186,79 @@ private fun HomeBody(
             },
             enabled = state.activeProfile != null || isSessionActive(snapshot.state),
             onToggle = { onIntent(HomeIntent.ToggleConnect) },
-            onOpenRoutes = homeRouteOwnerId(state)?.let { ownerId -> { onOpenRoutes(ownerId) } },
+            onOpenRoutes = null,
             holding = snapshot.waitingForNetwork || snapshot.hold != null || snapshot.tried != null,
             // Holding: «Выключить VPN» is right below; failed: the error card has «Повторить».
             showActionCaption = snapshot.tried == null && snapshot.state != ConnectionState.FAILED,
-        ) {
-            ProfileChip(
-                name = state.activeProfile?.name,
-                group = state.groups.firstOrNull { state.activeProfile?.id in it.profileIds },
-                empty = state.profiles.isEmpty(),
-                onOpenDrawer = onOpenDrawer,
-            )
-        }
-        // v2: the mode lives in Settings; the home screen only says when the proxy is on.
-        if (state.effectiveMode == RunMode.PROXY) ProxyModeNote()
-        if (snapshot.state == ConnectionState.FAILED) {
-            FailedCard(
-                cause = snapshot.cause,
-                onRetry = { onIntent(HomeIntent.ToggleConnect) },
-                onProfiles = onOpenDrawer,
-                onShareLogs = { shareSessionLogs(context, shareFailed) },
-            )
-        }
-        FailoverBannerCard(state, onIntent)
-        snapshot.tried?.let { report ->
-            FailoverReportCard(
-                report,
-                groupName = report.groupName ?: state.groups.firstOrNull { state.activeProfile?.id in it.profileIds }?.name,
-                onOtherFolder = onOpenDrawer,
-                onTurnOff = { onIntent(HomeIntent.ToggleConnect) },
-            )
-        }
-        if (state.skippedRules.isNotEmpty()) SkippedConditionsCard(state.skippedRules)
-        if (state.showLockdownHint) {
-            LockdownHintCard(
-                onOpenSettings = { openVpnSettings(context) },
-                onDismiss = { onIntent(HomeIntent.DismissLockdownHint) },
-            )
-        }
-        if (state.showNotificationHint) {
-            NotificationHintCard(
-                onOpenSettings = { openNotificationSettings(context) },
-                onDismiss = { onIntent(HomeIntent.DismissNotificationHint) },
-            )
-        }
-        if (snapshot.state == ConnectionState.CONNECTED && isTunnelSilence(snapshot.channel)) {
-            PipeSilentBanner(snapshot)
-        }
-        // While LerNET holds the tunnel the report card says what was tried; checks and zero speed would only repeat it.
-        val holding = snapshot.tried != null
-        // No configs yet: the card above says what to add; empty checks and an empty path would only add noise.
-        val noConfigs = state.profiles.isEmpty()
-        if (!holding && !noConfigs) ConnectionLatencyCard(state, onIntent)
-        if (!holding && snapshot.state == ConnectionState.CONNECTED) {
-            PanelCard {
-                TrafficLines(snapshot)
-                if (snapshot.state == ConnectionState.CONNECTED) ChannelLine(snapshot)
+        ) {}
+        ProfileLine(
+            name = state.activeProfile?.name,
+            group = state.groups.firstOrNull { state.activeProfile?.id in it.profileIds },
+            empty = state.profiles.isEmpty(),
+            onChange = onOpenDrawer,
+            onRules = homeRouteOwnerId(state)?.let { ownerId -> { onOpenRoutes(ownerId) } },
+        )
+        // Audit H7: one zone, most important first; the rest fold behind «Ещё N».
+        val attention = buildList<@Composable ColumnScope.() -> Unit> {
+            if (snapshot.state == ConnectionState.FAILED) add {
+                FailedCard(
+                    cause = snapshot.cause,
+                    onRetry = { onIntent(HomeIntent.ToggleConnect) },
+                    onProfiles = onOpenDrawer,
+                    onShareLogs = { shareSessionLogs(context, shareFailed) },
+                )
             }
+            snapshot.tried?.let { report ->
+                add {
+                    FailoverReportCard(
+                        report,
+                        groupName = report.groupName ?: state.groups.firstOrNull { state.activeProfile?.id in it.profileIds }?.name,
+                        onOtherFolder = onOpenDrawer,
+                        onTurnOff = { onIntent(HomeIntent.ToggleConnect) },
+                    )
+                }
+            }
+            if (snapshot.state == ConnectionState.CONNECTED && isTunnelSilence(snapshot.channel)) add { PipeSilentBanner(snapshot) }
+            if (snapshot.state == ConnectionState.CONNECTED && snapshot.channel != ChannelHealth.UNKNOWN &&
+                !isTunnelSilence(snapshot.channel) && snapshot.channel != ChannelHealth.HOP_UP) add { PanelCard { ChannelLine(snapshot) } }
+            if (snapshot.banner != null) add { FailoverBannerCard(state, onIntent) }
+            if (showCrashBanner && state.offerLastLogs) add {
+                LastLogsBanner(
+                    onShare = {
+                        shareSessionLogs(context, shareFailed)
+                        onIntent(HomeIntent.DismissLastLogs)
+                    },
+                    onDismiss = { onIntent(HomeIntent.DismissLastLogs) },
+                )
+            }
+            if (state.skippedRules.isNotEmpty()) add { SkippedConditionsCard(state.skippedRules) }
+            if (state.showLockdownHint) add {
+                LockdownHintCard(
+                    onOpenSettings = { openVpnSettings(context) },
+                    onDismiss = { onIntent(HomeIntent.DismissLockdownHint) },
+                )
+            }
+            if (state.showNotificationHint) add {
+                NotificationHintCard(
+                    onOpenSettings = { openNotificationSettings(context) },
+                    onDismiss = { onIntent(HomeIntent.DismissNotificationHint) },
+                )
+            }
+            // v2: the mode lives in Settings; the home screen only says when the proxy is on.
+            if (state.effectiveMode == RunMode.PROXY) add { ProxyModeNote() }
+            if (liveMode == RunMode.PROXY && state.effectiveMode != RunMode.PROXY) add { ProxyModeBanner() }
         }
+        AttentionZone(attention)
+        // While LerNET holds the tunnel the report card says what was tried; no configs: the line above says what to add.
+        val holding = snapshot.tried != null
+        val noConfigs = state.profiles.isEmpty()
         val selectedHost = state.activeProfile?.selectedOutbound()?.singBoxJson?.let(OutboundEndpoint::parse)?.host
         val hopSnapshot = if (snapshot.state == ConnectionState.DISCONNECTED && snapshot.hopHost.isNotBlank() &&
             selectedHost != null && !snapshot.hopHost.equals(selectedHost, ignoreCase = true)) {
             snapshot.copy(hops = emptyList(), hopHost = "", hopRunning = false)
         } else snapshot
-        if (!noConfigs) HopPathLine(
-            snapshot = hopSnapshot,
-            onRefresh = onRefreshHop,
-            enabled = state.activeProfile != null,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        // The proxy note at the top already says it; the banner stays only when the running session differs from the setting.
-        if (liveMode == RunMode.PROXY && state.effectiveMode != RunMode.PROXY) {
-            ProxyModeBanner()
-        }
-        // Address, login and password live in Settings (the note above says so); the home does not repeat them.
+        if (!holding && !noConfigs) LinkCard(state, onIntent, hopSnapshot, onRefreshHop)
+        JournalRow(onOpenDiag)
         if (!state.engineAvailable) {
             Text(
                 stringResource(R.string.engine_stub_hint),
@@ -299,7 +297,7 @@ private fun HomeTopBar(onOpenDrawer: () -> Unit, onOpenSettings: () -> Unit, onO
         },
         actions = {
             IconButton(onClick = onOpenDiag) {
-                Icon(LerNetSymbols.analytics(), contentDescription = stringResource(R.string.cd_diag))
+                Icon(LerNetSymbols.journal(), contentDescription = stringResource(R.string.cd_diag))
             }
             IconButton(onClick = onOpenSettings) {
                 Icon(LerNetSymbols.settings(), contentDescription = stringResource(R.string.cd_settings))
@@ -309,39 +307,6 @@ private fun HomeTopBar(onOpenDrawer: () -> Unit, onOpenSettings: () -> Unit, onO
     )
 }
 
-@Composable
-private fun TrafficLines(snapshot: ConnectionSnapshot) {
-    val traffic = TrafficDisplay.format(
-        uplinkBps = snapshot.uplinkBps,
-        downlinkBps = snapshot.downlinkBps,
-        uplinkTotal = snapshot.uplinkTotal,
-        downlinkTotal = snapshot.downlinkTotal,
-        dnsOk = snapshot.dnsOk,
-    )
-    Text(
-        stringResource(R.string.traffic_rates, traffic.uplinkRate, traffic.downlinkRate),
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    if (traffic.showTotals) {
-        Text(
-            stringResource(R.string.traffic_totals, traffic.uplinkTotal, traffic.downlinkTotal),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    } else if (traffic.dnsHint) {
-        Text(
-            stringResource(R.string.traffic_dns_alive),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            stringResource(R.string.traffic_dns_alive_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
 
 @Composable
 private fun ChannelLine(snapshot: ConnectionSnapshot) {
@@ -422,70 +387,6 @@ private fun PipeSilentBanner(snapshot: ConnectionSnapshot) {
     }
 }
 
-@Composable
-private fun ProfileChip(
-    name: String?,
-    group: app.lernet.config.model.Group?,
-    empty: Boolean,
-    onOpenDrawer: () -> Unit,
-) {
-    Card(
-        onClick = onOpenDrawer,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        shape = MaterialTheme.shapes.large,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(LerNetDimens.contentPadding)
-                .heightIn(min = LerNetDimens.buttonMinHeight),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap),
-        ) {
-            LerNetLogo(size = 32.dp)
-            Column(Modifier.weight(1f)) {
-                if (group != null) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            group.name, style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                        if (group.autoFailover) {
-                            Icon(
-                                LerNetSymbols.autoSwap(), contentDescription = stringResource(R.string.settings_failover),
-                                tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                }
-                Text(
-                    text = name ?: stringResource(if (empty) R.string.empty_profiles else R.string.no_profile),
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = stringResource(if (empty) R.string.empty_profiles_body else R.string.choose_profile),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = if (empty) 4 else 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Icon(
-                LerNetSymbols.chevronRight(),
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
 
 @Composable
 private fun LastLogsBanner(

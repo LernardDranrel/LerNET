@@ -1925,8 +1925,13 @@ internal fun Settings(saved: StoredState, controller: DesktopController, onReque
     localProxy: LocalProxyAccess? = null, locked: Boolean = false, onOpenNetwork: (() -> Unit)? = null,
     onOpenApps: (() -> Unit)? = null) {
     var expertPage by rememberSaveable { mutableStateOf(false) }
+    var appsPage by rememberSaveable { mutableStateOf(false) }
     if (expertPage) {
         SettingsForExperts(saved, controller) { expertPage = false }
+        return
+    }
+    if (appsPage) {
+        ProgramsThroughVpn(saved, controller) { appsPage = false }
         return
     }
     Column(Modifier.fillMaxWidth().widthIn(max = 860.dp).verticalScroll(rememberScrollState()),
@@ -1944,10 +1949,21 @@ internal fun Settings(saved: StoredState, controller: DesktopController, onReque
             SecurityToggle("Запускать при входе в систему",
                 "LerNET запустится в трее и, если VPN был включён, сам подключит его снова. Кнопка «Отключить» отменяет это до следующего подключения.",
                 saved.autostart, controller::setAutostart)
-            if (onOpenApps != null) {
-                HorizontalDivider(color = desktopColors.outlineVariant)
-                SettingsLink("Программы мимо VPN", "Выберите программы, которые выходят в интернет напрямую", onOpenApps)
+            HorizontalDivider(color = desktopColors.outlineVariant)
+            SettingsLink("Программы через VPN",
+                if (saved.bypassApps.isEmpty()) "Все программы идут через VPN" else "Все, кроме ${saved.bypassApps.size}: " + saved.bypassApps.take(3).joinToString() +
+                    if (saved.bypassApps.size > 3) "…" else "",
+                onClick = { onOpenApps?.invoke() ?: run { appsPage = true } })
+            HorizontalDivider(color = desktopColors.outlineVariant)
+            Text("DNS (адреса сайтов)", fontWeight = FontWeight.SemiBold)
+            SegmentedChoice(listOf("TUNNEL" to "Через VPN", "UNDERLAY" to "Напрямую", "PROFILE" to "Из конфига"), saved.defaultDnsPolicy) {
+                controller.setDefaultDnsPolicy(DnsPolicy.valueOf(it))
             }
+            Text(when (saved.defaultDnsPolicy) {
+                "PROFILE" -> "Если в конфиге есть DNS, используются его серверы и правила. Если нет — DNS-сервер из «Для опытных»."
+                "TUNNEL" -> "По умолчанию. Адреса сайтов запрашиваются через VPN: сеть не видит, какие сайты вы открываете."
+                else -> "Адреса сайтов запрашиваются напрямую, мимо VPN: сеть и провайдер видят имена сайтов."
+            }, color = muted, fontSize = 12.sp, lineHeight = 18.sp)
         }
         SettingsGroupTitle("Защита от утечек")
         Panel {
@@ -2007,6 +2023,64 @@ private fun SettingsLink(title: String, subtitle: String, onClick: () -> Unit) {
     }
 }
 
+/**
+ * Audit R3: «Программы через VPN». A checked program goes through the VPN; an unchecked one goes direct
+ * (a first route rule `process_name → direct`). The list is the running programs plus the ones already chosen.
+ */
+@Composable
+private fun ProgramsThroughVpn(saved: StoredState, controller: DesktopController, onBack: () -> Unit) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var added by rememberSaveable { mutableStateOf("") }
+    var changed by rememberSaveable { mutableStateOf(false) }
+    val running = remember {
+        runCatching {
+            ProcessHandle.allProcesses().iterator().asSequence().mapNotNull { process ->
+                process.info().command().orElse(null)?.let { Path.of(it).fileName?.toString() }
+            }.filter { it.endsWith(".exe", ignoreCase = true) }.toList()
+        }.getOrDefault(emptyList())
+    }
+    val bypass = saved.bypassApps
+    val names = (running + bypass).distinctBy(String::lowercase).sortedBy(String::lowercase)
+        .filter { query.isBlank() || it.contains(query.trim(), ignoreCase = true) }
+    fun set(next: Collection<String>) {
+        changed = true
+        controller.setBypassApps(next)
+    }
+    Column(Modifier.fillMaxWidth().widthIn(max = 860.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onBack) { Text("← Настройки") }
+            Text("Программы через VPN", style = MaterialTheme.typography.titleLarge)
+        }
+        Text("Отмеченные программы идут через VPN. Снимите галочку — программа пойдёт напрямую, мимо VPN. " +
+            "Действует в режиме VPN со следующего подключения. В Эксперте программы задаются правилами схемы.",
+            color = muted, fontSize = 13.sp, lineHeight = 19.sp)
+        if (changed) Text("Чтобы изменения подействовали, переподключите VPN.", color = desktopColors.tertiary, fontSize = 13.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(query, { query = it }, Modifier.weight(1f), singleLine = true, placeholder = { Text("Поиск по имени программы") })
+            OutlinedTextField(added, { added = it.take(120) }, Modifier.weight(1f), singleLine = true,
+                placeholder = { Text("Имя программы, например game.exe") })
+            OutlinedButton(onClick = { set(bypass + added.trim()); added = "" }, enabled = added.trim().isNotEmpty()) { Text("Пустить мимо VPN") }
+        }
+        if (bypass.isNotEmpty()) TextButton(onClick = { set(emptyList()) }) { Text("Все через VPN") }
+        Panel(Modifier.weight(1f, fill = false)) {
+            if (names.isEmpty()) Text("Программ не найдено.", color = muted)
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 560.dp)) {
+                items(names, key = { it.lowercase() }) { name ->
+                    val through = bypass.none { it.equals(name, ignoreCase = true) }
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
+                        .clickable { set(if (through) bypass + name else bypass.filterNot { it.equals(name, ignoreCase = true) }) }
+                        .padding(vertical = 4.dp, horizontal = 4.dp).testTag("program_$name"),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(through, onCheckedChange = null)
+                        Text(name, Modifier.weight(1f).padding(start = 8.dp), fontSize = 14.sp)
+                        Text(if (through) "через VPN" else "напрямую", color = if (through) muted else desktopColors.tertiary, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
 /** «Для опытных»: the technical settings on their own page (the phone has the same page). */
 @Composable
 private fun SettingsForExperts(saved: StoredState, controller: DesktopController, onBack: () -> Unit) {
@@ -2031,19 +2105,11 @@ private fun SettingsForExperts(saved: StoredState, controller: DesktopController
         Text("Значение применяется, как только оно верное, и действует со следующего подключения. Настройки самого конфига важнее этих.",
             color = muted, fontSize = 12.sp)
         Panel {
-            SettingHeading("", "DNS: кто определяет адреса сайтов", "")
-            SegmentedChoice(listOf("TUNNEL" to "Через VPN", "UNDERLAY" to "Напрямую", "PROFILE" to "Из конфига"), saved.defaultDnsPolicy) {
-                controller.setDefaultDnsPolicy(DnsPolicy.valueOf(it))
-            }
+            SettingHeading("", "DNS-сервер", "Кто определяет адреса сайтов, выбирается в «Подключение» → «DNS».")
             OutlinedTextField(directDns, { directDns = it }, modifier = Modifier.fillMaxWidth(),
                 label = { Text(if (saved.defaultDnsPolicy == "PROFILE") "Резервный DNS · IPv4" else "DNS-сервер · IPv4") },
                 placeholder = { Text("1.1.1.1") }, isError = !dnsValid, singleLine = true,
                 supportingText = { Text(if (!dnsValid) "Введите один IPv4-адрес, например 1.1.1.1." else "Один IPv4-адрес.") })
-            Text(when (saved.defaultDnsPolicy) {
-                "PROFILE" -> "Если в конфиге есть DNS, используются его серверы и правила. Если нет — адрес выше."
-                "TUNNEL" -> "По умолчанию. Адреса сайтов запрашиваются через VPN: сеть не видит, какие сайты вы открываете. Если на каком-то сервере так не работает, выберите для этого конфига «Напрямую»."
-                else -> "Адреса сайтов запрашиваются у этого DNS напрямую, мимо VPN: сеть и провайдер видят имена сайтов."
-            }, color = muted, fontSize = 12.sp, lineHeight = 18.sp)
         }
         Panel {
             SettingHeading("", "MTU: размер пакета VPN",

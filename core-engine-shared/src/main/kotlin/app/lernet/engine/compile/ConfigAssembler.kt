@@ -122,6 +122,7 @@ object ConfigAssembler {
         val preparedDns = DnsBlock.prepare(dnsJson, outbound.tag, dnsPolicy, defaults.directDnsServer)
         val dns = preparedDns.dns
         val rules = appRules(appProxy, outbound.tag) + platformRules(mode, platform, outbound.tag) +
+            bypassRules(mode, platform, defaults) +
             RouteCompiler.toSingBoxRules(activeRoute, outbound.tag, pipeTags) +
             finalReject(activeRoute)
         val finalTag = when (activeRoute.finalAction) {
@@ -262,6 +263,20 @@ object ConfigAssembler {
             }
         }
 
+    /** Windows, VPN mode: programs chosen in «Программы через VPN» go direct before any user rule. */
+    private fun bypassRules(mode: RunMode, platform: EnginePlatform, defaults: EngineDefaults): List<JsonObject> {
+        val bypass = bypassList(defaults)
+        if (mode != RunMode.FULL_VPN || platform != EnginePlatform.WINDOWS || bypass.isEmpty()) return emptyList()
+        return listOf(buildJsonObject {
+            put("process_name", buildJsonArray { bypass.forEach { add(JsonPrimitive(it)) } })
+            put("outbound", "direct")
+        })
+    }
+
+    private fun bypassList(defaults: EngineDefaults): List<String> =
+        defaults.bypassApps.map { it.trim() }.filter { it.isNotEmpty() && it.length <= 255 && it.none(Char::isISOControl) }
+            .distinct().sorted()
+
     /** First rule: everything LerNET itself sends goes to the VPN server, before sniffing or user rules. */
     private fun appRules(appProxy: LocalProxyAccess?, proxyTag: String): List<JsonObject> =
         if (appProxy == null) emptyList() else listOf(buildJsonObject {
@@ -317,6 +332,11 @@ object ConfigAssembler {
                 put("auto_route", true)
                 // Windows: without it DNS can leave through the physical adapter. Android has no use for it.
                 put("strict_route", platform == EnginePlatform.WINDOWS && defaults.strictRoute)
+                // Audit R3: Android takes these apps out of the VPN itself (TunEstablisher → addDisallowedApplication).
+                val bypass = bypassList(defaults)
+                if (platform == EnginePlatform.ANDROID && bypass.isNotEmpty()) {
+                    put("exclude_package", buildJsonArray { bypass.forEach { add(JsonPrimitive(it)) } })
+                }
             }
             RunMode.PROXY -> localListener(LocalListeners.USER_PROXY_TAG, checkNotNull(proxyAccess))
         }

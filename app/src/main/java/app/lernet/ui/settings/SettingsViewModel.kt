@@ -55,6 +55,9 @@ sealed class SettingsIntent {
 
     data class SetDirectDnsServer(val value: String) : SettingsIntent()
 
+    /** Audit R3: apps that go past the VPN (unchecked in «Приложения через VPN»). */
+    data class SetBypassApps(val packages: Set<String>) : SettingsIntent()
+
     data class SetProxyCredentials(val username: String, val password: String) : SettingsIntent()
 
     data class SetMode(val mode: app.lernet.engine.RunMode) : SettingsIntent()
@@ -121,6 +124,8 @@ class SettingsViewModel @Inject constructor(
                 is SettingsIntent.SetRealityKeyShare ->
                     settingsStore.setEngineDefaults(current.engineDefaults.copy(realityKeyShare = intent.value.storage))
                 is SettingsIntent.SetDefaultDnsPolicy -> settingsStore.setDefaultDnsPolicy(intent.value)
+                is SettingsIntent.SetBypassApps ->
+                    settingsStore.setEngineDefaults(current.engineDefaults.copy(bypassApps = intent.packages.sorted()))
                 is SettingsIntent.SetDirectDnsServer -> if (EngineDefaults.validIpv4(intent.value)) {
                     settingsStore.setEngineDefaults(current.engineDefaults.copy(directDnsServer = intent.value))
                 }

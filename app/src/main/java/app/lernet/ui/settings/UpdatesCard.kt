@@ -1,5 +1,10 @@
 package app.lernet.ui.settings
 
+import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.clickable
 import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -49,26 +54,32 @@ fun AndroidUpdatePrompt() {
     }
 }
 
+/** Settings «Приложение» group (mockup m2): the update check as list rows, same facts as the old card. */
 @Composable
-fun UpdatesCard() {
+fun UpdatesRows() {
     val context = LocalContext.current
     val uri = LocalUriHandler.current
     val monitor = remember { AndroidUpdates.monitor(context) }
     val state by monitor.state.collectAsState()
     val scope = rememberCoroutineScope()
     var error by remember { mutableStateOf("") }
-    PanelCard {
-        Text("Обновления LerNET", style = MaterialTheme.typography.titleMedium)
-        Text(state.message, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Checkbox(state.automatic, onCheckedChange = monitor::automatic)
-            Text("Проверять при запуске, не чаще раза в сутки", modifier = Modifier.weight(1f))
-        }
-        Text("Запрос идёт на GitHub. Конфиги и данные диагностики не отправляются.", style = MaterialTheme.typography.bodySmall)
-        OutlinedButton(onClick = { scope.launch { monitor.check(manual = true) } }, enabled = !state.checking, modifier = Modifier.fillMaxWidth()) { Text("Проверить обновления") }
-        state.release?.let { release ->
-            Button(onClick = { runCatching { uri.openUri(release.pageUrl) }.onFailure { error = "Не удалось открыть браузер" } }, modifier = Modifier.fillMaxWidth()) { Text("Открыть релиз v${release.version} и скачать APK") }
-        }
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp)
+            .clickable(role = androidx.compose.ui.semantics.Role.Switch) { monitor.automatic(!state.automatic) },
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+    ) {
+        Text(stringResource(app.lernet.R.string.settings_updates_row), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        androidx.compose.material3.Switch(state.automatic, onCheckedChange = null)
     }
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Text(state.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f))
+        androidx.compose.material3.TextButton(onClick = { scope.launch { monitor.check(manual = true) } }, enabled = !state.checking,
+            modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(app.lernet.R.string.settings_updates_now)) }
+    }
+    state.release?.let { release ->
+        Button(onClick = { runCatching { uri.openUri(release.pageUrl) }.onFailure { error = "Не удалось открыть браузер" } },
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) { Text("Открыть релиз v${release.version} и скачать APK") }
+    }
+    if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
 }

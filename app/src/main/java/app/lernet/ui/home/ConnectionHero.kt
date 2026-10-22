@@ -96,42 +96,13 @@ internal fun ConnectionHero(
         label = "power-depth",
     )
     var lockedUntil by remember { mutableLongStateOf(0L) }
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.extraLarge,
-        color = scheme.surface,
-        border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.7f)),
-    ) {
+    // Audit H1/H2 (mockup m1): no frame and no «Ваше подключение» caption; rules are in the config line.
+    run {
         Column(
-            modifier = Modifier
-                .background(Brush.verticalGradient(listOf(scheme.primaryContainer.copy(alpha = 0.35f), scheme.surface)))
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    stringResource(R.string.home_connection_title),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = scheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                FilledTonalIconButton(
-                    onClick = { onOpenRoutes?.invoke() },
-                    enabled = onOpenRoutes != null,
-                    modifier = Modifier.size(40.dp),
-                    colors = IconButtonDefaults.filledTonalIconButtonColors(
-                        containerColor = scheme.primaryContainer,
-                        contentColor = scheme.onPrimaryContainer,
-                    ),
-                ) {
-                    Icon(
-                        LerNetSymbols.route(),
-                        contentDescription = stringResource(R.string.home_open_routes),
-                        modifier = Modifier.size(21.dp),
-                    )
-                }
-            }
             Box(
                 Modifier.size(if (compact) 166.dp else 190.dp),
                 contentAlignment = Alignment.Center,
@@ -204,12 +175,12 @@ internal fun ConnectionHero(
                 textAlign = TextAlign.Center,
             )
             if (showActionCaption || !enabled) Text(
-                if (enabled) action else stringResource(R.string.home_choose_before_connect),
+                if (!enabled) stringResource(R.string.home_choose_before_connect)
+                else stringResource(if (active) R.string.home_tap_disconnect else R.string.home_tap_connect),
                 style = MaterialTheme.typography.bodyMedium,
                 color = scheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.size(4.dp))
             profile()
         }
     }

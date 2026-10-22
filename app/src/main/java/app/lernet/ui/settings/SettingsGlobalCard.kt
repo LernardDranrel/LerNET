@@ -19,6 +19,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,46 +41,12 @@ import app.lernet.engine.log.JournalCeiling
 import app.lernet.ui.components.PanelCard
 
 @Composable
-internal fun GlobalDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(stringResource(R.string.settings_global), style = MaterialTheme.typography.titleMedium)
-        SettingHelp(stringResource(R.string.settings_defaults_scope))
-    }
-    DnsDefaultsCard(state, onIntent)
-    XmuxDefaultsCard(state, onIntent)
-    MtuDefaultsCard(state, onIntent)
-    TlsHandshakeCard(state, onIntent)
-    ProxyPasswordCard(state, onIntent)
-    JournalDefaultsCard(state, onIntent)
-}
-
-@Composable
 internal fun DnsDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
     val saved = state.settings.engineDefaults.directDnsServer
     var draft by remember(saved) { mutableStateOf(saved) }
     PanelCard {
         Text(stringResource(R.string.settings_dns_section), style = MaterialTheme.typography.titleMedium)
         SettingHelp(stringResource(R.string.settings_dns_explained))
-        Text(stringResource(R.string.settings_dns_default), style = MaterialTheme.typography.labelLarge)
-        Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(DnsPolicy.TUNNEL to R.string.cfg_dns_tunnel, DnsPolicy.UNDERLAY to R.string.cfg_keep_system, DnsPolicy.PROFILE to R.string.cfg_use_profile).forEach { (policy, label) ->
-                val selected = state.settings.defaultDnsPolicy == policy
-                val scheme = MaterialTheme.colorScheme
-                Surface(
-                    selected = selected,
-                    onClick = { onIntent(SettingsIntent.SetDefaultDnsPolicy(policy)) },
-                    modifier = Modifier.fillMaxWidth().semantics { role = Role.RadioButton },
-                    shape = MaterialTheme.shapes.medium,
-                    color = if (selected) scheme.primaryContainer else scheme.surface,
-                    border = BorderStroke(1.dp, if (selected) scheme.primary else scheme.outlineVariant),
-                ) {
-                    Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(stringResource(label), Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
-                        if (selected) Text(stringResource(R.string.home_mode_selected), style = MaterialTheme.typography.labelSmall, color = scheme.primary)
-                    }
-                }
-            }
-        }
         SettingHelp(stringResource(R.string.settings_dns_default_help))
         OutlinedTextField(
             value = draft,
@@ -93,11 +60,11 @@ internal fun DnsDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) 
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
         )
         SettingHelp(stringResource(R.string.settings_dns_multiple_help))
-        FilledTonalButton(
-            onClick = { onIntent(SettingsIntent.SetDirectDnsServer(draft)) },
-            enabled = draft != saved && EngineDefaults.validIpv4(draft),
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(stringResource(R.string.settings_journal_apply)) }
+    }
+    // Audit S5: applied by itself once the address is valid.
+    LaunchedEffect(draft) {
+        kotlinx.coroutines.delay(700)
+        if (draft != saved && EngineDefaults.validIpv4(draft)) onIntent(SettingsIntent.SetDirectDnsServer(draft))
     }
 }
 
@@ -140,24 +107,24 @@ internal fun MtuDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) 
             modifier = Modifier.fillMaxWidth(),
         )
         SettingHelp(stringResource(R.string.settings_mtu_tuning))
-        FilledTonalButton(
-            onClick = { draft.toIntOrNull()?.let { onIntent(SettingsIntent.SetTunMtu(it)) } },
-            enabled = valid && draft.toIntOrNull() != saved,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(stringResource(R.string.settings_journal_apply)) }
+    }
+    LaunchedEffect(draft) {
+        kotlinx.coroutines.delay(700)
+        if (valid && draft.toIntOrNull() != saved) draft.toIntOrNull()?.let { onIntent(SettingsIntent.SetTunMtu(it)) }
     }
 }
 
+/** Audit S2: login and password of the local proxy live in the «Режим» row and only when «Прокси» is chosen. */
 @Composable
-internal fun ProxyPasswordCard(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
+internal fun ProxyCredentialsFields(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
     val savedUser = state.settings.proxyUsername
     val savedPassword = state.settings.proxyPassword
     var user by remember(savedUser) { mutableStateOf(savedUser) }
     var password by remember(savedPassword) { mutableStateOf(savedPassword) }
     val clearing = user.isBlank() && password.isEmpty()
     val valid = clearing || (LocalProxyAccess.valid(user.trim()) && LocalProxyAccess.valid(password))
-    PanelCard {
-        Text(stringResource(R.string.settings_proxy_password_title), style = MaterialTheme.typography.titleMedium)
+    Column(Modifier.testTag("settings_proxy_credentials"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(stringResource(R.string.settings_proxy_access), style = MaterialTheme.typography.labelLarge)
         SettingHelp(stringResource(R.string.settings_proxy_password_help))
         OutlinedTextField(
             value = user,
@@ -177,11 +144,10 @@ internal fun ProxyPasswordCard(state: SettingsUiState, onIntent: (SettingsIntent
             modifier = Modifier.fillMaxWidth(),
         )
         SettingHelp(stringResource(R.string.settings_proxy_password_rules))
-        FilledTonalButton(
-            onClick = { onIntent(SettingsIntent.SetProxyCredentials(user, password)) },
-            enabled = valid && (user.trim() != savedUser || password != savedPassword),
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(stringResource(R.string.save)) }
+    }
+    LaunchedEffect(user, password) {
+        kotlinx.coroutines.delay(900)
+        if (valid && (user.trim() != savedUser || password != savedPassword)) onIntent(SettingsIntent.SetProxyCredentials(user, password))
     }
 }
 

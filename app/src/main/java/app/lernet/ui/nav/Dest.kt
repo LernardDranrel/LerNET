@@ -13,6 +13,8 @@ sealed class Dest(val route: String) {
 
     data object Network : Dest("network")
 
+    /** Audit R3: «Приложения через VPN». */
+    data object Apps : Dest("apps")
 
     data object Routes : Dest("routes/{profileId}") {
         fun of(profileId: String): String = "routes/$profileId"

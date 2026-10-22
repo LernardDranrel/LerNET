@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import app.lernet.config.model.DnsPolicy
 import app.lernet.engine.RunMode
@@ -47,6 +48,7 @@ class SettingsStore(private val context: Context) {
         it[DIRECT_DNS_SERVER] = defaults.directDnsServer
         it[TLS_RECORD_FRAGMENT] = defaults.tlsRecordFragment
         it[REALITY_KEY_SHARE] = app.lernet.engine.compile.RealityKeyShare.fromStorage(defaults.realityKeyShare).storage
+        it[BYPASS_APPS] = defaults.bypassApps.map(String::trim).filter(String::isNotEmpty).toSet()
     }
 
     suspend fun setDefaultDnsPolicy(policy: DnsPolicy) = edit { it[DEFAULT_DNS_POLICY] = policy.name }
@@ -100,6 +102,7 @@ class SettingsStore(private val context: Context) {
                 directDnsServer = this[DIRECT_DNS_SERVER]?.takeIf { EngineDefaults.validIpv4(it) } ?: "1.1.1.1",
                 tlsRecordFragment = this[TLS_RECORD_FRAGMENT] ?: false,
                 realityKeyShare = app.lernet.engine.compile.RealityKeyShare.fromStorage(this[REALITY_KEY_SHARE]).storage,
+                bypassApps = this[BYPASS_APPS].orEmpty().sorted(),
             ),
             defaultDnsPolicy = DnsPolicy.fromStorage(this[DEFAULT_DNS_POLICY] ?: DnsPolicy.DEFAULT.name),
             lockdownHintDismissed = this[LOCKDOWN_HINT_DISMISSED] ?: false,
@@ -128,6 +131,7 @@ class SettingsStore(private val context: Context) {
         val DIRECT_DNS_SERVER = stringPreferencesKey("direct_dns_server")
         val TLS_RECORD_FRAGMENT = booleanPreferencesKey("tls_record_fragment")
         val REALITY_KEY_SHARE = stringPreferencesKey("reality_key_share")
+        val BYPASS_APPS = stringSetPreferencesKey("bypass_apps")
         val LOCKDOWN_HINT_DISMISSED = booleanPreferencesKey("lockdown_hint_dismissed")
         val PROXY_USERNAME = stringPreferencesKey("proxy_username")
         val NOTIFICATIONS_ASKED = booleanPreferencesKey("notifications_asked")

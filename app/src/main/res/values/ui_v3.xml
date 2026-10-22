@@ -83,4 +83,42 @@
         <item quantity="many">%d узлов</item>
         <item quantity="other">%d узла</item>
     </plurals>
+    <!-- Settings (m2) -->
+    <string name="settings_group_connection">Подключение</string>
+    <string name="settings_group_leaks">Защита от утечек</string>
+    <string name="settings_group_help">Помощь</string>
+    <string name="settings_group_app">Приложение</string>
+    <string name="settings_mode_row">Режим</string>
+    <string name="settings_apps_row">Приложения через VPN</string>
+    <string name="settings_apps_all">все</string>
+    <string name="settings_apps_some">кроме %1$d</string>
+    <string name="settings_boot_row">Включать VPN после перезагрузки</string>
+    <string name="settings_dns_row">DNS (адреса сайтов)</string>
+    <string name="settings_dns_tunnel_short">через VPN</string>
+    <string name="settings_dns_system_short">сеть устройства</string>
+    <string name="settings_dns_profile_short">из конфига</string>
+    <string name="settings_leaks_row">Блокировать соединения без VPN</string>
+    <string name="settings_leaks_value">в настройках Android</string>
+    <string name="settings_leaks_help">Включает сам Android: «Постоянный VPN» и «Блокировать соединения без VPN» для LerNET. Тогда, если LerNET закроется, телефон не пустит трафик мимо VPN. LerNET не может включить это за вас.</string>
+    <string name="settings_share_log_row">Отправить журнал разработчику</string>
+    <string name="settings_network_row">Анализ сети устройства</string>
+    <string name="settings_updates_row">Проверять обновления раз в сутки</string>
+    <string name="settings_updates_now">Проверить сейчас</string>
+    <string name="settings_experts_row">Для опытных</string>
+    <string name="settings_experts_hint">DNS-сервер, MTU, соединения XHTTP, TLS, повторы, журнал</string>
+    <string name="settings_version_row">Версия</string>
+    <string name="settings_core_row">Ядро</string>
+    <string name="settings_copy">Скопировать</string>
+    <string name="settings_copied">Скопировано</string>
+    <string name="settings_experts_title">Для опытных</string>
+    <string name="settings_auto_apply">Значения применяются сами, как только они правильные.</string>
+    <string name="settings_proxy_access">Логин и пароль прокси</string>
+    <string name="settings_proxy_saved">Сохранено</string>
+    <!-- Apps through VPN (R3) -->
+    <string name="apps_title">Приложения через VPN</string>
+    <string name="apps_help">Отмеченные приложения идут через VPN. Снимите галочку — приложение пойдёт напрямую, мимо VPN. Действует в режиме VPN со следующего подключения. В Эксперте приложения задаются правилами схемы.</string>
+    <string name="apps_search">Название приложения</string>
+    <string name="apps_system">Показать системные</string>
+    <string name="apps_all_on">Все через VPN</string>
+    <string name="apps_reconnect">Чтобы изменения подействовали, переподключите VPN.</string>
 </resources>

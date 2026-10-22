@@ -12,6 +12,11 @@ data class EngineDefaults(
     val tlsRecordFragment: Boolean = false,
     /** Reality key exchange: "" (as the fingerprint), "hybrid" or "classical". */
     val realityKeyShare: String = "",
+    /**
+     * Audit R3: apps that go past the VPN in VPN mode. Android: package names, taken out of the VPN by the
+     * system (`exclude_package`). Windows: program names (chrome.exe), sent direct by a first route rule.
+     */
+    val bypassApps: List<String> = emptyList(),
 ) {
     companion object {
         fun validIpv4(value: String): Boolean {
