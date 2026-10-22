@@ -51,16 +51,16 @@ private val observationAmber = Color(0xFFF1CC80)
 private val observationInk = Color(0xFF101824)
 
 private enum class ObservationPage(val title: String, val mark: String, val help: String) {
-    OVERVIEW("Обзор", "◎", "Исследуйте настройки, по которым Windows выбирает путь трафика."),
-    ADAPTERS("Адаптеры", "▤", "Физические и виртуальные входы в сеть. Включённый адаптер ещё не означает работающий VPN."),
-    APPS("Программы и VPN", "◈", "Кто использует сеть и какие подключения зарегистрированы в Windows."),
-    ROUTES("Маршруты", "⑂", "Для каждого адреса Windows выбирает наиболее точный маршрут, затем сравнивает метрики."),
-    DNS("DNS и прокси", "◇", "Кто переводит имена сайтов в адреса и куда приложения отправляют запросы."),
-    FILTERS("Фильтры", "▧", "Правила, которые могут разрешить или остановить трафик внутри компьютера."),
-    SYSTEM("Устройство", "⌘", "Драйверы, привязки, беспроводная сеть и дополнительные сетевые компоненты."),
-    EVENTS("События", "≋", "Существующие события Windows и короткая запись для разбора конкретного сбоя."),
-    CHANGES("Что изменилось", "⇄", "Сравнение двух последних снимков. Изменение само по себе не указывает на виновника."),
-    ALL("Все источники", "⋮", "Данные системы с указанием источника и времени чтения."),
+    OVERVIEW(app.lernet.engine.text.NetworkWords.OVERVIEW, "◎", app.lernet.engine.text.NetworkWords.OVERVIEW_HELP),
+    ADAPTERS(app.lernet.engine.text.NetworkWords.ADAPTERS, "▤", app.lernet.engine.text.NetworkWords.ADAPTERS_HELP),
+    APPS(app.lernet.engine.text.NetworkWords.APPS, "◈", app.lernet.engine.text.NetworkWords.APPS_HELP),
+    ROUTES(app.lernet.engine.text.NetworkWords.ROUTES, "⑂", app.lernet.engine.text.NetworkWords.ROUTES_HELP),
+    DNS(app.lernet.engine.text.NetworkWords.DNS, "◇", app.lernet.engine.text.NetworkWords.DNS_HELP),
+    FILTERS(app.lernet.engine.text.NetworkWords.FILTERS, "▧", app.lernet.engine.text.NetworkWords.FILTERS_HELP),
+    SYSTEM(app.lernet.engine.text.NetworkWords.SYSTEM, "⌘", app.lernet.engine.text.NetworkWords.SYSTEM_HELP),
+    EVENTS(app.lernet.engine.text.NetworkWords.EVENTS, "≋", app.lernet.engine.text.NetworkWords.EVENTS_HELP),
+    CHANGES(app.lernet.engine.text.NetworkWords.CHANGES, "⇄", app.lernet.engine.text.NetworkWords.CHANGES_HELP),
+    ALL(app.lernet.engine.text.NetworkWords.ALL, "⋮", app.lernet.engine.text.NetworkWords.ALL_HELP),
 }
 
 /** A read-only view: all operating-system work belongs to the caller. */
@@ -115,8 +115,8 @@ internal fun DesktopNetworkObservation(
                 Spacer(Modifier.height(12.dp))
                 HorizontalDivider()
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Меньше движения", fontSize = 12.sp, modifier = Modifier.weight(1f))
-                    Switch(reducedMotion, { reducedMotion = it }, Modifier.padding(start = 4.dp).semantics { contentDescription = "Меньше движения" })
+                    Text(app.lernet.engine.text.NetworkWords.LESS_MOTION, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                    Switch(reducedMotion, { reducedMotion = it }, Modifier.padding(start = 4.dp).semantics { contentDescription = app.lernet.engine.text.NetworkWords.LESS_MOTION })
                 }
                 Text("Наблюдение не меняет настройки сети.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
@@ -148,8 +148,8 @@ internal fun DesktopNetworkObservation(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         TextButton(onExport, enabled = snapshot != null && !busy) { Text("Сохранить полный разбор") }
                         Spacer(Modifier.weight(1f))
-                        Text("Меньше движения", fontSize = 12.sp)
-                        Switch(reducedMotion, { reducedMotion = it }, Modifier.semantics { contentDescription = "Меньше движения" })
+                        Text(app.lernet.engine.text.NetworkWords.LESS_MOTION, fontSize = 12.sp)
+                        Switch(reducedMotion, { reducedMotion = it }, Modifier.semantics { contentDescription = app.lernet.engine.text.NetworkWords.LESS_MOTION })
                     }
                 }
                 if (busy) {

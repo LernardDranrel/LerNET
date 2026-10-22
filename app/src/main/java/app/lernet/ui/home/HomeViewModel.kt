@@ -134,6 +134,7 @@ sealed class HomeIntent {
     data class ReorderUngrouped(val id: String, val beforeId: String) : HomeIntent()
 
     data class ProbeProfiles(val ids: List<String>) : HomeIntent()
+    data class ProbeProfilesFull(val ids: List<String>) : HomeIntent()
 
     data object ConfirmApplyRoutes : HomeIntent()
 
@@ -452,7 +453,8 @@ class HomeViewModel @Inject constructor(
                         repository.reorderProfiles(profiles)
                     }
                 }
-                is HomeIntent.ProbeProfiles -> probeProfiles(intent.ids)
+                is HomeIntent.ProbeProfiles -> probeProfiles(intent.ids, app.lernet.engine.policy.LinkCheck.Intensity.GENTLE)
+                is HomeIntent.ProbeProfilesFull -> probeProfiles(intent.ids, app.lernet.engine.policy.LinkCheck.Intensity.FULL)
                 HomeIntent.ConfirmApplyRoutes -> reconnectSameOutbound()
                 HomeIntent.DismissApplyRoutes -> Unit
                 HomeIntent.DismissLastLogs -> {
@@ -507,7 +509,7 @@ class HomeViewModel @Inject constructor(
         return ProfileProbe(tcpMs = result?.latencyMs, reachable = result?.ok == true, throughTunnel = result?.throughTunnel == true)
     }
 
-    private suspend fun probeProfiles(ids: List<String>) {
+    private suspend fun probeProfiles(ids: List<String>, intensity: app.lernet.engine.policy.LinkCheck.Intensity = app.lernet.engine.policy.LinkCheck.Intensity.GENTLE) {
         val profiles = repository.profiles.first().associateBy { it.id }
         val unique = ids.distinct().filter { it in profiles }
         if (unique.isEmpty()) return
@@ -527,7 +529,7 @@ class HomeViewModel @Inject constructor(
                 val active = connected && snapshot.activeProfileId == id
                 // One algorithm with Windows (LinkCheck): budget first, one by one, never a second core.
                 val plan = app.lernet.engine.policy.LinkCheck.plan(active, connected,
-                    endpoint?.transport == app.lernet.engine.net.ProbeTransport.TCP)
+                    endpoint?.transport == app.lernet.engine.net.ProbeTransport.TCP, intensity)
                 val server = when {
                     endpoint == null -> ProfileProbe(reachable = false)
                     // The running config is already connected: measure it through the tunnel only.
@@ -542,9 +544,12 @@ class HomeViewModel @Inject constructor(
                 } else {
                     null
                 }
+                // Полная проверка при выключенном VPN: отдельное рукопожатие к серверу уже в checkServer;
+                // временного второго ядра на телефоне нет — путь через туннель честно «при подключении».
+                val diagnostic = plan.fullPath == app.lernet.engine.policy.LinkCheck.FullPath.DIAGNOSTIC
                 val result = server?.copy(
                     tunnelMs = tunnel?.getOrNull(),
-                    tunnelChecked = tunnel != null,
+                    tunnelChecked = tunnel != null || diagnostic,
                     requestId = requestId,
                 )
                 overlay.update { old ->

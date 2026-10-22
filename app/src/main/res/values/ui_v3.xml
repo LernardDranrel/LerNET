@@ -99,7 +99,7 @@
     <string name="settings_leaks_row">Блокировать соединения без VPN</string>
     <string name="settings_leaks_value">в настройках Android</string>
     <string name="settings_leaks_help">Включает сам Android: «Постоянный VPN» и «Блокировать соединения без VPN» для LerNET. Тогда, если LerNET закроется, телефон не пустит трафик мимо VPN. LerNET не может включить это за вас.</string>
-    <string name="settings_share_log_row">Отправить журнал разработчику</string>
+    <string name="settings_share_log_row">Сохранить журнал для разработчика</string>
     <string name="settings_network_row">Анализ сети</string>
     <string name="settings_updates_row">Проверять обновления раз в сутки</string>
     <string name="settings_updates_now">Проверить сейчас</string>
@@ -136,7 +136,7 @@
     <string name="journal_live_on">Живая запись включена: строки сохраняются для «Сохранить запись».</string>
     <string name="journal_more">Действия журнала</string>
     <string name="journal_copy">Скопировать журнал</string>
-    <string name="journal_share">Отправить журнал</string>
+    <string name="journal_share">Сохранить журнал</string>
     <string name="journal_save_record">Сохранить запись</string>
     <string name="journal_hint">Нажмите строку — откроются подробности. В ⋮: скопировать, отправить журнал, сохранить запись, анализ сети.</string>
     <string name="journal_nothing_found">Ничего не найдено. Измените поиск или фильтр.</string>

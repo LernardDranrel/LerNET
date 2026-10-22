@@ -673,7 +673,7 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
     if (importOpen) ImportDialog(
         groupName = ui.saved.groups.firstOrNull { it.id == importGroupId }?.name,
         onDismiss = { importOpen = false },
-    ) { controller.import(it, importGroupId); importOpen = false }
+    ) { raw, name, mode -> controller.import(raw, importGroupId, name, mode); importOpen = false }
     if (newGroupOpen) NameDialog("Новая папка", "", { newGroupOpen = false }) {
         controller.addGroup(it); newGroupOpen = false
     }
@@ -732,7 +732,8 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
     controller: DesktopController, compact: Boolean = false, onImport: (String?) -> Unit, onGroupRoutes: (String) -> Unit,
     onExportGroup: (StoredGroup) -> Unit, onSelect: (String) -> Unit, onProfileRoutes: (String) -> Unit = {},
     addAction: @Composable () -> Unit) {
-    val selectionLocked = busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RECONNECTING)
+    // Сознательная смена конфига всегда разрешена (решения 23.10 п.1): спрашиваем, не блокируем.
+    var pendingSwitchId by remember { mutableStateOf<String?>(null) }
     var editProfile by remember { mutableStateOf<StoredProfile?>(null) }
     var renameGroup by remember { mutableStateOf<StoredGroup?>(null) }
     var deleteGroup by remember { mutableStateOf<StoredGroup?>(null) }
@@ -802,7 +803,6 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                 Text(app.lernet.engine.text.ConfigListWords.summary(done.size, saved.profiles.size, done.count { it.latencyMs != null }, known.any { it.checking }),
                     color = muted, fontSize = 12.sp)
             }
-            if (selectionLocked) Text("Дождитесь завершения переключения", color = muted, fontSize = 12.sp)
             Spacer(Modifier.height(10.dp))
             LazyColumn(modifier = Modifier.weight(1f).onGloballyPositioned { listBounds = it.boundsInWindow() }, verticalArrangement = Arrangement.spacedBy(7.dp)) {
                 saved.groups.forEach { group ->
@@ -885,7 +885,7 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                     }
                     items(saved.profiles.filter { it.groupId == group.id && group.id in expanded }, key = { it.id }) { profile ->
                         DisposableEffect(profile.id) { onDispose { profileBounds.remove(profile.id) } }
-                        ProfileRow(profile, profile.id == saved.selectedProfileId, !selectionLocked, probes[profile.id],
+                        ProfileRow(profile, profile.id == saved.selectedProfileId, true, probes[profile.id],
                             onProbe = { controller.probe(listOf(profile.id)) }, onMove = { controller.moveProfile(profile.id, it) },
                             onDuplicate = { controller.duplicateProfile(profile.id) },
                             onRefreshSubscription = profile.subscriptionUrl?.takeIf(String::isNotBlank)?.let { url -> { controller.refreshSubscription(url) } },
@@ -897,12 +897,15 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                             onDragStart = { local -> beginDrag(profile.id, (profileBounds[profile.id]?.topLeft ?: Offset.Zero) + local) },
                             onDrag = { dragDelta += it }, onDragEnd = finishDrag,
                             onDelete = { controller.delete(profile.id) }, compact = compact,
-                            onEdit = { editProfile = profile }, onRules = { onGroupRoutes(group.id) }) { onSelect(profile.id) }
+                            onEdit = { editProfile = profile }, onRules = { onGroupRoutes(group.id) }) {
+                            val active = tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RUNNING, TunnelStatus.RECONNECTING)
+                            if (active && profile.id != saved.selectedProfileId) pendingSwitchId = profile.id else onSelect(profile.id)
+                        }
                     }
                 }
                 items(saved.profiles.filter { it.groupId == null }, key = { it.id }) { profile ->
                     DisposableEffect(profile.id) { onDispose { profileBounds.remove(profile.id) } }
-                    ProfileRow(profile, profile.id == saved.selectedProfileId, !selectionLocked, probes[profile.id],
+                    ProfileRow(profile, profile.id == saved.selectedProfileId, true, probes[profile.id],
                         onProbe = { controller.probe(listOf(profile.id)) }, onMove = { controller.moveProfile(profile.id, it) },
                         onDuplicate = { controller.duplicateProfile(profile.id) },
                         onRefreshSubscription = profile.subscriptionUrl?.takeIf(String::isNotBlank)?.let { url -> { controller.refreshSubscription(url) } },
@@ -914,7 +917,10 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                         onDragStart = { local -> beginDrag(profile.id, (profileBounds[profile.id]?.topLeft ?: Offset.Zero) + local) },
                         onDrag = { dragDelta += it }, onDragEnd = finishDrag,
                         onDelete = { controller.delete(profile.id) }, compact = compact,
-                        onEdit = { editProfile = profile }, onRules = { onProfileRoutes(profile.id) }) { onSelect(profile.id) }
+                        onEdit = { editProfile = profile }, onRules = { onProfileRoutes(profile.id) }) {
+                        val active = tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RUNNING, TunnelStatus.RECONNECTING)
+                        if (active && profile.id != saved.selectedProfileId) pendingSwitchId = profile.id else onSelect(profile.id)
+                    }
                 }
                 if (draggingId != null) item("drop-root") {
                     DisposableEffect(Unit) { onDispose { rootBounds = null } }
@@ -926,6 +932,20 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                 }
             }
     }
+
+    pendingSwitchId?.let { id ->
+        val name = saved.profiles.firstOrNull { it.id == id }?.name ?: id
+        AlertDialog(
+            onDismissRequest = { pendingSwitchId = null },
+            title = { Text("Сменить и переподключить?") },
+            text = { Text("Сейчас активна сессия. Подключимся заново с конфигом «$name».") },
+            confirmButton = {
+                TextButton(onClick = { pendingSwitchId = null; onSelect(id) }) { Text("Сменить") }
+            },
+            dismissButton = { TextButton(onClick = { pendingSwitchId = null }) { Text("Отмена") } },
+        )
+    }
+
     renameGroup?.let { group ->
         NameDialog("Название папки", group.name, { renameGroup = null }) {
             controller.renameGroup(group.id, it); renameGroup = null
@@ -1148,6 +1168,7 @@ private fun HomeNote(text: String) {
 private fun HomeLinkPanel(selected: StoredProfile, endpoint: app.lernet.engine.compile.OwnedOutbound?, tunnel: TunnelSnapshot, active: Boolean,
     probe: ProbeResult?, tunnelLatencyMs: Long?, diagnostics: CoreDiagnostics, trace: TraceSnapshot, controller: DesktopController) {
     var pathOpen by remember { mutableStateOf(false) }
+    var fullConfirm by remember { mutableStateOf(false) }
     val running = tunnel.status == TunnelStatus.RUNNING
     val checking = probe?.checking == true
     // The same rows, words and rules as the phone's LinkCard (shared HomeWords); no tooltip with protocol names.
@@ -1155,8 +1176,26 @@ private fun HomeLinkPanel(selected: StoredProfile, endpoint: app.lernet.engine.c
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(HomeWords.LINK_TITLE, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             TextButton(onClick = { controller.probe(listOf(selected.id)) }, enabled = !checking, modifier = Modifier.testTag("home_link_check")) {
-                Text(if (checking) HomeWords.CHECKING_BUTTON else HomeWords.CHECK)
+                Text(if (checking) HomeWords.CHECKING_BUTTON else app.lernet.engine.policy.LinkCheck.GENTLE_LABEL)
             }
+            TextButton(
+                onClick = { fullConfirm = true }, enabled = !checking && !running,
+                modifier = Modifier.testTag("home_link_check_full"),
+            ) { Text(app.lernet.engine.policy.LinkCheck.FULL_LABEL) }
+        }
+        if (fullConfirm) {
+            AlertDialog(
+                onDismissRequest = { fullConfirm = false },
+                title = { Text(app.lernet.engine.policy.LinkCheck.FULL_CONFIRM_TITLE) },
+                text = { Text(app.lernet.engine.policy.LinkCheck.FULL_CONFIRM_BODY) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        fullConfirm = false
+                        controller.probe(listOf(selected.id), app.lernet.engine.policy.LinkCheck.Intensity.FULL)
+                    }) { Text(app.lernet.engine.policy.LinkCheck.FULL_CONFIRM) }
+                },
+                dismissButton = { TextButton(onClick = { fullConfirm = false }) { Text("Отмена") } },
+            )
         }
         probe?.budgetWaitMs?.let { wait ->
             Text(app.lernet.engine.policy.BudgetNotice.full(wait, expert = false), color = muted, fontSize = 12.sp)
@@ -1776,7 +1815,7 @@ internal fun Diagnostics(
                             Column(Modifier.weight(1f)) {
                                 Text(process.label.ifBlank { JournalWords.SYSTEM }, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(listOfNotNull(row.host.ifBlank { row.destination },
-                                    if (journalSilent(row)) JournalWords.NO_REPLY else row.rule.takeIf { it.isNotBlank() }?.let(JournalWords::rule))
+                                    if (journalSilent(row)) JournalWords.NO_REPLY else row.rule.takeIf { it.isNotBlank() }?.let(JournalWords::ruleLabeled))
                                     .joinToString(" · "), color = muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             JournalBadge(journalRoute(row))
@@ -1820,7 +1859,7 @@ private fun JournalDetails(row: LiveConnection, onClose: () -> Unit) {
                 JournalRoute.DIRECT -> JournalWords.VIA_DIRECT
                 JournalRoute.BLOCK -> JournalWords.BADGE_BLOCK
             })
-            JournalDetail(JournalWords.RULE, row.rule.ifBlank { JournalWords.RULE_UNKNOWN })
+            JournalDetail(JournalWords.RULE, row.rule.takeIf { it.isNotBlank() }?.let(JournalWords::kernel) ?: JournalWords.RULE_UNKNOWN)
             JournalDetail(JournalWords.STATE, when {
                 row.active -> JournalWords.STATE_OPEN
                 journalSilent(row) -> JournalWords.STATE_SILENT
@@ -1828,7 +1867,7 @@ private fun JournalDetails(row: LiveConnection, onClose: () -> Unit) {
             })
             JournalDetail(JournalWords.BYTES, "↑ ${bytesText(row.upload)} · ↓ ${bytesText(row.download)}")
             if (row.network.isNotBlank()) JournalDetail(JournalWords.KIND, row.network.uppercase())
-            if (row.chains.isNotEmpty()) JournalDetail(JournalWords.CHAIN, row.chains.joinToString(" → "))
+            if (row.chains.isNotEmpty()) JournalDetail(JournalWords.CHAIN, row.chains.joinToString(" → ", transform = JournalWords::kernel))
             process.parent?.let { JournalDetail("Запущено из", it) }
             if (row.process.isNotBlank()) JournalDetail("Путь", row.process)
             Text(JournalWords.ENCRYPTED, color = muted, fontSize = 12.sp)
@@ -2412,15 +2451,32 @@ private fun SettingAdvice(title: String, text: String) {
     }
 }
 @Composable
-private fun ImportDialog(groupName: String?, onDismiss: () -> Unit, onImport: (String) -> Unit) {
+private fun ImportDialog(
+    groupName: String?,
+    onDismiss: () -> Unit,
+    onImport: (String, String?, app.lernet.config.parse.GuessedMode?) -> Unit,
+) {
     var value by remember { mutableStateOf("") }
+    var displayName by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
+    var forced by remember { mutableStateOf<app.lernet.config.parse.GuessedMode?>(null) }
+    val chips = listOf(
+        null to "Авто",
+        app.lernet.config.parse.GuessedMode.VLESS to ImportWords.CHIP_VLESS,
+        app.lernet.config.parse.GuessedMode.JSON_PASTE to ImportWords.CHIP_JSON,
+        app.lernet.config.parse.GuessedMode.JSON_URL to ImportWords.CHIP_URL,
+        app.lernet.config.parse.GuessedMode.SUBSCRIPTION to ImportWords.CHIP_SUB,
+    )
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (groupName == null) ImportWords.TITLE else ImportWords.intoFolder(groupName)) },
         text = {
-            Column {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(ImportWords.HINT, color = muted)
+                OutlinedTextField(
+                    displayName, { displayName = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text(ImportWords.NAME) }, placeholder = { Text(ImportWords.NAME_HINT) },
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     TextButton(onClick = {
                         value = runCatching { Toolkit.getDefaultToolkit().systemClipboard.getData(DataFlavor.stringFlavor) as String }
@@ -2439,13 +2495,37 @@ private fun ImportDialog(groupName: String?, onDismiss: () -> Unit, onImport: (S
                         }
                         picker.dispose()
                     }) { Text(ImportWords.FROM_FILE) }
+                    TextButton(onClick = {
+                        val picker = FileDialog(null as Frame?, ImportWords.FROM_QR, FileDialog.LOAD)
+                        picker.isVisible = true
+                        picker.file?.let { name ->
+                            val file = Path.of(picker.directory, name)
+                            val decoded = DesktopQr.decodeFile(file)
+                            when {
+                                decoded == null && !Files.exists(file) -> error = ImportWords.QR_FAIL
+                                decoded == null -> error = ImportWords.QR_NONE
+                                else -> { value = decoded; error = "" }
+                            }
+                        }
+                        picker.dispose()
+                    }) { Text(ImportWords.FROM_QR) }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    chips.forEach { (mode, label) ->
+                        FilterChip(selected = forced == mode, onClick = { forced = mode }, label = { Text(label) })
+                    }
                 }
                 OutlinedTextField(value, { value = it }, modifier = Modifier.fillMaxWidth().height(170.dp),
                     placeholder = { Text(ImportWords.INPUT_EXAMPLE) })
                 if (error.isNotBlank()) Text(error, color = desktopColors.error, fontSize = 12.sp)
             }
         },
-        confirmButton = { TextButton(onClick = { onImport(value.trim()) }, enabled = value.isNotBlank()) { Text(ImportWords.ACTION) } },
+        confirmButton = {
+            TextButton(
+                onClick = { onImport(value.trim(), displayName.trim().ifBlank { null }, forced) },
+                enabled = value.isNotBlank(),
+            ) { Text(ImportWords.ACTION) }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
     )
 }

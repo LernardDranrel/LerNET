@@ -33,4 +33,36 @@ object JournalWords {
     const val NOTHING_FOUND = "Ничего не найдено. Измените поиск или фильтр."
     const val SYSTEM = "Системное приложение"
     const val UNKNOWN_APP = "Приложение не определено"
+
+    /**
+     * Сырые слова ядра в обычном режиме: русский перевод и серым оригинал в скобках.
+     * Неизвестные имена оставляем как есть.
+     */
+    private val KERNEL = mapOf(
+        "rule" to "правило",
+        "proxy" to "через VPN",
+        "direct" to "напрямую",
+        "block" to "запрет",
+        "reject" to "запрет",
+        "final" to "итог",
+        "dns-out" to "DNS",
+        "uid" to "приложение",
+    )
+
+    /** «правило (rule)», «через VPN (proxy)»; неизвестное — без скобок. */
+    fun kernel(raw: String): String {
+        val key = raw.trim()
+        if (key.isEmpty()) return key
+        val lower = key.lowercase()
+        val ru = KERNEL[lower]
+        return if (ru != null) "$ru ($key)" else key
+    }
+
+    /** Правило в строке журнала: перевод имени, если это слово ядра. */
+    fun ruleLabeled(name: String): String {
+        val shown = kernel(name)
+        return if (shown == name) rule(name) else "правило «$shown»"
+    }
+
+    fun uidLabeled(uid: Int): String = "приложение (uid $uid)"
 }

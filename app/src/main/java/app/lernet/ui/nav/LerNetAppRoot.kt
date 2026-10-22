@@ -119,7 +119,7 @@ fun LerNetAppRoot() {
     }
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
-    val shareFailed = stringResource(R.string.logs_share_failed)
+    val saveFailed = stringResource(R.string.logs_save_failed)
     var pendingImportGroupId by remember { mutableStateOf<String?>(null) }
     var exportRequest by remember { mutableStateOf<ExportRequest?>(null) }
     var activeExportGroupId by remember { mutableStateOf<String?>(null) }
@@ -129,6 +129,16 @@ fun LerNetAppRoot() {
     }
     val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) homeViewModel.importTransfer(uri)
+    }
+    val saveJournal = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        if (uri != null) {
+            runCatching {
+                val store = (context.applicationContext as LerNetApp).logStore
+                LogShare.saveSession(context, store, uri)
+            }.onFailure {
+                Toast.makeText(context, saveFailed, Toast.LENGTH_SHORT).show()
+            }
+        }
     }
     LaunchedEffect(homeViewModel) {
         homeViewModel.transferMessages.collect { snackbar.showSnackbar(it) }
@@ -146,14 +156,7 @@ fun LerNetAppRoot() {
             dismissButton = { TextButton(onClick = { exportRequest = null }) { Text(stringResource(R.string.cancel)) } },
         )
     }
-    val shareLogs: () -> Unit = {
-        runCatching {
-            val store = (context.applicationContext as LerNetApp).logStore
-            LogShare.shareSession(context, store)
-        }.onFailure {
-            Toast.makeText(context, shareFailed, Toast.LENGTH_SHORT).show()
-        }
-    }
+    val shareLogs: () -> Unit = { saveJournal.launch(LogShare.SUGGESTED_NAME) }
     var crashDialogOpen by remember { mutableStateOf(false) }
     LaunchedEffect(homeState.offerLastLogs) {
         if (homeState.offerLastLogs) crashDialogOpen = true

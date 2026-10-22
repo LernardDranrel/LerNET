@@ -79,19 +79,113 @@ internal fun ExpertExits(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit,
             "Сбой одного конфига не выключает туннель. Проверки не будят спящие конфиги.",
             color = ExpertColors.muted, fontSize = 13.sp
         )
-        if (exits.isNotEmpty()) ExpertExitTableHeader()
-        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            if (exits.isEmpty()) {
+        val schemeFolders = state.folders.filter { folder ->
+            state.draft.folderPolicies.any { it.folderId == folder.id } ||
+                state.exits.any { it.folderId == folder.id } ||
+                state.profiles.any { it.folderId == folder.id }
+        }
+        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Решения 23.10 п.4: все VPN-конфиги, как на телефоне.
+            item {
+                Text("Все конфиги", color = ExpertColors.text, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Те же, что в режиме VPN. Их можно выбрать целью в схеме или положить в папку.",
+                    color = ExpertColors.muted, fontSize = 12.sp,
+                )
+            }
+            if (state.profiles.isEmpty()) {
                 item {
                     ExpertEmpty(
-                        if (state.exits.isEmpty()) app.lernet.engine.text.ExpertWords.EXITS_EMPTY else app.lernet.engine.text.ExpertWords.SLEEPING_NONE.substringBefore(". "),
-                        if (state.exits.isNotEmpty()) {
-                            "Все конфиги сейчас на связи или ждут проверки. " + app.lernet.engine.text.ExpertWords.SLEEPING_NONE.substringAfter(". ")
-                        } else {
-                            "Эксперт берёт те же конфиги, что и режим VPN. Добавь их там — ссылкой, QR-кодом или файлом, — " +
-                                "и они появятся здесь, когда схема направит в них трафик. " +
-                                "Выход через другое приложение или интерфейс можно добавить кнопкой выше."
+                        app.lernet.engine.text.ExpertWords.EXITS_EMPTY,
+                        "Добавь конфиг в режиме VPN — ссылкой, QR-кодом или файлом — и он появится здесь.",
+                    )
+                }
+            } else {
+                items(state.profiles, key = { "all-" + it.id }) { profile ->
+                    val live = state.exits.firstOrNull { it.profileId == profile.id }
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
+                            live?.let { selected = it.id } ?: run {
+                                importedInterfaceDetails = profile.takeIf { it.interfaceBinding != null }
+                            }
+                        },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(profile.name, color = ExpertColors.text)
+                            val folder = profile.folderId?.let { id -> state.folders.firstOrNull { it.id == id }?.name }
+                            Text(
+                                listOfNotNull(folder?.let { "папка «$it»" }, profile.protocol.takeIf { it.isNotBlank() }).joinToString(" · ")
+                                    .ifBlank { "конфиг VPN" },
+                                color = ExpertColors.muted, fontSize = 12.sp,
+                            )
                         }
+                        live?.let {
+                            ExpertTag(exitDisplayName(it, state), exitDisplayColor(it, state))
+                        }
+                    }
+                }
+            }
+            // Отдельный блок: задействованные в схеме папки со стратегией и состоянием.
+            item {
+                Text("Задействованные в схеме", color = ExpertColors.text, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Папки и выходы, куда схема уже направила трафик, со стратегией выбора.",
+                    color = ExpertColors.muted, fontSize = 12.sp,
+                )
+            }
+            if (schemeFolders.isEmpty() && exits.isEmpty()) {
+                item {
+                    Text(
+                        "Пока схема никуда не направила трафик. Добавь правило или папку — здесь появятся задействованные конфиги.",
+                        color = ExpertColors.muted, fontSize = 13.sp,
+                    )
+                }
+            }
+            items(schemeFolders, key = { "folder-" + it.id }) { folder ->
+                val policy = state.draft.folderPolicies.firstOrNull { it.folderId == folder.id }
+                    ?: app.lernet.routing.policy.FolderPolicy(folder.id)
+                val members = state.profiles.filter { it.folderId == folder.id }
+                Column(
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(folder.name, color = ExpertColors.text, fontWeight = FontWeight.Medium)
+                    Text(
+                        "Стратегия: ${folderStrategyTitle(policy.selection)}" +
+                            (if (policy.autoSwap) " · автосмена" else ""),
+                        color = ExpertColors.muted, fontSize = 12.sp,
+                    )
+                    members.forEach { profile ->
+                        val live = state.exits.firstOrNull { it.profileId == profile.id }
+                        Row(
+                            Modifier.fillMaxWidth().padding(start = 12.dp, top = 2.dp, bottom = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(profile.name, color = ExpertColors.text, modifier = Modifier.weight(1f))
+                            live?.let { ExpertTag(exitDisplayName(it, state), exitDisplayColor(it, state)) }
+                                ?: Text("в схеме", color = ExpertColors.muted, fontSize = 12.sp)
+                        }
+                    }
+                    if (members.isEmpty()) {
+                        Text("В папке пока нет конфигов.", color = ExpertColors.muted, fontSize = 12.sp,
+                            modifier = Modifier.padding(start = 12.dp))
+                    }
+                    OutlinedButton(onClick = { editingFolder = folder.id }, enabled = !state.busy) {
+                        Text("Настроить папку")
+                    }
+                }
+            }
+            if (exits.isNotEmpty()) {
+                item { ExpertExitTableHeader() }
+            } else if (sleepingOnly) {
+                item {
+                    ExpertEmpty(
+                        app.lernet.engine.text.ExpertWords.SLEEPING_NONE.substringBefore(". "),
+                        "Все конфиги сейчас на связи или ждут проверки. " +
+                            app.lernet.engine.text.ExpertWords.SLEEPING_NONE.substringAfter(". "),
                     )
                 }
             }

@@ -1,10 +1,8 @@
 package app.lernet.log
 
-import android.content.ClipData
 import android.content.Context
-import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
-import androidx.core.content.FileProvider
 import app.lernet.R
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -13,53 +11,56 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * «Сохранить журнал»: writes the redacted session bundle into a file the user chose
+ * (CreateDocument / system save). Nothing is sent to another app.
+ */
 object LogShare {
-    private val shareScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    fun shareSession(context: Context, store: AppLogStore) {
-        shareScope.launch {
+    /** Suggested file name for CreateDocument. */
+    const val SUGGESTED_NAME = "LerNET-journal.txt"
+
+    fun saveSession(context: Context, store: AppLogStore, uri: Uri) {
+        scope.launch {
             val prepared = runCatching { store.flushShareBundle() }
             withContext(Dispatchers.Main) {
                 prepared.fold(
-                    onSuccess = { file -> shareOrReport(context, file, context.getString(R.string.share_logs)) },
+                    onSuccess = { file ->
+                        runCatching { writeFile(context, uri, file) }
+                            .onSuccess {
+                                Toast.makeText(context, R.string.logs_saved, Toast.LENGTH_SHORT).show()
+                            }
+                            .onFailure { showFailure(context) }
+                    },
                     onFailure = { showFailure(context) },
                 )
             }
         }
     }
 
-    fun shareTextFile(context: Context, text: String, name: String, title: String) {
-        shareScope.launch {
-            val prepared = runCatching {
-                File(context.cacheDir, name).apply { writeText(text) }
-            }
+    fun saveText(context: Context, text: String, uri: Uri) {
+        scope.launch {
             withContext(Dispatchers.Main) {
-                prepared.fold(
-                    onSuccess = { file -> shareOrReport(context, file, title) },
-                    onFailure = { showFailure(context) },
-                )
+                runCatching {
+                    context.contentResolver.openOutputStream(uri)?.use { out ->
+                        out.write(text.toByteArray(Charsets.UTF_8))
+                    } ?: error("no stream")
+                }.onSuccess {
+                    Toast.makeText(context, R.string.logs_saved, Toast.LENGTH_SHORT).show()
+                }.onFailure { showFailure(context) }
             }
         }
     }
 
-    private fun shareOrReport(context: Context, file: File, title: String) {
-        runCatching { shareFile(context, file, title) }.onFailure { showFailure(context) }
+    private fun writeFile(context: Context, uri: Uri, file: File) {
+        require(file.exists()) { "Journal file is missing" }
+        context.contentResolver.openOutputStream(uri)?.use { out ->
+            file.inputStream().use { input -> input.copyTo(out) }
+        } ?: error("no stream")
     }
 
     private fun showFailure(context: Context) {
-        Toast.makeText(context, R.string.logs_share_failed, Toast.LENGTH_SHORT).show()
-    }
-
-    private fun shareFile(context: Context, file: File, title: String) {
-        require(file.exists()) { "Share file is missing" }
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-        val send = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_SUBJECT, title)
-            clipData = ClipData.newRawUri(title, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        context.startActivity(Intent.createChooser(send, title))
+        Toast.makeText(context, R.string.logs_save_failed, Toast.LENGTH_SHORT).show()
     }
 }

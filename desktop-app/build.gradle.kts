@@ -48,6 +48,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation("net.java.dev.jna:jna:5.6.0")
     implementation("net.java.dev.jna:jna-platform:5.6.0")
+    implementation(libs.zxing.core)
     testImplementation(libs.junit)
     testImplementation(libs.truth)
 }

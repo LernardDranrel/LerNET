@@ -80,6 +80,8 @@ import app.lernet.engine.live.ChannelWatch
 import app.lernet.engine.live.SilenceReport
 import app.lernet.engine.net.OutboundEndpoint
 import app.lernet.engine.policy.LinkHold
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import app.lernet.log.LogShare
 import app.lernet.ui.components.LerNetLogo
 import app.lernet.ui.components.PanelCard
@@ -172,7 +174,17 @@ private fun HomeBody(
         return
     }
     val context = LocalContext.current
-    val shareFailed = stringResource(R.string.logs_share_failed)
+    val saveFailed = stringResource(R.string.logs_save_failed)
+    val saveJournal = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        if (uri != null) {
+            runCatching {
+                val store = (context.applicationContext as LerNetApp).logStore
+                LogShare.saveSession(context, store, uri)
+            }.onFailure {
+                Toast.makeText(context, saveFailed, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
     val metrics = rememberCompactMetrics()
     val liveMode = if (isSessionActive(snapshot.state)) snapshot.mode else state.effectiveMode
     // Mockup m1: button and state without a frame, one config line, one attention zone, one «Связь» card, the journal row.
@@ -218,7 +230,7 @@ private fun HomeBody(
                     cause = snapshot.cause,
                     onRetry = { onIntent(HomeIntent.ToggleConnect) },
                     onProfiles = onOpenDrawer,
-                    onShareLogs = { shareSessionLogs(context, shareFailed) },
+                    onShareLogs = { saveJournal.launch(LogShare.SUGGESTED_NAME) },
                 )
             }
             snapshot.tried?.let { report ->
@@ -238,7 +250,7 @@ private fun HomeBody(
             if (showCrashBanner && state.offerLastLogs) add {
                 LastLogsBanner(
                     onShare = {
-                        shareSessionLogs(context, shareFailed)
+                        saveJournal.launch(LogShare.SUGGESTED_NAME)
                         onIntent(HomeIntent.DismissLastLogs)
                     },
                     onDismiss = { onIntent(HomeIntent.DismissLastLogs) },
@@ -729,14 +741,6 @@ private fun ExitSessionDialog(onStay: () -> Unit, onExit: () -> Unit) {
     )
 }
 
-private fun shareSessionLogs(context: Context, failedMessage: String) {
-    runCatching {
-        val store = (context.applicationContext as LerNetApp).logStore
-        LogShare.shareSession(context, store)
-    }.onFailure {
-        Toast.makeText(context, failedMessage, Toast.LENGTH_SHORT).show()
-    }
-}
 
 private fun isConnecting(state: ConnectionState): Boolean =
     state == ConnectionState.CONNECTING || state == ConnectionState.RECONNECTING

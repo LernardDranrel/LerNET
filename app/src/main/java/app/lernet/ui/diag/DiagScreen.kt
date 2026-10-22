@@ -54,11 +54,14 @@ import androidx.compose.ui.unit.dp
 import app.lernet.BuildConfig
 import app.lernet.LerNetApp
 import app.lernet.R
+import app.lernet.engine.text.JournalWords
 import app.lernet.engine.TrafficDisplay
 import app.lernet.engine.live.ChannelHealth
 import app.lernet.engine.live.ChannelWatch
 import app.lernet.engine.live.LiveConn
 import app.lernet.engine.live.LiveConnStatus
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import app.lernet.log.LogShare
 import app.lernet.ui.components.PanelCard
 import app.lernet.ui.icons.LerNetSymbols
@@ -178,7 +181,7 @@ fun DiagScreen(
             when (val face = resolveAppFace(packages, row.uid, row.pid, row.app)) {
                 is AppFace.Installed -> face.label
                 AppFace.System -> system
-                is AppFace.Uid -> uidTitle.replace("0", face.uid.toString())
+                is AppFace.Uid -> JournalWords.uidLabeled(face.uid)
                 is AppFace.Pid -> "pid ${face.pid}"
             }
         }
@@ -242,7 +245,7 @@ private fun JournalRow(row: LiveConn, title: String, onClick: () -> Unit) {
     val host = row.domain?.takeIf { it.isNotBlank() } ?: row.dest
     val tail = when {
         row.status == LiveConnStatus.UNFINISHED -> stringResource(R.string.journal_no_reply)
-        !row.rule.isNullOrBlank() -> stringResource(R.string.journal_rule, row.rule!!)
+        !row.rule.isNullOrBlank() -> JournalWords.ruleLabeled(row.rule!!)
         else -> null
     }
     Row(
@@ -294,7 +297,7 @@ private fun JournalDetails(row: LiveConn, title: String, ping: String?, onPing: 
             RouteTone.BLOCK -> stringResource(R.string.journal_badge_block)
             RouteTone.VIA -> stringResource(R.string.journal_via_vpn)
         })
-        DetailLine(stringResource(R.string.journal_rule_title), model.rule ?: stringResource(R.string.diag_rule_unavailable))
+        DetailLine(stringResource(R.string.journal_rule_title), model.rule?.let(JournalWords::kernel) ?: stringResource(R.string.diag_rule_unavailable))
         DetailLine(stringResource(R.string.journal_state), when (model.status) {
             LiveConnStatus.OPEN -> stringResource(R.string.diag_status_open)
             LiveConnStatus.CLOSED -> stringResource(R.string.diag_status_ok)
@@ -305,7 +308,7 @@ private fun JournalDetails(row: LiveConn, title: String, ping: String?, onPing: 
         if (transport.isNotEmpty()) DetailLine(stringResource(R.string.journal_kind), transport)
         model.protocol?.let { DetailLine(stringResource(R.string.journal_app_protocol), it) }
         if (model.routeChain.isNotEmpty()) DetailLine(stringResource(R.string.journal_chain), model.routeChain.joinToString(" → "))
-        model.uid?.let { Text("uid $it", style = MaterialTheme.typography.bodySmall, color = muted) }
+        model.uid?.let { Text(JournalWords.uidLabeled(it), style = MaterialTheme.typography.bodySmall, color = muted) }
         model.pid?.let { PidLine(it) }
         if (model.hasCapturedContent) {
             TextButton(onClick = { contentOpen = !contentOpen }, modifier = Modifier.heightIn(min = 48.dp)) {
@@ -347,9 +350,25 @@ private fun ObserveDiagEvents(events: Flow<DiagEvent>) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val copied = stringResource(R.string.copied)
-    val shareFailed = stringResource(R.string.logs_share_failed)
+    val saveFailed = stringResource(R.string.logs_save_failed)
     val emptyRec = stringResource(R.string.diag_recording_empty)
     val idleRec = stringResource(R.string.diag_recording_idle)
+    var pendingRecording by remember { mutableStateOf<String?>(null) }
+    val saveJournal = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        if (uri != null) {
+            runCatching {
+                val store = (context.applicationContext as LerNetApp).logStore
+                LogShare.saveSession(context, store, uri)
+            }.onFailure { Toast.makeText(context, saveFailed, Toast.LENGTH_SHORT).show() }
+        }
+    }
+    val saveRecording = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        val text = pendingRecording
+        pendingRecording = null
+        if (uri != null && text != null) {
+            LogShare.saveText(context, text, uri)
+        }
+    }
     LaunchedEffect(events) {
         events.collect { event ->
             when (event) {
@@ -357,8 +376,11 @@ private fun ObserveDiagEvents(events: Flow<DiagEvent>) {
                     clipboard.setText(AnnotatedString(event.text))
                     Toast.makeText(context, copied, Toast.LENGTH_SHORT).show()
                 }
-                DiagEvent.ShareLogs -> shareSession(context, shareFailed)
-                is DiagEvent.ShareRecording -> shareRecording(context, event.text, shareFailed)
+                DiagEvent.ShareLogs -> saveJournal.launch(LogShare.SUGGESTED_NAME)
+                is DiagEvent.ShareRecording -> {
+                    pendingRecording = event.text
+                    saveRecording.launch("lernet-live.txt")
+                }
                 is DiagEvent.Message -> {
                     val text = when (event.text) {
                         "empty" -> emptyRec
@@ -369,28 +391,6 @@ private fun ObserveDiagEvents(events: Flow<DiagEvent>) {
                 }
             }
         }
-    }
-}
-
-private fun shareSession(context: Context, shareFailed: String) {
-    runCatching {
-        val store = (context.applicationContext as LerNetApp).logStore
-        LogShare.shareSession(context, store)
-    }.onFailure {
-        Toast.makeText(context, shareFailed, Toast.LENGTH_SHORT).show()
-    }
-}
-
-private fun shareRecording(context: Context, text: String, shareFailed: String) {
-    runCatching {
-        LogShare.shareTextFile(
-            context,
-            text,
-            "lernet-live.txt",
-            context.getString(R.string.diag_export_recording),
-        )
-    }.onFailure {
-        Toast.makeText(context, shareFailed, Toast.LENGTH_SHORT).show()
     }
 }
 

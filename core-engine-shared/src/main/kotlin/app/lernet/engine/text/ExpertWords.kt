@@ -7,6 +7,15 @@ object ExpertWords {
     const val TILE_PROTECTION = "Защита"
     const val PROTECTION_ON = "включена"
     const val PROTECTION_CHECK = "проверь"
+
+    /**
+     * Одна логика плитки «Защита» на обеих платформах:
+     * нет «тихих» веток другой ОС и подтверждена защита при отказе/остановке (exit+DNS или lockdown).
+     */
+    fun protectionOk(inactiveCount: Int, failureGuardOk: Boolean, dnsGuardOk: Boolean): Boolean =
+        inactiveCount == 0 && failureGuardOk && dnsGuardOk
+
+    fun protectionValue(ok: Boolean): String = if (ok) PROTECTION_ON else PROTECTION_CHECK
     const val NO_EXITS = "ещё нет"
 
     // «События» → «Соединения»

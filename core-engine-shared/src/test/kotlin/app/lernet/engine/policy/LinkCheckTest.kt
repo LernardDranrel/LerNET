@@ -18,4 +18,12 @@ class LinkCheckTest {
         assertEquals(LinkCheck.Plan(LinkCheck.Server.DIRECT, LinkCheck.FullPath.ON_CONNECT), LinkCheck.plan(active = true, vpnRunning = false, tcp = true))
         assertEquals("Проверим при подключении", LinkCheck.notMeasured(LinkCheck.FullPath.ON_CONNECT))
     }
+
+    @org.junit.Test fun fullIntensityPlansDiagnosticWhenVpnOff() {
+        assertEquals(
+            LinkCheck.Plan(LinkCheck.Server.DIRECT, LinkCheck.FullPath.DIAGNOSTIC),
+            LinkCheck.plan(active = false, vpnRunning = false, tcp = true, intensity = LinkCheck.Intensity.FULL),
+        )
+        assertEquals(null, LinkCheck.notMeasured(LinkCheck.FullPath.DIAGNOSTIC))
+    }
 }

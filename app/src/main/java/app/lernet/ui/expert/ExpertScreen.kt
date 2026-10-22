@@ -736,15 +736,19 @@ private fun ExpertTiles(runtime: app.lernet.engine.policy.ExpertRuntimeState, st
     val exits = runtime.exits
     val working = exits.count { it.phase == app.lernet.engine.policy.ExitPhase.READY }
     val active = runtime.connections.count { it.active == true }
-    val protectionOk = runtime.inactiveNodeIds.isEmpty()
+    // Одна логика с Windows (ExpertWords.protectionOk): нет тихих веток + защита при отказе.
+    val failureGuard = state.environment?.crashProtectionVerified != false
+    val dnsGuard = true // на Android DNS схемы всегда следует политике VpnService
+    val protectionOk = app.lernet.engine.text.ExpertWords.protectionOk(
+        runtime.inactiveNodeIds.size, failureGuard, dnsGuard,
+    )
+    val words = app.lernet.engine.text.ExpertWords
     Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        // Same values as on Windows (ExpertWords): «2 из 3», «3 активных».
-        ExpertTile(stringResource(R.string.expert_tile_exits), app.lernet.engine.text.ExpertWords.exitsValue(working, exits.size),
+        ExpertTile(stringResource(R.string.expert_tile_exits), words.exitsValue(working, exits.size),
             Modifier.weight(1f).testTag("expert_tile_exits")) { open(ExpertSection.EXITS) }
-        ExpertTile(stringResource(R.string.expert_tile_connections), app.lernet.engine.text.ExpertWords.connectionsValue(active),
+        ExpertTile(stringResource(R.string.expert_tile_connections), words.connectionsValue(active),
             Modifier.weight(1f).testTag("expert_open_events")) { open(ExpertSection.JOURNAL) }
-        ExpertTile(stringResource(R.string.expert_tile_protection),
-            stringResource(if (protectionOk) R.string.expert_tile_protection_on else R.string.expert_tile_protection_check),
+        ExpertTile(stringResource(R.string.expert_tile_protection), words.protectionValue(protectionOk),
             Modifier.weight(1f).testTag("expert_tile_safety"), warn = !protectionOk) { open(ExpertSection.SAFETY) }
     }
 }

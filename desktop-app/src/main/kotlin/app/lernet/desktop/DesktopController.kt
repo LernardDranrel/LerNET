@@ -429,7 +429,7 @@ class DesktopController(
         mutableHistory.value = observedConnections.values.sortedByDescending { it.lastSeenAt }
     }
 
-    fun probe(profileIds: Collection<String>) {
+    fun probe(profileIds: Collection<String>, intensity: LinkCheck.Intensity = LinkCheck.Intensity.GENTLE) {
         val saved = state.value.saved
         val profiles = saved.profiles.filter { it.id in profileIds }
         if (profiles.isEmpty()) return
@@ -458,7 +458,7 @@ class DesktopController(
                 ))) }
                 // One algorithm with Android (LinkCheck): budget first, one by one, never a second core.
                 // Another config goes through the VPN only when LerNET's internal listener is there to carry it.
-                val plan = LinkCheck.plan(active, running && (active || access != null), EndpointProbe.isTcp(profile))
+                val plan = LinkCheck.plan(active, running && (active || access != null), EndpointProbe.isTcp(profile), intensity)
                 when (plan.server) {
                     LinkCheck.Server.LIVE -> {
                         // The running config: one fresh request through the VPN, budgeted like any connection.
@@ -481,7 +481,23 @@ class DesktopController(
                             tunnelMessage = LinkCheck.notMeasured(plan.fullPath).orEmpty(),
                         ))) }
                     }
-                    LinkCheck.Server.DIRECT -> probeDirect(profile, ticket, plan)
+                    LinkCheck.Server.DIRECT -> {
+                        if (plan.fullPath == LinkCheck.FullPath.DIAGNOSTIC) {
+                            // Осознанная полная проверка: временное ядро, полный путь (лишнее рукопожатие).
+                            if (keyOf(profile) != null && !awaitBudgetShowing(profile.id, ticket, keyOf(profile))) return@forEachIndexed
+                            val full = checkOutbound(profile, state.value.saved)
+                            if (probeTickets[profile.id] != ticket) return@forEachIndexed
+                            mutable.update { it.copy(probes = it.probes + (profile.id to ProbeResult(
+                                latencyMs = full.latencyMs,
+                                message = if (full.latencyMs != null) "Сервер отвечает" else full.message,
+                                tunnelLatencyMs = full.latencyMs,
+                                tunnelMessage = if (full.latencyMs != null) "Полная проверка · работает" else full.message.ifBlank { "Полная проверка не удалась" },
+                                serverProtocol = EndpointProbe.protocol(profile),
+                            ))) }
+                        } else {
+                            probeDirect(profile, ticket, plan)
+                        }
+                    }
                 }
             }
         }
@@ -626,7 +642,7 @@ class DesktopController(
         }
     }
 
-    fun import(text: String, groupId: String? = null) {
+    fun import(text: String, groupId: String? = null, displayName: String? = null, forcedMode: GuessedMode? = null) {
         if (text.isBlank()) return
         if (loaded.isFailure) {
             mutable.update { it.copy(message = "Файл конфигов повреждён. Импорт не сохранён.") }
@@ -639,12 +655,15 @@ class DesktopController(
         mutable.update { it.copy(busy = true, message = "Загружаем конфигурацию") }
         thread(name = "lernet-windows-import", isDaemon = true) {
             val result = runCatching {
-                val guess = ImportHint.detect(text)
-                when (guess.mode) {
+                val mode = forcedMode ?: ImportHint.detect(text).mode
+                when (mode) {
                     GuessedMode.VLESS -> importer.importVless(text)
                     GuessedMode.JSON_PASTE -> importer.importPastedJson(text)
                     GuessedMode.JSON_URL -> importer.importJsonUrl(text)
-                    GuessedMode.SUBSCRIPTION -> if (guess.document) importer.importSubscriptionDocument(text) else importer.importSubscription(text)
+                    GuessedMode.SUBSCRIPTION -> {
+                        val guess = ImportHint.detect(text)
+                        if (guess.document) importer.importSubscriptionDocument(text) else importer.importSubscription(text)
+                    }
                     null -> if (ImportHint.isHttpUrl(text)) {
                         val classified = importer.classifyUrl(text)
                         if (classified.mode == GuessedMode.JSON_URL) importer.importJsonUrl(text)
@@ -657,7 +676,9 @@ class DesktopController(
                     var added = emptyList<StoredProfile>()
                     val ok = change { saved ->
                         added = result.drafts.map {
-                            StoredProfile.fromDraft(it).copy(groupId = groupId, dnsPolicy = saved.defaultDnsPolicy)
+                            val base = StoredProfile.fromDraft(it).copy(groupId = groupId, dnsPolicy = saved.defaultDnsPolicy)
+                            val named = displayName?.trim()?.takeIf { n -> n.isNotEmpty() }
+                            if (named != null) base.copy(name = named) else base
                         }
                         saved.copy(
                             profiles = saved.profiles + added,

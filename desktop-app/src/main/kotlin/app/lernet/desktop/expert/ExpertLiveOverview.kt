@@ -89,9 +89,13 @@ internal fun ExpertSummaryTiles(state: ExpertUiState, openPage: (ExpertPage) -> 
         SummaryTile(words.TILE_CONNECTIONS, words.connectionsValue(state.connections.count { it.active == true }), Modifier.weight(1f)) {
             openPage(ExpertPage.EVENTS)
         }
-        val guarded = state.protection.exitFailureEnforced && state.protection.dnsFollowsPolicy
+        val guarded = words.protectionOk(
+            inactiveCount = state.inactiveReasons.size,
+            failureGuardOk = state.protection.exitFailureEnforced,
+            dnsGuardOk = state.protection.dnsFollowsPolicy,
+        )
         SummaryTile(
-            words.TILE_PROTECTION, if (guarded) words.PROTECTION_ON else words.PROTECTION_CHECK, Modifier.weight(1f),
+            words.TILE_PROTECTION, words.protectionValue(guarded), Modifier.weight(1f),
             valueColor = if (guarded) ExpertColors.green else ExpertColors.amber,
         ) { openPage(ExpertPage.PROTECTION) }
     }

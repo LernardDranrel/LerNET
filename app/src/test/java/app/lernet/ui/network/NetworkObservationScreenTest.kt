@@ -36,7 +36,7 @@ class NetworkObservationScreenTest {
 
     @Test fun tableShowsParametersAndDataTabKeepsEvidenceWithoutAnEngine() {
         rule.setContent { LerNetTheme { NetworkObservationScreen(NetworkObservationUiState(snapshot = snapshot), {}, {}, {}, {}) } }
-        rule.onNodeWithText("Сеть в одной таблице").assertIsDisplayed()
+        rule.onNodeWithText("Анализ сети").assertIsDisplayed()
         rule.onNodeWithText("Необычных значений нет").assertIsDisplayed()
         rule.onNodeWithText("192.0.2.10/24").performScrollTo().assertIsDisplayed()
         capture("android-network-overview.png")

@@ -290,6 +290,16 @@ private fun DisguiseCard(
                 singleLine = true,
             )
         }
+        // Как на Windows во вкладке «Удалённый сервер»: режим XHTTP у сервера, не в «Дополнительно».
+        if (state.transportType == "xhttp" || state.transportType == "splithttp") {
+            ChoiceField(
+                label = stringResource(R.string.cfg_mode),
+                value = state.mode,
+                options = (listOf("", "auto", "packet-up", "stream-up", "stream-one", "stream-on") + state.mode).distinct(),
+                onSelect = { onIntent(ConfigEditorIntent.Mode(it)) },
+                hint = stringResource(R.string.cfg_mode_help),
+            )
+        }
     }
 }
 
@@ -395,15 +405,7 @@ private fun LocalDefaultsCard(
 ) {
     PanelCard {
         SectionTitle(stringResource(R.string.cfg_advanced), stringResource(R.string.cfg_local_defaults_help))
-        if (state.transportType == "xhttp" || state.transportType == "splithttp") {
-            ChoiceField(
-                label = stringResource(R.string.cfg_mode),
-                value = state.mode,
-                options = (listOf("", "auto", "packet-up", "stream-up", "stream-one", "stream-on") + state.mode).distinct(),
-                onSelect = { onIntent(ConfigEditorIntent.Mode(it)) },
-                hint = stringResource(R.string.cfg_mode_help),
-            )
-        }
+        // Режим XHTTP — у сервера (NodeCard), не в общих «Дополнительно» (решения 23.10 п.8).
         TruthLine(byId, TruthFieldId.XMUX, R.string.cfg_xmux)
         TruthLine(byId, TruthFieldId.TUN_STACK, R.string.cfg_tun_stack)
         TruthLine(byId, TruthFieldId.TUN_MTU, R.string.cfg_tun_mtu)

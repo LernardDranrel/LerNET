@@ -8,6 +8,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.background
 import app.lernet.R
+import app.lernet.engine.text.NetworkWords
 
 import androidx.compose.ui.res.stringResource
 
@@ -115,7 +116,7 @@ internal fun NetworkObservationScreen(
         LazyColumn(Modifier.fillMaxSize().padding(padding), state = listState, contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             item {
-                Text("Сеть в одной таблице", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text(NetworkWords.TITLE, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
                 Text("Параметр, значение и что обычно. Отличия от обычного подсвечены.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(12.dp))
@@ -123,7 +124,7 @@ internal fun NetworkObservationScreen(
                     Text(if (snapshot == null) "Локальный снимок" else "Снимок ${time(snapshot.finishedAt)} · Android", style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
                     // The same switch and word as on Windows.
-                    Text("Меньше движения", style = MaterialTheme.typography.labelSmall)
+                    Text(NetworkWords.LESS_MOTION, style = MaterialTheme.typography.labelSmall)
                     androidx.compose.material3.Switch(reduceMotion, { pauseMotion = it }, enabled = !systemReducedMotion,
                         modifier = Modifier.padding(start = 6.dp))
                 }

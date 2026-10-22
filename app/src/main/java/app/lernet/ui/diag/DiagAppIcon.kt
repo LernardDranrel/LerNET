@@ -18,6 +18,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import app.lernet.R
+import app.lernet.engine.text.JournalWords
 import app.lernet.ui.icons.LerNetSymbols
 
 @Composable
@@ -52,7 +53,7 @@ internal fun resolveAppFace(packages: PackageManager, uid: Int?, pid: Long?, pro
 internal fun appFaceTitle(face: AppFace): String = when (face) {
     is AppFace.Installed -> face.label
     AppFace.System -> stringResource(R.string.diag_system)
-    is AppFace.Uid -> stringResource(R.string.diag_uid, face.uid)
+    is AppFace.Uid -> JournalWords.uidLabeled(face.uid)
     is AppFace.Pid -> stringResource(R.string.diag_pid, face.pid.toString())
 }
 

@@ -13,4 +13,12 @@ object ImportWords {
     const val BUSY = "Импорт…"
     const val NAME = "Отображаемое имя"
     const val NAME_HINT = "Необязательно. Если пусто — возьмём имя из импорта."
+
+    const val FROM_QR = "QR из файла"
+    const val CHIP_VLESS = "VLESS"
+    const val CHIP_JSON = "JSON"
+    const val CHIP_URL = "URL"
+    const val CHIP_SUB = "Подписка"
+    const val QR_NONE = "В картинке нет QR-кода с конфигом"
+    const val QR_FAIL = "Не удалось прочитать картинку"
 }

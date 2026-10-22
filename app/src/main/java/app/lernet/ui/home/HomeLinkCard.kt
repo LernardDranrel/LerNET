@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -110,13 +111,33 @@ internal fun LinkCard(state: HomeUiState, onIntent: (HomeIntent) -> Unit, hopSna
         Modifier.fillMaxWidth().testTag("home_link_card"), shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surfaceVariant, tonalElevation = 1.dp,
     ) { Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        var fullConfirm by rememberSaveable { mutableStateOf(false) }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.home_link_title), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
             TextButton(
                 onClick = { profileId?.let { onIntent(HomeIntent.ProbeProfiles(listOf(it))) } },
                 enabled = profileId != null && !running,
-                modifier = Modifier.heightIn(min = 48.dp),
-            ) { Text(stringResource(if (running) R.string.home_latency_checking else R.string.home_link_check)) }
+                modifier = Modifier.heightIn(min = 48.dp).testTag("home_link_check"),
+            ) { Text(if (running) stringResource(R.string.home_latency_checking) else app.lernet.engine.policy.LinkCheck.GENTLE_LABEL) }
+            TextButton(
+                onClick = { fullConfirm = true },
+                enabled = profileId != null && !running && !connected,
+                modifier = Modifier.heightIn(min = 48.dp).testTag("home_link_check_full"),
+            ) { Text(app.lernet.engine.policy.LinkCheck.FULL_LABEL) }
+        }
+        if (fullConfirm) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { fullConfirm = false },
+                title = { Text(app.lernet.engine.policy.LinkCheck.FULL_CONFIRM_TITLE) },
+                text = { Text(app.lernet.engine.policy.LinkCheck.FULL_CONFIRM_BODY) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        fullConfirm = false
+                        profileId?.let { onIntent(HomeIntent.ProbeProfilesFull(listOf(it))) }
+                    }) { Text(app.lernet.engine.policy.LinkCheck.FULL_CONFIRM) }
+                },
+                dismissButton = { TextButton(onClick = { fullConfirm = false }) { Text(stringResource(R.string.cancel)) } },
+            )
         }
         // Resilience: when the check budget is spent, say when the next check is allowed.
         probe?.budgetWaitMs?.let { wait ->
