@@ -1125,7 +1125,7 @@ internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boole
                     }
                 }
                 Spacer(Modifier.height(14.dp))
-                val preview = remember(selected, saved.rules, saved.mode, saved.defaultDnsPolicy, saved.tunMtu, saved.xmuxConcurrency, saved.directDnsServer, saved.strictRoute) {
+                val preview = remember(selected, saved.rules, saved.mode, saved.defaultDnsPolicy, saved.tunMtu, saved.xmuxChannels, saved.directDnsServer, saved.strictRoute) {
                     runCatching { controller.preview(selected.id) }.getOrNull()
                 }
                 Panel {
@@ -1912,20 +1912,15 @@ private fun bytesText(value: Long): String = when {
 internal fun Settings(saved: StoredState, controller: DesktopController, onRequestElevation: () -> Unit,
     localProxy: LocalProxyAccess? = null, locked: Boolean = false) {
     var mtu by remember(saved.tunMtu) { mutableStateOf(saved.tunMtu.toString()) }
-    var xmuxMin by remember(saved.xmuxConcurrency) { mutableStateOf(saved.xmuxConcurrency.substringBefore('-')) }
-    var xmuxMax by remember(saved.xmuxConcurrency) { mutableStateOf(saved.xmuxConcurrency.substringAfter('-')) }
     var directDns by remember(saved.directDnsServer) { mutableStateOf(saved.directDnsServer) }
     var dnsPolicy by remember(saved.defaultDnsPolicy) { mutableStateOf(saved.defaultDnsPolicy) }
     var logLevel by remember(saved.logLevel) { mutableStateOf(saved.logLevel) }
     var healthUrl by remember(saved.healthUrl) { mutableStateOf(saved.healthUrl) }
     var journalMb by remember(saved.journalMaxMb) { mutableStateOf(saved.journalMaxMb.toString()) }
     val mtuValid = mtu.toIntOrNull()?.let { it in 1280..9000 } == true
-    val minimum = xmuxMin.toIntOrNull()
-    val maximum = xmuxMax.toIntOrNull()
-    val xmuxValid = minimum != null && maximum != null && minimum > 0 && maximum >= minimum
     val dnsValid = EngineDefaults.validIpv4(directDns.trim())
     var advanced by remember { mutableStateOf(false) }
-    val defaultsChanged = mtu != saved.tunMtu.toString() || "$xmuxMin-$xmuxMax" != saved.xmuxConcurrency ||
+    val defaultsChanged = mtu != saved.tunMtu.toString() ||
         directDns.trim() != saved.directDnsServer || dnsPolicy != saved.defaultDnsPolicy || logLevel != saved.logLevel
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -1960,8 +1955,8 @@ internal fun Settings(saved: StoredState, controller: DesktopController, onReque
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Button(onClick = {
                     controller.setDefaultDnsPolicy(DnsPolicy.valueOf(dnsPolicy))
-                    controller.setDefaults(mtu.toInt(), "$xmuxMin-$xmuxMax", directDns.trim(), logLevel)
-                }, enabled = defaultsChanged && mtuValid && xmuxValid && dnsValid) { Text("Сохранить параметры") }
+                    controller.setDefaults(mtu.toInt(), directDns.trim(), logLevel)
+                }, enabled = defaultsChanged && mtuValid && dnsValid) { Text("Сохранить параметры") }
                 Text(if (defaultsChanged) "Есть несохранённые изменения" else "Параметры сохранены", color = muted, fontSize = 12.sp)
             }
         }
@@ -1973,7 +1968,7 @@ internal fun Settings(saved: StoredState, controller: DesktopController, onReque
             ) {
                 Column(Modifier.weight(1f)) {
                     Text("Дополнительно", style = MaterialTheme.typography.titleLarge)
-                    Text("MTU, XMUX, журнал, рукопожатие TLS, адрес проверки связи",
+                    Text("MTU, соединения XHTTP, журнал, рукопожатие TLS, адрес проверки связи",
                         color = muted, fontSize = 12.sp)
                 }
                 FolderChevron(advanced)
@@ -1992,28 +1987,11 @@ internal fun Settings(saved: StoredState, controller: DesktopController, onReque
                 color = muted, fontSize = 12.sp, lineHeight = 18.sp)
             SettingAdvice("Как подобрать", "Начните с 1500. Если сайты или загрузки зависают, сравните 1400 и 1280 на тех же задачах после переподключения. Оставьте наибольшее значение со стабильной работой. Универсальной формулы для любого VPN нет; обычный пинг не измеряет MTU всего пути.")
             HorizontalDivider(Modifier.padding(vertical = 5.dp), color = desktopColors.outlineVariant)
-            SettingHeading("XMUX", "Потоки в одном соединении XHTTP",
-                "Несколько запросов делят одно соединение с сервером. Диапазон ниже задаёт, сколько запросов оно может обслуживать одновременно.")
-            Surface(modifier = Modifier.fillMaxWidth(), color = Color(0xFF101A29), shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, desktopColors.outlineVariant)) {
-                Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        OutlinedTextField(xmuxMin, { xmuxMin = it.filter(Char::isDigit).take(10) }, modifier = Modifier.width(150.dp),
-                            label = { Text("От · минимум") }, isError = !xmuxValid, singleLine = true)
-                        Text("—", color = muted)
-                        OutlinedTextField(xmuxMax, { xmuxMax = it.filter(Char::isDigit).take(10) }, modifier = Modifier.width(150.dp),
-                            label = { Text("До · максимум") }, isError = !xmuxValid, singleLine = true)
-                        TextButton(onClick = { xmuxMin = "16"; xmuxMax = "16" }) { Text("16–16") }
-                    }
-                    Text(if (!xmuxValid) "Нужны два целых числа больше нуля. Минимум не должен превышать максимум."
-                        else if (minimum == maximum) "$minimum–$maximum: фиксированный предел $minimum запросов на соединение."
-                        else "$minimum–$maximum: ядро выбирает предел из этого диапазона для нового соединения.",
-                        color = if (xmuxValid) blue else desktopColors.error, fontSize = 12.sp)
-                }
-            }
-            Text("Первое число — нижняя граница предела, второе — верхняя. Это не число загрузок и отдач. При достижении предела создаётся ещё одно соединение. Настройка применяется только к XHTTP, если конфиг не задаёт собственный XMUX.",
-                color = muted, fontSize = 12.sp, lineHeight = 18.sp)
-            SettingAdvice("Как подобрать", "16–16 — исходное значение LerNET. Больший предел уменьшает число новых соединений, но больше запросов зависят от одного канала. Меньший создаёт больше соединений и увеличивает расходы на их установку. Сравнивайте стабильность, задержку и скорость при одинаковой нагрузке; больше не всегда быстрее.")
+            SettingHeading("XHTTP", "Соединения с сервером",
+                "Сколько соединений с сервером держит XHTTP. По умолчанию два: все запросы идут по ним, новые соединения не открываются пачкой. Настройка применяется, только если конфиг не задаёт собственный XMUX.")
+            SecurityToggle("Один канал",
+                "Весь трафик пойдёт одним соединением. Включите, если в вашей сети глушат новые соединения. Минус: одна медленная загрузка может притормозить остальное. Вступит в силу при следующем подключении.",
+                saved.xmuxChannels == app.lernet.engine.compile.XhttpMode.SINGLE_CHANNEL, controller::setXmuxSingleChannel)
             HorizontalDivider(Modifier.padding(vertical = 5.dp), color = desktopColors.outlineVariant)
             Text("Подробность журнала", fontWeight = FontWeight.SemiBold)
             Box(Modifier.fillMaxWidth()) {
@@ -2028,8 +2006,8 @@ internal fun Settings(saved: StoredState, controller: DesktopController, onReque
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Button(onClick = {
                     controller.setDefaultDnsPolicy(DnsPolicy.valueOf(dnsPolicy))
-                    controller.setDefaults(mtu.toInt(), "$xmuxMin-$xmuxMax", directDns.trim(), logLevel)
-                }, enabled = defaultsChanged && mtuValid && xmuxValid && dnsValid) { Text("Сохранить параметры") }
+                    controller.setDefaults(mtu.toInt(), directDns.trim(), logLevel)
+                }, enabled = defaultsChanged && mtuValid && dnsValid) { Text("Сохранить параметры") }
                 Text(if (defaultsChanged) "Есть несохранённые изменения" else "Параметры сохранены", color = muted, fontSize = 12.sp)
             }
         }

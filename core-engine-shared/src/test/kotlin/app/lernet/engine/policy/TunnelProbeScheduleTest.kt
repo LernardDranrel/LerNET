@@ -78,4 +78,82 @@ class TunnelProbeScheduleTest {
             assert(at in 3_000L..8_000L) { "first check at $at" }
         }
     }
+
+    @Test
+    fun hintChecksSoonButRespectsTheCooldownAfterASuccess() {
+        val s = schedule()
+        s.onStart(0)
+        s.takeDue(5_000); s.onResult(5_000, ok = true)
+        s.onHint(10_000)
+        assertNull("cooldown after a passed check", s.takeDue(10_000))
+        s.onHint(70_000)
+        assertEquals(TunnelProbeSchedule.Reason.HINT, s.takeDue(70_000))
+        // While a check runs, more hints add nothing.
+        s.onHint(70_500)
+        assertNull(s.takeDue(70_500))
+    }
+
+    @Test
+    fun aHoldWaitsItsPauseAndSilenceDoesNotCutItShort() {
+        val s = schedule()
+        s.onStart(0)
+        s.takeDue(5_000); s.onResult(5_000, ok = false)
+        s.takeDue(9_000); assertEquals(TunnelProbeSchedule.Verdict.FAILED, s.onResult(9_000, ok = false))
+        s.planHold(9_000, 120_000)
+        var up = 0L
+        for (t in 10_000L until 129_000L step 1_000L) {
+            up += 5_000
+            s.onTraffic(t, up, 0)
+            s.onHint(t)
+            assertNull("held at $t", s.takeDue(t))
+        }
+        assertEquals(TunnelProbeSchedule.Reason.HOLD, s.takeDue(129_000))
+    }
+
+    @Test
+    fun aNetworkChangeStillChecksSoonDuringAHold() {
+        val s = schedule()
+        s.onStart(0)
+        s.takeDue(5_000)
+        s.onResult(5_000, ok = true)
+        s.planHold(6_000, 600_000)
+        s.onNetworkChanged(7_000)
+        assertEquals(TunnelProbeSchedule.Reason.NETWORK, s.takeDue(12_000))
+    }
+
+    @Test
+    fun aFailedRoundStartsACooldownSoSilenceDoesNotRetestAtOnce() {
+        val s = schedule()
+        s.onStart(0)
+        s.takeDue(5_000); s.onResult(5_000, ok = false)
+        s.takeDue(9_000); s.onResult(9_000, ok = false)
+        var up = 0L
+        for (t in 10_000L until 69_000L step 1_000L) {
+            up += 5_000
+            s.onTraffic(t, up, 0)
+            assertNull("cooldown at $t", s.takeDue(t))
+        }
+    }
+
+    @Test
+    fun aCheckBlockedByTheBudgetIsMovedNotDropped() {
+        val s = schedule()
+        s.onStart(0)
+        val reason = s.takeDue(5_000)!!
+        s.defer(reason, 40_000)
+        assertNull(s.takeDue(39_999))
+        assertEquals(TunnelProbeSchedule.Reason.START, s.takeDue(40_000))
+    }
+
+    @Test
+    fun checkLimitsAllowAJammedHandshake() {
+        assertEquals(15_000L, TunnelProbeSchedule.CHECK_TIMEOUT_MS)
+        assertEquals(20_000L, TunnelProbeSchedule.CALL_TIMEOUT_MS)
+        val s = TunnelProbeSchedule()
+        s.onStart(0)
+        s.takeDue(s.nextCheckAt()!!)
+        s.onResult(10_000, ok = false)
+        val confirmAt = s.nextCheckAt()!! - 10_000
+        assert(confirmAt in 10_000L..20_000L) { "confirm after $confirmAt" }
+    }
 }

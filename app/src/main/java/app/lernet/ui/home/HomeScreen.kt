@@ -78,6 +78,7 @@ import app.lernet.engine.live.ChannelHealth
 import app.lernet.engine.live.ChannelWatch
 import app.lernet.engine.live.SilenceReport
 import app.lernet.engine.net.OutboundEndpoint
+import app.lernet.engine.policy.LinkHold
 import app.lernet.log.LogShare
 import app.lernet.ui.components.LerNetLogo
 import app.lernet.ui.components.PanelCard
@@ -179,13 +180,15 @@ private fun HomeBody(
             connection = snapshot.state,
             status = when {
                 snapshot.waitingForNetwork -> stringResource(R.string.state_waiting_network)
+                snapshot.hold == LinkHold.ALL_SILENT -> stringResource(R.string.state_hold_all_silent)
+                snapshot.hold == LinkHold.JAMMED -> stringResource(R.string.state_hold_jammed)
                 snapshot.tried != null -> stringResource(R.string.state_holding_no_config)
                 else -> phaseLabel(snapshot.state)
             },
             enabled = state.activeProfile != null || isSessionActive(snapshot.state),
             onToggle = { onIntent(HomeIntent.ToggleConnect) },
             onOpenRoutes = homeRouteOwnerId(state)?.let { ownerId -> { onOpenRoutes(ownerId) } },
-            holding = snapshot.waitingForNetwork || snapshot.tried != null,
+            holding = snapshot.waitingForNetwork || snapshot.hold != null || snapshot.tried != null,
             // Holding: «Выключить VPN» is right below; failed: the error card has «Повторить».
             showActionCaption = snapshot.tried == null && snapshot.state != ConnectionState.FAILED,
         ) {

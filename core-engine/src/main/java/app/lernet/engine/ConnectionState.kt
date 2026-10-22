@@ -45,6 +45,10 @@ data class ConnectionSnapshot(
     val waitingForNetwork: Boolean = false,
     /** Mockup 10: configs tried while the folder had no working backup; null once a config works. */
     val tried: app.lernet.engine.policy.FailoverReport? = null,
+    /** The connection is held without a restart: replies are jammed, or no server answers at all. */
+    val hold: app.lernet.engine.policy.LinkHold? = null,
+    /** Wall clock of the next planned look while [hold] is set; null when none is planned. */
+    val nextCheckAtMs: Long? = null,
 ) {
     companion object {
         fun idle(mode: RunMode = RunMode.FULL_VPN): ConnectionSnapshot =

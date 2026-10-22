@@ -23,13 +23,17 @@ enum class RealityKeyShare(val storage: String) {
 /**
  * Handshake shape of every TLS outbound, applied when the config is assembled (so profiles imported before
  * the parser fix get it too):
- * - no `utls` → `chrome` (Go TLS stands out; Reality cannot start without uTLS);
+ * - no `utls` or no fingerprint → `firefox` = Firefox 148 in our core, with the X25519MLKEM768 key share
+ *   (Reality cannot start without uTLS). Chrome 133, the old default, hangs handshakes on several Russian
+ *   networks since 2026-09 while Firefox passes (field reports, TSPU-update-2026-10). Plain TLS without
+ *   Reality gets it too: Go's own TLS hello is a rare non-browser shape, and LerNET then shows one
+ *   browser shape for every TLS outbound;
  * - opt-in `record_fragment`: the first TLS message is split into several TLS records;
  * - opt-in Reality `key_share`.
  * Values written in the profile itself win.
  */
 object TlsHandshake {
-    const val DEFAULT_FINGERPRINT = "chrome"
+    const val DEFAULT_FINGERPRINT = "firefox"
     /** TCP-TLS outbounds; QUIC-based ones (hysteria2, tuic) have no uTLS or record fragmentation. */
     private val TCP_TLS_TYPES = setOf("vless", "vmess", "trojan", "anytls", "http")
 

@@ -19,9 +19,9 @@ object PipeAffinity {
         return out
     }
 
-    fun clone(source: JsonObject, tag: String, concurrency: String = XhttpMode.MUX_CONCURRENCY): XhttpNormalizeResult {
+    fun clone(source: JsonObject, tag: String, channels: Int = XhttpMode.DEFAULT_CHANNELS): XhttpNormalizeResult {
         val copied = JsonObject(source.toMutableMap().apply { put("tag", JsonPrimitive(tag)) })
-        return XhttpMode.normalize(copied, concurrency)
+        return XhttpMode.normalize(copied, channels)
     }
 
     fun tag(name: String): String {

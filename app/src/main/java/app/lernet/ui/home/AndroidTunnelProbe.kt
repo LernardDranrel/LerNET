@@ -3,6 +3,7 @@ package app.lernet.ui.home
 import app.lernet.config.net.LocalProxyAccess
 import app.lernet.config.net.LocalProxyHttp
 import app.lernet.engine.compile.ConfigAssembler
+import app.lernet.engine.policy.TunnelProbeSchedule
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -18,9 +19,12 @@ import okhttp3.Request
  * already open connection instead of opening a new one through the tunnel (on Reality without
  * multiplexing every new connection is a new handshake with the server, visible on the wire).
  * After a failed check the pool is dropped, so the confirming check does not reuse a dead socket.
+ * Limits are 15 s per step and 20 s per request: under jamming a fresh handshake takes 5–20 s, and the
+ * old 5 s limit declared live but slow tunnels dead. Same limits as Windows ([TunnelProbeSchedule]).
  */
 internal object AndroidTunnelProbe {
-    private const val TIMEOUT_MS = 5_000L
+    private const val TIMEOUT_MS = TunnelProbeSchedule.CHECK_TIMEOUT_MS
+    private const val CALL_TIMEOUT_MS = TunnelProbeSchedule.CALL_TIMEOUT_MS
     private const val KEEP_ALIVE_MIN = 10L
 
     private var cachedAccess: LocalProxyAccess? = null
@@ -34,7 +38,7 @@ internal object AndroidTunnelProbe {
             .connectionPool(ConnectionPool(1, KEEP_ALIVE_MIN, TimeUnit.MINUTES))
             .connectTimeout(TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .readTimeout(TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            .callTimeout(TIMEOUT_MS * 2, TimeUnit.MILLISECONDS)
+            .callTimeout(CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .followRedirects(false).followSslRedirects(false)
             .retryOnConnectionFailure(false)
             .build()

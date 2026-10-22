@@ -16,17 +16,20 @@ class VlessFingerprintTest {
     private val uuid = "11111111-1111-1111-1111-111111111111"
 
     @Test
-    fun realityWithoutFpGetsChrome() {
+    fun realityWithoutFpKeepsUtlsOnAndLeavesTheFingerprintToTheAssembler() {
         val o = outbound("vless://$uuid@example.com:443?security=reality&pbk=KEY&sid=ab&sni=www.example.org#r")
         val utls = o["tls"]!!.jsonObject["utls"]!!.jsonObject
         assertThat(utls["enabled"]!!.jsonPrimitive.content).isEqualTo("true")
-        assertThat(utls["fingerprint"]!!.jsonPrimitive.content).isEqualTo("chrome")
+        // Not baked in: the assembler fills the current default (firefox), so a later change reaches this profile.
+        assertThat(utls["fingerprint"]).isNull()
     }
 
     @Test
-    fun tlsWithoutFpGetsChromeAndExplicitFpIsKept() {
+    fun tlsWithoutFpStoresNoFingerprintAndExplicitFpIsKept() {
         val plain = outbound("vless://$uuid@example.com:443?security=tls&sni=cdn.example.com#t")
-        assertThat(plain["tls"]!!.jsonObject["utls"]!!.jsonObject["fingerprint"]!!.jsonPrimitive.content).isEqualTo("chrome")
+        assertThat(plain["tls"]!!.jsonObject["utls"]!!.jsonObject["fingerprint"]).isNull()
+        val chrome = outbound("vless://$uuid@example.com:443?security=tls&fp=chrome#t")
+        assertThat(chrome["tls"]!!.jsonObject["utls"]!!.jsonObject["fingerprint"]!!.jsonPrimitive.content).isEqualTo("chrome")
         val firefox = outbound("vless://$uuid@example.com:443?security=tls&fp=Firefox#t")
         assertThat(firefox["tls"]!!.jsonObject["utls"]!!.jsonObject["fingerprint"]!!.jsonPrimitive.content).isEqualTo("firefox")
     }

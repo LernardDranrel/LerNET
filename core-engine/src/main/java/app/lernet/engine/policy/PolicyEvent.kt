@@ -9,6 +9,8 @@ sealed class PolicyEvent {
         val outboundId: String,
         val mode: RunMode,
         val compiledJson: String,
+        /** Journal reason of the start ([PolicyCommand.REASON_START], switch, resume). */
+        val reason: String = PolicyCommand.REASON_START,
     ) : PolicyEvent()
 
     data object EngineStarted : PolicyEvent()
@@ -44,13 +46,21 @@ sealed class PolicyEvent {
 
     data object UserDisconnect : PolicyEvent()
 
-    data class ProbeCompleted(val aliveOutboundIds: Set<String>) : PolicyEvent()
+    /**
+     * A round of real checks of folder configs ended. [checkedOutboundIds] are the ones that were
+     * actually checked (empty = every requested one); the checked ones that did not answer rest.
+     */
+    data class ProbeCompleted(
+        val aliveOutboundIds: Set<String>,
+        val checkedOutboundIds: Set<String> = emptySet(),
+    ) : PolicyEvent()
 
     data object PermissionDenied : PolicyEvent()
 }
 
 sealed class PolicyCommand {
-    data class StartEngine(val outboundId: String) : PolicyCommand()
+    /** [reason] goes into the journal line ([RestartLog]): start, switch, user. */
+    data class StartEngine(val outboundId: String, val reason: String = REASON_START) : PolicyCommand()
 
     data class StopEngine(val reason: ConnectionCause) : PolicyCommand()
 
@@ -58,7 +68,15 @@ sealed class PolicyCommand {
         val outboundId: String,
         val delayMs: Long,
         val attempt: Int,
+        /** Journal reason: core-failed, connect-timeout, recheck, stale-core. */
+        val reason: String = REASON_CORE_FAILED,
     ) : PolicyCommand()
+
+    /** Something looked wrong but proves nothing: ask the tunnel check for one look, within its cooldown. */
+    data object RequestCheck : PolicyCommand()
+
+    /** The connection is held after a failed round: look at the tunnel again after [delayMs]. Nothing restarts. */
+    data class HoldCheck(val delayMs: Long) : PolicyCommand()
 
     data class ProbeGroup(val outboundIds: List<String>) : PolicyCommand()
 
@@ -67,4 +85,13 @@ sealed class PolicyCommand {
         val toOutboundId: String,
         val groupName: String,
     ) : PolicyCommand()
+
+    companion object {
+        const val REASON_START = "start"
+        const val REASON_SWITCH = "switch"
+        const val REASON_CORE_FAILED = "core-failed"
+        const val REASON_CONNECT_TIMEOUT = "connect-timeout"
+        const val REASON_RECHECK = "recheck"
+        const val REASON_STALE_CORE = "stale-core"
+    }
 }

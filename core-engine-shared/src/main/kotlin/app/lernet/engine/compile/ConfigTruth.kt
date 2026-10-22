@@ -170,14 +170,15 @@ object ConfigTruth {
     }
 
     private fun xmuxField(input: TruthInput, owned: OwnedOutbound): FieldView {
-        val note = input.notes.firstOrNull { it.contains("xmux max_concurrency=") }
+        val note = input.notes.firstOrNull { it.contains("xmux max_connections=") }
         val stamped = note != null
         val profileValue = owned.xmuxConcurrency
-        val effective = if (stamped) input.defaults.xmuxConcurrency else profileValue
+        val global = XhttpMode.channelsRange(input.defaults.xmuxChannels)
+        val effective = if (stamped) global else profileValue
         return FieldView(
             id = TruthFieldId.XMUX,
             profileValue = profileValue,
-            globalValue = if (stamped) input.defaults.xmuxConcurrency else null,
+            globalValue = if (stamped) global else null,
             effectiveValue = effective,
             source = if (stamped) FieldSource.GLOBAL else FieldSource.PROFILE,
             overridden = false,

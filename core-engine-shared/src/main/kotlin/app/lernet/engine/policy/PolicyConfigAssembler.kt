@@ -464,7 +464,7 @@ object PolicyConfigAssembler {
                         if ("connect_timeout" !in raw) put("connect_timeout", JsonPrimitive("30s"))
                     }
                 }
-                val normalized = XhttpMode.normalize(TlsHandshake.apply(JsonObject(rewritten), defaults), defaults.xmuxConcurrency)
+                val normalized = XhttpMode.normalize(TlsHandshake.apply(JsonObject(rewritten), defaults), defaults.xmuxChannels)
                 normalized.note?.let(notes::add)
                 outbounds[tags.getValue(sourceTag)] = normalized.outbound
                 walking.remove(sourceTag)

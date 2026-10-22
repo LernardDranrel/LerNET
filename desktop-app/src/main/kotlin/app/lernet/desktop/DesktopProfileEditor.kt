@@ -62,7 +62,7 @@ fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller:
             modeOverride = runMode.takeUnless { it == "SYSTEM" },
         )
     }
-    val preview = remember(candidate, saved.rules, saved.mode, saved.tunMtu, saved.xmuxConcurrency, saved.directDnsServer) {
+    val preview = remember(candidate, saved.rules, saved.mode, saved.tunMtu, saved.xmuxChannels, saved.directDnsServer) {
         if (valid) runCatching { controller.preview(profile.id, candidate) }.getOrNull() else null
     }
 
@@ -115,7 +115,7 @@ fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller:
                                         isError = !dnsValid, supportingText = { Text("Должен соответствовать выбранному типу DNS") })
                                 } else Text("Используется DNS устройства: ${saved.directDnsServer}. Значение задаётся в глобальных настройках.", color = editorWarning, fontSize = 12.sp)
                                 HorizontalDivider()
-                                Text("Глобальные значения: MTU ${saved.tunMtu} · XMUX ${saved.xmuxConcurrency} · журнал ${saved.logLevel}", color = editorMuted, fontSize = 12.sp)
+                                Text("Глобальные значения: MTU ${saved.tunMtu} · XHTTP-соединений ${saved.xmuxChannels} · журнал ${saved.logLevel}", color = editorMuted, fontSize = 12.sp)
                             }
                             EditorPage.REMOTE -> {
                                 Text("Эти поля должны совпадать с настройками принимающего сервера.", color = editorWarning, fontSize = 12.sp)

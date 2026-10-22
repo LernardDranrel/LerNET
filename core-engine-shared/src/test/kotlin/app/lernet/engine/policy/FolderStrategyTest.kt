@@ -50,7 +50,7 @@ class FolderStrategyTest {
 
     @Test fun `button gap and background pace stay in range`() {
         repeat(200) {
-            assertTrue(BackupRotation.buttonGapMs() in 300..900)
+            assertTrue(BackupRotation.buttonGapMs() in BackupRotation.BUTTON_GAP_MIN_MS..BackupRotation.BUTTON_GAP_MAX_MS)
             assertTrue(BackupRotation.nextDelayMs() in 45_000..300_000)
         }
     }

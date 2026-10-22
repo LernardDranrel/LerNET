@@ -9,11 +9,16 @@ enum class LiveVia {
     ;
 
     companion object {
+        /** Tag prefix of folder backups carried in the config only to be checked ([app.lernet.engine.compile.ConfigAssembler]). */
+        const val STANDBY_TAG_PREFIX = "standby-"
+
         fun of(outbound: String, outboundType: String): LiveVia {
             val tag = outbound.trim().lowercase()
             val type = outboundType.trim().lowercase()
             return when {
                 tag == "direct" || type == "direct" -> DIRECT
+                // LerNET's own checks of folder backups through the running core prove nothing about the active config.
+                tag.startsWith(STANDBY_TAG_PREFIX) -> OTHER
                 tag == "proxy" || type == "vless" || type == "vmess" || type == "trojan" || type == "shadowsocks" ->
                     PROXY
                 tag.startsWith("pipe-") -> PROXY

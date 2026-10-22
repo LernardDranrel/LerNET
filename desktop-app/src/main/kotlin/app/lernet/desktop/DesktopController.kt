@@ -50,7 +50,12 @@ import app.lernet.engine.policy.BackupHealth
 import app.lernet.engine.policy.BackupReach
 import app.lernet.engine.policy.BackupRotation
 import app.lernet.engine.policy.ReachRoute
-import java.util.concurrent.ThreadLocalRandom
+import app.lernet.engine.policy.ConfigPenalties
+import app.lernet.engine.policy.HandshakeBudget
+import app.lernet.engine.policy.HandshakeKey
+import app.lernet.engine.policy.LinkHold
+import app.lernet.engine.policy.RestartLog
+import app.lernet.engine.policy.SilentNetworkBackoff
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.Executors
@@ -105,6 +110,8 @@ data class DesktopUiState(
     val localProxy: LocalProxyAccess? = null,
     /** Honest failover report: which configs were tried, why they failed and when the next attempt is. */
     val tried: FailoverReport? = null,
+    /** The connection is held without a restart: replies are jammed, or no server answers at all. */
+    val hold: LinkHold? = null,
 )
 
 typealias FailoverAttempt = app.lernet.engine.policy.FailoverAttempt
@@ -166,9 +173,24 @@ class DesktopController(
     private val observedConnections = LinkedHashMap<String, LiveConnection>()
     private val mutableHistory = MutableStateFlow<List<LiveConnection>>(emptyList())
     val connectionHistory: StateFlow<List<LiveConnection>> = mutableHistory
-    private val failedInGroup = mutableSetOf<String>()
-    /** Failed folder configs are looked at again after a random 45 s – 5 min pause. */
-    private val failedRecheck = UnavailableRecheck()
+    /** Configs that died rest 2 → 10 → 30 min; kept in the work folder, so the list survives a restart. */
+    internal val penalties = ConfigPenalties().also { list ->
+        val file = store.workDirectory().resolve(PENALTIES_FILE)
+        list.decode(runCatching { Files.readString(file) }.getOrNull(), System.currentTimeMillis())
+        list.onChange = { encoded ->
+            runCatching { Files.writeString(file, encoded) }
+                .onFailure { tunnel.logDiagnostic("Не удалось сохранить список отдыхающих конфигов: ${it.javaClass.simpleName}") }
+        }
+    }
+    /** LerNET's own new connections per server+SNI: at most 3 per minute ([HandshakeBudget]). */
+    private val handshakeBudget = HandshakeBudget()
+    /** Rounds in a row in which neither the active config nor any folder config answered. */
+    private val silentRounds = java.util.concurrent.atomic.AtomicInteger(0)
+    @Volatile private var lastRestartAt = 0L
+    /** Asks the monitor loop for one tunnel check (within its cooldown). */
+    private val hintRequest = AtomicBoolean(false)
+    /** Asks the monitor loop to hold and look again after this many ms; -1 = none. */
+    private val holdRequest = AtomicLong(-1L)
     private val failoverRunner = FailoverRunner()
     @Volatile private var desiredConnection = false
     private val expertReserved = AtomicBoolean(false)
@@ -203,7 +225,7 @@ class DesktopController(
                     FlowSample(row.id, activeTag != null && activeTag in row.chains, row.upload, row.download, row.active)
                 }
                 if (lastStatus != TunnelStatus.RUNNING) {
-                    recoveryAttempt.set(0)
+                    // A started core is no proof the config works: failures reset only on a verified reply.
                     schedule = TunnelProbeSchedule().also { it.onStart(System.currentTimeMillis()) }
                     traffic.clear()
                     synchronized(blockingDetector) { blockingDetector.reset() }
@@ -216,17 +238,18 @@ class DesktopController(
                 val sign = synchronized(blockingDetector) { blockingDetector.onFlows(now, flows) }
                     ?: pendingBlockingSign.getAndSet(null)
                 if (sign != null) onBlockingSuspected(sign)
+                if (hintRequest.getAndSet(false)) schedule.onHint(now)
+                holdRequest.getAndSet(-1L).takeIf { it >= 0L }?.let { schedule.planHold(now, it) }
                 if (now - lastNetworkScanAt >= 3_000) {
                     lastNetworkScanAt = now
                     runCatching { WindowsTunnelHealth.networkSignature() }.onSuccess { signature ->
                         if (signature != lastNetwork) {
                             lastNetwork = signature
                             networkChangedAt = now
-                            // A new network may revive configs that failed on the old one.
-                            synchronized(failedInGroup) { failedInGroup.clear() }
+                            // A new network may revive configs that failed on the old one (their level stays).
+                            penalties.onNetworkChanged(now)
                             backupHealth.clear()
                             backupRotation.reset()
-                            failedRecheck.reset()
                             schedule.onNetworkChanged(now)
                             synchronized(blockingDetector) { blockingDetector.reset() }
                             mutable.update { it.copy(healthMessage = "Сеть изменилась · проверяем VPN", healthVerified = null) }
@@ -240,7 +263,11 @@ class DesktopController(
                         probePool.submit { try { checkOneBackup() } finally { backupChecking.set(false) } }
                     }
                 }
-                if (schedule.takeDue(now) != null) {
+                val dueReason = schedule.takeDue(now)
+                if (dueReason != null && !takeActiveBudget()) {
+                    // A check is one more connection through the active server: it must fit the budget.
+                    schedule.defer(dueReason, now + activeBudgetWait().coerceAtLeast(1_200L))
+                } else if (dueReason != null) {
                     val saved = state.value.saved
                     val profile = saved.profiles.firstOrNull { it.id == saved.selectedProfileId }
                     val tag = profile?.selectedOutbound?.tag
@@ -255,10 +282,13 @@ class DesktopController(
                                     healthVerified = false, tunnelLatencyMs = null) }
                             } else if (health.latencyMs != null) {
                                 failedChecks = 0
+                                onConfigWorks(profile.id)
                                 mutable.update { it.copy(healthMessage = "VPN отвечает · ${health.latencyMs} мс", healthFailures = 0,
                                     healthVerified = true, tunnelLatencyMs = health.latencyMs, tried = null) }
                             } else {
-                                val nodeAlive = runCatching { coreApi.delay(tag, saved.healthUrl, 4_000) }.isSuccess
+                                // One more request through the node: it opens a connection, so it is budgeted too.
+                                val nodeAlive = takeActiveBudget() &&
+                                    runCatching { coreApi.delay(tag, saved.healthUrl, TunnelProbeSchedule.CHECK_TIMEOUT_MS.toInt()) }.isSuccess
                                 if (ticket == connectGeneration.get() && tunnel.state.value.status == TunnelStatus.RUNNING) {
                                     failedChecks = if (verdict == TunnelProbeSchedule.Verdict.FAILED) 2 else 1
                                     val reason = if (nodeAlive) "Узел отвечает, но путь Windows через VPN не работает"
@@ -295,8 +325,20 @@ class DesktopController(
                 if (permissionFailure) desiredConnection = false
                 val failure = tunnel.state.value.failure
                 val failMessage = tunnel.state.value.message
+                val failedId = state.value.saved.selectedProfileId
                 val search = {
-                    val swapped = !permissionFailure && state.value.saved.selectedProfileId?.let(::tryFailover) == true
+                    // Same rule as Android: the core is started again after a pause; the second failure in a
+                    // row (or the end of the quick tries) looks for a checked replacement in the folder.
+                    val attempt = recoveryAttempt.get() + 1
+                    val switch = !permissionFailure && failedId != null && desiredConnection && coreFailureSwitches(failedId, attempt)
+                    if (switch) {
+                        penalties.fail(failedId!!, System.currentTimeMillis())
+                    } else if (failedId != null && attempt > SimpleRecovery.QUICK_ATTEMPTS) {
+                        penalties.fail(failedId, System.currentTimeMillis())
+                        silentRounds.incrementAndGet()
+                    }
+                    val swapped = switch && tryFailover(failedId!!)
+                    if (switch && !swapped) silentRounds.incrementAndGet()
                     // The old code waited for a "попытки исчерпаны" message nobody produced: a failed tunnel stayed off.
                     if (SimpleRecovery.retries(desiredConnection, failure, swapped)) {
                         scheduleRecovery(failMessage)
@@ -405,6 +447,8 @@ class DesktopController(
                 }
                 when (BackupReach.route(access != null, EndpointProbe.isTcp(profile), userAsked = true)) {
                     ReachRoute.TUNNEL -> {
+                        // Through the tunnel every check is one more connection via the active server.
+                        awaitActiveBudget()
                         val result = EndpointProbe.checkThroughTunnel(profile, access!!)
                         if (probeTickets[profile.id] != ticket) return@forEachIndexed
                         // A full-path check would start a second core that dials the server from this
@@ -419,6 +463,8 @@ class DesktopController(
                         mutable.update { it.copy(probes = it.probes + (profile.id to tcp.copy(
                             checking = true, tunnelMessage = "Проверяем канал через узел…",
                         ))) }
+                        // The second core opens a connection to this server: it counts against its budget.
+                        keyOf(profile)?.let { key -> awaitBudget(key) }
                         val outbound = checkOutbound(profile, saved)
                         if (probeTickets[profile.id] != ticket) return@forEachIndexed
                         mutable.update { it.copy(probes = it.probes + (profile.id to tcp.copy(
@@ -794,9 +840,12 @@ class DesktopController(
     fun setTlsHandshake(recordFragment: Boolean, keyShare: app.lernet.engine.compile.RealityKeyShare) =
         change { it.copy(tlsRecordFragment = recordFragment, realityKeyShare = keyShare.storage) }
     fun setJournalMaxMb(value: Int) = change { it.copy(journalMaxMb = value.coerceIn(1, 500)) }
-    fun setDefaults(mtu: Int, xmux: String, dnsServer: String, logLevel: String) = change {
-        it.copy(tunMtu = mtu.coerceIn(1280, 9000), xmuxConcurrency = xmux.trim(),
-            directDnsServer = dnsServer.trim(), logLevel = logLevel)
+    fun setDefaults(mtu: Int, dnsServer: String, logLevel: String) = change {
+        it.copy(tunMtu = mtu.coerceIn(1280, 9000), directDnsServer = dnsServer.trim(), logLevel = logLevel)
+    }
+    /** «Один канал»: XHTTP carries everything over one connection instead of two. */
+    fun setXmuxSingleChannel(enabled: Boolean) = change {
+        it.copy(xmuxChannels = if (enabled) app.lernet.engine.compile.XhttpMode.SINGLE_CHANNEL else app.lernet.engine.compile.XhttpMode.DEFAULT_CHANNELS)
     }
     fun updateProfile(profile: StoredProfile) = change { saved ->
         saved.copy(profiles = saved.profiles.map { if (it.id == profile.id) profile else it })
@@ -978,8 +1027,9 @@ class DesktopController(
             return
         }
         if (resetFailover) {
-            synchronized(failedInGroup) { failedInGroup.clear() }
-            failedRecheck.reset()
+            // The user's own start: a fresh series. Resting configs stay resting (they are not the user's pick).
+            recoveryAttempt.set(0)
+            silentRounds.set(0)
         }
         val ticket = synchronized(connectLock) {
             if (expertReserved.get()) {
@@ -1030,6 +1080,8 @@ class DesktopController(
                         mutable.update { it.copy(localProxy = assembled.userProxy.takeIf { runMode == RunMode.PROXY }) }
                         activeAppProxy = assembled.appProxy
                         updateAppTraffic()
+                        keyOf(profile)?.let { handshakeBudget.record(it, System.currentTimeMillis()) }
+                        lastRestartAt = System.currentTimeMillis()
                         tunnel.start(launch)
                     }
                 }
@@ -1059,8 +1111,17 @@ class DesktopController(
     /** Retries the wanted connection after a growing random pause; the guard (if on) keeps the network closed meanwhile. */
     private fun scheduleRecovery(reason: String) {
         val ticket = connectGeneration.get()
-        val pause = SimpleRecovery.pauseMs(recoveryAttempt.incrementAndGet())
-        mutable.update { it.copy(message = SimpleRecovery.message(simpleGuard.isEngaged(), pause, reason)) }
+        val attempt = recoveryAttempt.incrementAndGet()
+        val rounds = silentRounds.get()
+        val pause = SimpleRecovery.pauseMs(attempt, rounds, activeBudgetWait())
+        val tag = if (attempt > SimpleRecovery.QUICK_ATTEMPTS || rounds > 0) "recheck" else "core-failed"
+        tunnel.logDiagnostic(RestartLog.line(tag, attempt, pause))
+        val hold = if (rounds >= SimpleRecovery.ALL_SILENT_ROUNDS) LinkHold.ALL_SILENT else null
+        mutable.update { it.copy(
+            message = hold?.let { h -> LinkJudge.holdMessage(h, RecheckJitter.label(pause)) }
+                ?: SimpleRecovery.message(simpleGuard.isEngaged(), pause, reason),
+            hold = hold,
+        ) }
         thread(name = "lernet-windows-retry", isDaemon = true) {
             try { Thread.sleep(pause) } catch (_: InterruptedException) { return@thread }
             if (desiredConnection && !expertReserved.get() && connectGeneration.get() == ticket &&
@@ -1088,13 +1149,97 @@ class DesktopController(
         mutable.update { it.copy(message = message, connectionError = ConnectionError(message, routeOwnerId)) }
     }
 
+    /** The block detector proves nothing: hold the connection and ask for one tunnel check (same as Android). */
     private fun onBlockingSuspected(sign: BlockingSign) {
-        val text = BlockingDetector.message(sign)
-        mutable.update { it.copy(healthMessage = text, healthVerified = false) }
+        tunnel.logDiagnostic(BlockingDetector.message(sign))
         if (!desiredConnection) return
-        val failedId = state.value.saved.selectedProfileId ?: return
-        failoverRunner.launch { actOnLinkFailure(failedId, LinkFailure.BLOCKED, 1, text) }
+        holdJammed()
+        hintRequest.set(true)
     }
+
+    private fun holdJammed() {
+        mutable.update {
+            if (it.hold == LinkHold.ALL_SILENT) it else it.copy(
+                healthMessage = LinkJudge.holdMessage(LinkHold.JAMMED), healthVerified = false, hold = LinkHold.JAMMED,
+            )
+        }
+    }
+
+    /** Replies came back through the config: it works, whatever was suspected before. */
+    private fun onConfigWorks(profileId: String) {
+        recoveryAttempt.set(0)
+        silentRounds.set(0)
+        penalties.clear(profileId)
+        mutable.update { it.copy(hold = null) }
+    }
+
+    private fun keyOf(profile: StoredProfile?): HandshakeKey? =
+        profile?.selectedOutbound?.singBoxJson?.let(HandshakeKey::fromOutboundJson)
+
+    private fun activeProfileKey(): HandshakeKey? = state.value.saved.let { saved ->
+        keyOf(saved.profiles.firstOrNull { it.id == saved.selectedProfileId })
+    }
+
+    private fun takeActiveBudget(): Boolean =
+        activeProfileKey()?.let { handshakeBudget.tryTake(it, System.currentTimeMillis()) } ?: true
+
+    /** Waits until the active server's handshake budget allows one more connection, then takes it. */
+    private fun awaitActiveBudget() {
+        while (!takeActiveBudget()) runCatching { Thread.sleep(activeBudgetWait().coerceAtLeast(1_000L)) }.onFailure { return }
+    }
+
+    private fun awaitBudget(key: HandshakeKey) {
+        while (!handshakeBudget.tryTake(key, System.currentTimeMillis())) {
+            runCatching { Thread.sleep(handshakeBudget.waitMs(key, System.currentTimeMillis()).coerceAtLeast(1_000L)) }.onFailure { return }
+        }
+    }
+
+    private fun activeBudgetWait(): Long =
+        activeProfileKey()?.let { handshakeBudget.waitMs(it, System.currentTimeMillis()) } ?: 0L
+
+    /** Folder configs that may be tried now: same folder with auto-switch, not this one, not resting. */
+    private fun freeCandidates(saved: StoredState, failedId: String): List<StoredProfile> {
+        val failed = saved.profiles.firstOrNull { it.id == failedId } ?: return emptyList()
+        if (saved.groups.none { it.id == failed.groupId && it.autoSwap }) return emptyList()
+        val now = System.currentTimeMillis()
+        return saved.profiles.filter { it.groupId == failed.groupId && it.id != failedId && !penalties.isResting(it.id, now) }
+    }
+
+    private fun msSinceNetworkChange(): Long =
+        networkChangedAt.let { if (it == 0L) Long.MAX_VALUE else System.currentTimeMillis() - it }
+
+    /** Same rule as Android: a failed core switches on its second failure in a row, or after the quick tries. */
+    private fun coreFailureSwitches(failedId: String, attempt: Int): Boolean {
+        val hasFree = freeCandidates(state.value.saved, failedId).isNotEmpty()
+        if (!hasFree) return false
+        if (attempt > SimpleRecovery.QUICK_ATTEMPTS) return true
+        val networkUp = runCatching { WindowsPhysicalNetwork.select() }.isSuccess
+        return LinkJudge.decide(networkUp, LinkFailure.ENGINE_ERROR, attempt, msSinceNetworkChange(), hasFree) == LinkDecision.SWITCH_NOW
+    }
+
+    /** Nothing answered this round while the core runs: hold, count the round, look again later (same as Android). */
+    private fun silentRound(failedId: String, detail: String) {
+        val rounds = silentRounds.incrementAndGet()
+        val hold = if (rounds >= LinkJudge.ALL_SILENT_ROUNDS) LinkHold.ALL_SILENT else LinkHold.JAMMED
+        val now = System.currentTimeMillis()
+        if (rounds == LinkJudge.STALE_CORE_ROUND && now - lastRestartAt >= LinkJudge.STALE_CORE_GAP_MS && desiredConnection) {
+            // A core that kept a broken pool is started once more, at most every 10 min.
+            tunnel.logDiagnostic(RestartLog.line("stale-core", rounds, 0L, "profile=$failedId"))
+            mutable.update { it.copy(hold = hold, healthMessage = LinkJudge.holdMessage(hold)) }
+            synchronized(connectLock) {
+                if (!desiredConnection || expertReserved.get()) return
+                connectGeneration.incrementAndGet()
+                if (!tunnel.stop(waitForExit = true)) return
+            }
+            connectInternal(resetFailover = false, holdOnError = true)
+            return
+        }
+        val delay = SilentNetworkBackoff.delayMs(rounds)
+        tunnel.logDiagnostic("hold: core and live connections kept, next look in ${delay}ms · $detail")
+        holdRequest.set(delay)
+        mutable.update { it.copy(hold = hold, healthMessage = LinkJudge.holdMessage(hold, RecheckJitter.label(delay))) }
+    }
+
 
     /**
      * Same rule as Android (shared LinkJudge): no network → keep the tunnel and wait;
@@ -1104,20 +1249,27 @@ class DesktopController(
         if (!desiredConnection) return
         val saved = state.value.saved
         val profile = saved.profiles.firstOrNull { it.id == failedId } ?: return
-        val hasAlternative = saved.groups.any { it.id == profile.groupId && it.autoSwap } &&
-            saved.profiles.any { it.groupId == profile.groupId && it.id != failedId }
+        val hasAlternative = freeCandidates(saved, profile.id).isNotEmpty()
         val networkUp = runCatching { WindowsPhysicalNetwork.select() }.isSuccess
-        val changedAt = networkChangedAt
-        val since = if (changedAt == 0L) Long.MAX_VALUE else System.currentTimeMillis() - changedAt
+        val since = msSinceNetworkChange()
         when (LinkJudge.decide(networkUp, failure, failures, since, hasAlternative)) {
             LinkDecision.WAIT_FOR_NETWORK ->
                 // A failed probe is not evidence that ingress is dead: keep the guard and routes.
                 mutable.update { it.copy(healthMessage = LinkJudge.message(LinkDecision.WAIT_FOR_NETWORK)) }
+            LinkDecision.HOLD -> if (since in 0 until LinkJudge.SETTLE_MS) {
+                // The network appeared a moment ago: nothing is blamed on the config yet.
+                holdJammed()
+                holdRequest.set(LinkJudge.SETTLE_RECHECK_MS)
+            } else {
+                penalties.fail(failedId, System.currentTimeMillis())
+                silentRound(failedId, detail)
+            }
             LinkDecision.SWITCH_NOW -> {
+                // The core and its live connections stay until a checked replacement answered.
+                penalties.fail(failedId, System.currentTimeMillis())
+                holdJammed()
                 mutable.update { it.copy(healthMessage = LinkJudge.message(LinkDecision.SWITCH_NOW)) }
-                if (!tryFailover(failedId) && desiredConnection) {
-                    mutable.update { it.copy(healthMessage = "$detail · другой рабочий конфиг в папке не найден") }
-                }
+                if (!tryFailover(failedId) && desiredConnection) silentRound(failedId, "$detail · другой рабочий конфиг в папке не найден")
             }
             LinkDecision.RETRY_SAME ->
                 mutable.update { it.copy(healthMessage = if (hasAlternative) "$detail · ${LinkJudge.message(LinkDecision.RETRY_SAME)}"
@@ -1139,37 +1291,41 @@ class DesktopController(
         val profile = saved.profiles.firstOrNull { it.id == id } ?: return
         val access = (AppTraffic.route as? AppTraffic.Route.Through)?.access
         if (BackupReach.route(access != null, EndpointProbe.isTcp(profile), userAsked = false) != ReachRoute.TUNNEL) return
+        // Through the tunnel the check is one more connection via the active server.
+        if (!takeActiveBudget()) return
         val result = EndpointProbe.checkThroughTunnel(profile, access!!, timeoutMs = 8_000)
         backupHealth[id] = BackupHealth(result.latencyMs != null, result.latencyMs, System.currentTimeMillis(), throughTunnel = true)
     }
 
+    /**
+     * Looks for a folder config that passes a real check (a second core makes a request through it), one at a
+     * time with a random gap and within each server's handshake budget. Resting configs are skipped; a candidate
+     * that did not answer rests. The caller has already marked [failedProfileId] as failed.
+     */
     private fun tryFailover(failedProfileId: String): Boolean {
         val saved = state.value.saved
         val failed = saved.profiles.firstOrNull { it.id == failedProfileId } ?: return false
         val group = saved.groups.firstOrNull { it.id == failed.groupId && it.autoSwap } ?: return false
-        if (failedRecheck.consumeIfDue(System.currentTimeMillis())) synchronized(failedInGroup) { failedInGroup.clear() }
-        synchronized(failedInGroup) { failedInGroup += failedProfileId }
-        val unordered = saved.profiles.filter { it.groupId == group.id && it.id != failedProfileId &&
-            synchronized(failedInGroup) { it.id !in failedInGroup } }
+        val unordered = freeCandidates(saved, failedProfileId)
         // Backups verified by the background checks go first: the switch takes seconds.
         val order = BackupHealth.order(unordered.map { it.id }, backupHealth, System.currentTimeMillis())
         val candidates = order.mapNotNull { id -> unordered.firstOrNull { it.id == id } }
         val attempts = mutableListOf(
             FailoverAttempt(failed.name, state.value.probes[failed.id]?.let(::attemptReason) ?: "нет ответа", System.currentTimeMillis()),
         )
-        if (candidates.isEmpty()) {
-            val wait = failedRecheck.arm(System.currentTimeMillis())
-            mutable.update { it.copy(
-                message = "В папке «${group.name}» нет доступной замены · перепроверка через ${RecheckJitter.label(wait)}",
-                tried = FailoverReport.merge(it.tried, group.name, attempts, RecheckJitter.label(wait)),
-            ) }
-            return false
-        }
-        // Keep current ingress while searching. An offline/failed folder probe
-        // must never remove capture routes and silently return to Direct.
         for ((index, candidate) in candidates.withIndex()) {
             // Sequential with a random pause, the same rule as on Android: no burst of handshakes.
-            if (index > 0) runCatching { Thread.sleep(ThreadLocalRandom.current().nextLong(200L, 601L)) }
+            if (index > 0) runCatching { Thread.sleep(LinkJudge.candidateGapMs()) }
+            val key = keyOf(candidate)
+            if (key != null) {
+                val wait = handshakeBudget.waitMs(key, System.currentTimeMillis())
+                if (wait > LinkJudge.CANDIDATE_BUDGET_WAIT_MS) {
+                    tunnel.logDiagnostic("Профиль «${candidate.name}» пропущен: лимит новых соединений к серверу")
+                    continue
+                }
+                if (wait > 0L) runCatching { Thread.sleep(wait) }
+                handshakeBudget.record(key, System.currentTimeMillis())
+            }
             val tcp = EndpointProbe.check(candidate)
             val outbound = checkOutbound(candidate, saved)
             val probe = tcp.copy(tunnelLatencyMs = outbound.latencyMs, tunnelMessage = outbound.message)
@@ -1180,20 +1336,28 @@ class DesktopController(
                     connectGeneration.incrementAndGet()
                     if (!tunnel.stop(waitForExit = true)) return false
                 }
+                tunnel.logDiagnostic(RestartLog.line("switch", 0, 0L, "from=${failed.id} to=${candidate.id}"))
+                silentRounds.set(0)
+                recoveryAttempt.set(0)
                 change { it.copy(selectedProfileId = candidate.id) }
-                mutable.update { it.copy(message = "Переключаемся на ${candidate.name} из папки «${group.name}»") }
+                mutable.update { it.copy(message = "Переключаемся на ${candidate.name} из папки «${group.name}»", hold = null) }
                 // The guard stays engaged across stop → start; a failed switch keeps it closed and retries.
                 connectInternal(resetFailover = false, holdOnError = true)
                 return true
             }
-            synchronized(failedInGroup) { failedInGroup += candidate.id }
+            penalties.fail(candidate.id, System.currentTimeMillis())
             attempts += FailoverAttempt(candidate.name, attemptReason(probe), System.currentTimeMillis())
         }
-        val wait = failedRecheck.arm(System.currentTimeMillis())
-        mutable.update { it.copy(
-            message = "В папке «${group.name}» нет доступной замены · перепроверка через ${RecheckJitter.label(wait)}",
-            tried = FailoverReport.merge(it.tried, group.name, attempts, RecheckJitter.label(wait)),
-        ) }
+        val now = System.currentTimeMillis()
+        val members = saved.profiles.filter { it.groupId == group.id }.map { it.id }
+        val wait = (penalties.nextFreeAt(members, now) ?: now) - now
+        val label = RecheckJitter.label(wait.coerceAtLeast(RecheckJitter.MIN_MS))
+        mutable.update {
+            it.copy(
+                message = "В папке «${group.name}» нет доступной замены · запасные снова проверим через $label",
+                tried = FailoverReport.merge(it.tried, group.name, attempts, label),
+            )
+        }
         return false
     }
 
@@ -1349,6 +1513,9 @@ class DesktopController(
         probePool.shutdownNow()
     }
 }
+
+/** Resting configs ([ConfigPenalties]) in the work folder, one line per config. */
+private const val PENALTIES_FILE = "config-penalties.txt"
 
 /** A free loopback port for the internal listener; sing-box binds it right after. */
 internal fun freeLoopbackPort(): Int =
