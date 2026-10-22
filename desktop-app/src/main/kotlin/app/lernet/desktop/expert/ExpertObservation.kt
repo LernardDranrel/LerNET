@@ -233,21 +233,21 @@ internal fun ExpertEvents(
     var tab by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            androidx.compose.material3.FilterChip(tab == 0, { tab = 0 }, label = { Text("Соединения") })
-            androidx.compose.material3.FilterChip(tab == 1, { tab = 1 }, label = { Text("Что делает LerNET · ${state.events.size}") })
+            // m6: one segment «Соединения | Действия LerNET», the same on both platforms.
+            androidx.compose.material3.FilterChip(tab == 0, { tab = 0 }, label = { Text("Соединения · ${state.connections.count { it.active == true }}") })
+            androidx.compose.material3.FilterChip(tab == 1, { tab = 1 }, label = { Text("Действия LerNET · ${state.events.size}") })
         }
         if (tab == 0) {
             ExpertLiveStreams(state, Modifier.weight(1f), simulate, showPath)
             return@Column
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Что делает LerNET", Modifier.weight(1f), color = ExpertColors.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Применение схемы, пробуждение, отказ и смена выхода. Каждое событие сохраняет объяснение ядра.",
+                Modifier.weight(1f), color = ExpertColors.muted, fontSize = 13.sp,
+            )
             OutlinedButton(onClick = { onIntent(ExpertIntent.Refresh) }, enabled = !state.busy) { Text("Обновить") }
         }
-        Text(
-            "Применение схемы, пробуждение, отказ и смена выхода. Каждое событие сохраняет объяснение ядра.",
-            color = ExpertColors.muted, fontSize = 13.sp
-        )
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (state.events.isEmpty()) {
                 item {

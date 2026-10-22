@@ -91,6 +91,7 @@ import app.lernet.config.model.DnsPolicy
 import app.lernet.desktop.expert.DesktopExpert
 import app.lernet.desktop.expert.ExpertIntent
 import app.lernet.desktop.expert.ExpertPhase
+import app.lernet.desktop.expert.ExpertUiState
 import java.awt.Toolkit
 import java.awt.FileDialog
 import java.awt.Frame
@@ -171,6 +172,7 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
     val expertUi = expert?.state?.collectAsState()?.value
     val modeStates = rememberSaveableStateHolder()
     var expertTab by rememberSaveable { mutableStateOf(false) }
+    var homeRequest by remember { mutableIntStateOf(0) }
     var expertConfirm by remember { mutableStateOf<ExpertIntent?>(null) }
     var expertImport by remember { mutableStateOf<ExpertArchivePreview?>(null) }
     var expertReplaceConfirm by remember { mutableStateOf(false) }
@@ -238,12 +240,15 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
             Surface(color = background, contentColor = desktopColors.onBackground) {
                 if (startupCheck == null) DesktopUpdatePrompt()
                 Column(Modifier.fillMaxSize()) {
+                    // G1: the connection state is visible on every page of both modes, in one place of constant height.
                     DesktopModeTabs(expertTab, { expertTab = it },
-                        status = when {
-                            expertUi?.phase == ExpertPhase.RUNNING -> "Управление включено"
-                            tunnel.status == TunnelStatus.RUNNING -> "VPN подключён"
-                            else -> ""
-                        }, reducedMotion = expertUi?.reducedMotion == true)
+                        status = workspaceStatus(expertUi, tunnel, ui),
+                        reducedMotion = expertUi?.reducedMotion == true,
+                        onStatusClick = {
+                            val expertOwns = expertUi?.phase in setOf(ExpertPhase.RUNNING, ExpertPhase.STARTING, ExpertPhase.APPLYING, ExpertPhase.FAILED)
+                            expertTab = expertOwns
+                            homeRequest++
+                        })
                     Crossfade(expertTab, Modifier.weight(1f).fillMaxWidth(),
                         animationSpec = tween(if (expertUi?.reducedMotion == true) 0 else 180), label = "workspace") { showExpert ->
                         modeStates.SaveableStateProvider(showExpert) {
@@ -424,6 +429,47 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
             app.lernet.desktop.observation.ClientObservationContext(profile?.name.orEmpty(), endpoint, outbound?.type.orEmpty(), profile?.modeOverride ?: saved.mode, controller.tunnel.state.value.status.name, controller.tunnel.state.value.message, APP_VERSION)
         },
     )
+}
+
+/** One status line for the window strip; the words match the phone's status strip. */
+internal fun workspaceStatus(expertUi: ExpertUiState?, tunnel: TunnelSnapshot, ui: DesktopUiState): WorkspaceStatus {
+    val expertPhase = expertUi?.phase
+    if (expertUi != null && expertPhase != null && expertPhase != ExpertPhase.STOPPED) {
+        val active = expertUi.connections.count { it.active == true }
+        return when (expertPhase) {
+            ExpertPhase.RUNNING, ExpertPhase.APPLYING ->
+                if (expertUi.tunnelHealth == app.lernet.engine.policy.ExpertTunnelHealth.ERROR) {
+                    WorkspaceStatus("Своя схема · сбой выхода", StatusTone.PROBLEM)
+                } else {
+                    WorkspaceStatus("Своя схема работает · ${connectionCount(active)}", StatusTone.OK)
+                }
+            ExpertPhase.STARTING -> WorkspaceStatus("Своя схема включается…", StatusTone.PROGRESS)
+            ExpertPhase.STOPPING -> WorkspaceStatus("Своя схема выключается…", StatusTone.PROGRESS)
+            ExpertPhase.FAILED -> WorkspaceStatus("Своя схема: сбой", StatusTone.PROBLEM)
+            else -> WorkspaceStatus("")
+        }
+    }
+    val profile = ui.saved.profiles.firstOrNull { it.id == ui.saved.selectedProfileId }?.name
+    val holding = ui.tried != null && tunnel.status != TunnelStatus.STOPPED
+    return when {
+        holding -> WorkspaceStatus("Нет связи · VPN держим", StatusTone.HOLD)
+        tunnel.status == TunnelStatus.RUNNING && ui.healthFailures >= 2 -> WorkspaceStatus("Подключено · нет ответа", StatusTone.PROBLEM)
+        tunnel.status == TunnelStatus.RUNNING -> WorkspaceStatus(listOfNotNull("Подключено", profile).joinToString(" · "), StatusTone.OK)
+        ui.busy || tunnel.status == TunnelStatus.STARTING -> WorkspaceStatus("Подключаемся…", StatusTone.PROGRESS)
+        tunnel.status == TunnelStatus.RECONNECTING -> WorkspaceStatus("Переподключаемся…", StatusTone.PROGRESS)
+        tunnel.status == TunnelStatus.FAILED -> WorkspaceStatus("Не удалось подключиться", StatusTone.PROBLEM)
+        else -> WorkspaceStatus("Отключено")
+    }
+}
+
+internal fun connectionCount(n: Int): String {
+    val word = when {
+        n % 100 in 11..14 -> "соединений"
+        n % 10 == 1 -> "соединение"
+        n % 10 in 2..4 -> "соединения"
+        else -> "соединений"
+    }
+    return "$n $word"
 }
 
 private enum class Tab(val label: String) {

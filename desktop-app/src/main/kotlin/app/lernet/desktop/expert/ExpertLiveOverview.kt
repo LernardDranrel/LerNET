@@ -11,7 +11,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -70,36 +69,53 @@ internal fun ExpertLiveOverview(
     onIntent: (ExpertIntent) -> Unit,
     modifier: Modifier,
     confirm: (ExpertIntent) -> Unit,
-    openEvents: () -> Unit,
+    openPage: (ExpertPage) -> Unit,
 ) {
-    // The pult keeps the lever and a short summary; search, filters and history are in «События».
+    // The pult is a summary: the lever and three tiles that lead to the details (m3, m6).
     ExpertScrollableColumn(modifier.fillMaxSize()) {
         TunControl(state, onIntent, confirm)
-        ExpertNowSummary(state, openEvents)
+        ExpertSummaryTiles(state, openPage)
     }
 }
 
-/** «Сейчас»: a short summary of exits and connections, with a way to the full list. */
+/** Three counters, each a link to the one page where the details live; no number is repeated elsewhere on the pult. */
 @Composable
-private fun ExpertNowSummary(state: ExpertUiState, openEvents: () -> Unit) {
+internal fun ExpertSummaryTiles(state: ExpertUiState, openPage: (ExpertPage) -> Unit) {
     val working = state.exits.count { it.phase == app.lernet.engine.policy.ExitPhase.READY }
     val sleeping = state.exits.count { it.phase == app.lernet.engine.policy.ExitPhase.SLEEPING }
-    val down = state.exits.count { it.phase == app.lernet.engine.policy.ExitPhase.FAILED || it.phase == app.lernet.engine.policy.ExitPhase.DEGRADED }
-    Surface(color = ExpertColors.panel, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, ExpertColors.border)) {
-        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("СЕЙЧАС", style = MaterialTheme.typography.labelSmall, color = ExpertColors.amber)
-            NowRow("Конфиги", if (state.exits.isEmpty()) "ещё не добавлены" else "$working работают · $sleeping спят · $down недоступны")
-            NowRow("Активных соединений", state.connections.count { it.active == true }.toString())
-            TextButton(onClick = openEvents) { Text("Соединения, поиск и история — в «Событиях» →") }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        SummaryTile(
+            "Конфиги",
+            if (state.exits.isEmpty()) "ещё нет" else "$working работают" + if (sleeping > 0) " · $sleeping спят" else "",
+            Modifier.weight(1f),
+        ) { openPage(ExpertPage.EXITS) }
+        SummaryTile("Соединения", "${state.connections.count { it.active == true }} активных", Modifier.weight(1f)) {
+            openPage(ExpertPage.EVENTS)
         }
+        val guarded = state.protection.exitFailureEnforced && state.protection.dnsFollowsPolicy
+        SummaryTile(
+            "Защита", if (guarded) "включена" else "не подтверждена", Modifier.weight(1f),
+            valueColor = if (guarded) ExpertColors.green else ExpertColors.amber,
+        ) { openPage(ExpertPage.PROTECTION) }
     }
 }
 
 @Composable
-private fun NowRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
-        Text(value, style = MaterialTheme.typography.bodyMedium, color = ExpertColors.muted)
+private fun SummaryTile(
+    title: String,
+    value: String,
+    modifier: Modifier,
+    valueColor: androidx.compose.ui.graphics.Color = ExpertColors.text,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier.clickable(onClickLabel = "Открыть «$title»", onClick = onClick),
+        color = ExpertColors.panel, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, ExpertColors.border),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium, color = ExpertColors.muted)
+            Text("$value ›", style = MaterialTheme.typography.titleMedium, color = valueColor, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 
@@ -208,6 +224,8 @@ internal fun ExpertLiveStreams(
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var activeOnly by rememberSaveable { mutableStateOf(false) }
+    var finishedOnly by rememberSaveable { mutableStateOf(false) }
+    var longOnly by rememberSaveable { mutableStateOf(false) }
     var protectedOnly by rememberSaveable { mutableStateOf(false) }
     var selected by remember { mutableStateOf<ExpertConnection?>(null) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -221,8 +239,11 @@ internal fun ExpertLiveStreams(
     }
     val sampler = remember(state.tunnelIdentity) { FlowRateSampler() }
     val rates = remember(state.connections, sampler) { sampler.update(state.connections) }
+    // m6: one feed with filters instead of two columns «разовые / длительные» with repeated counters.
     val all = state.connections.filter { flow ->
         (!activeOnly || flow.active == true) &&
+            (!finishedOnly || flow.active == false) &&
+            (!longOnly || isLongLivedFlow(flow, now)) &&
             (!protectedOnly || flow.protected) &&
             (
                 query.isBlank() ||
@@ -234,65 +255,37 @@ internal fun ExpertLiveStreams(
             .thenByDescending { it.id.substringAfterLast(':').toLongOrNull() ?: 0L }
             .thenByDescending { it.id }
     )
-    val long = all.filter { isLongLivedFlow(it, now) }
-    val recent = all.filterNot { isLongLivedFlow(it, now) }
     val activeRates = state.connections.filter { it.active == true }
         .mapNotNull { freshFlowRate(it, rates[it.id], now) }
     val activeCount = state.connections.count { it.active == true }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         OutlinedTextField(
             query, { query = it }, Modifier.fillMaxWidth(), singleLine = true,
-            label = { Text("Найти программу, сайт или адрес") }
+            label = { Text("Программа, сайт или адрес") }
         )
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            FilterChip(activeOnly, { activeOnly = !activeOnly }, label = { Text("Активные") })
-            FilterChip(protectedOnly, { protectedOnly = !protectedOnly }, label = { Text("С запретом прямого выхода") })
-            Text(
-                if (activeRates.isEmpty()) {
-                    "Скорость ещё не измерена"
-                } else {
-                    (
-                        if (activeRates.size < activeCount) {
-                            "Скорость ${activeRates.size} из $activeCount соединений: "
-                        } else {
-                            "Наблюдаемый трафик: "
-                        }
-                        ) + "↑ ${formatTraffic(activeRates.sumOf { it.upload })}/с  " +
-                        "↓ ${formatTraffic(activeRates.sumOf { it.download })}/с"
-                },
-                Modifier.align(Alignment.CenterVertically), color = ExpertColors.muted, fontSize = 12.sp,
-            )
+            FilterChip(activeOnly, { activeOnly = !activeOnly; if (activeOnly) finishedOnly = false }, label = { Text("Активные") })
+            FilterChip(longOnly, { longOnly = !longOnly }, label = { Text("Длительные") })
+            FilterChip(finishedOnly, { finishedOnly = !finishedOnly; if (finishedOnly) activeOnly = false }, label = { Text("Завершённые") })
+            FilterChip(protectedOnly, { protectedOnly = !protectedOnly }, label = { Text("С защитой") })
         }
         Text(
-            if (state.connectionHistoryTruncated) {
-                "Показана ограниченная часть истории · до ${state.connectionHistoryLimit} записей. " +
-                    "Вытеснено: ${state.connectionDroppedCount}."
-            } else {
-                "История текущей сессии · до ${state.connectionHistoryLimit} соединений. " +
-                    "HTTPS-запросы внутри соединения не раскрываются."
+            buildString {
+                append(
+                    if (activeRates.isEmpty()) {
+                        "Скорость ещё не измерена"
+                    } else {
+                        (if (activeRates.size < activeCount) "Скорость ${activeRates.size} из $activeCount: " else "") +
+                            "↑ ${formatTraffic(activeRates.sumOf { it.upload })}/с  ↓ ${formatTraffic(activeRates.sumOf { it.download })}/с"
+                    }
+                )
+                if (state.connectionHistoryTruncated) {
+                    append(" · показаны последние ${state.connectionHistoryLimit}, вытеснено ${state.connectionDroppedCount}")
+                }
             },
             color = if (state.connectionHistoryTruncated) ExpertColors.amber else ExpertColors.muted, fontSize = 12.sp,
         )
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-            if (maxWidth >= 740.dp) {
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    TrafficColumn("Недавние / разовые", recent, rates, state, now, Modifier.weight(1f)) { selected = it }
-                    TrafficColumn("Длительные · от 30 с", long, rates, state, now, Modifier.weight(1f)) { selected = it }
-                }
-            } else {
-                var longTab by rememberSaveable { mutableStateOf(false) }
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(!longTab, { longTab = false }, label = { Text("Недавние · ${recent.size}") })
-                        FilterChip(longTab, { longTab = true }, label = { Text("Длительные · ${long.size}") })
-                    }
-                    TrafficColumn(
-                        if (longTab) "Длительные · от 30 с" else "Недавние / разовые",
-                        if (longTab) long else recent, rates, state, now, Modifier.weight(1f)
-                    ) { selected = it }
-                }
-            }
-        }
+        TrafficColumn("Соединения", all, rates, state, now, Modifier.weight(1f).fillMaxWidth()) { selected = it }
     }
     selected?.let { captured ->
         val current = state.connections.firstOrNull { it.id == captured.id }

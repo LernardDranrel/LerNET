@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.lernet.desktop.DesktopWorkspaceSidebar
+import app.lernet.desktop.WorkspaceNavigationHeader
 import app.lernet.desktop.WorkspaceNavigationItem
 
 internal enum class ExpertPage(val title: String) {
@@ -55,11 +56,13 @@ internal enum class ExpertPage(val title: String) {
     EXITS("Конфиги"),
     PREVIEW("Проверка пути"),
     EVENTS("События"),
-    PROTECTION("Защита и DNS")
+    PROTECTION("Защита и DNS"),
+    LIBRARY("Конфиги и папки"),
+    APP_SETTINGS("Настройки приложения"),
 }
 
-/** Expert's own bottom menu (v2); Expert safety settings stay in the left column. */
-internal val ExpertBottomPages = listOf(ExpertPage.OVERVIEW, ExpertPage.ROUTES, ExpertPage.EXITS, ExpertPage.PREVIEW, ExpertPage.EVENTS)
+/** The five Expert sections, the same set and order as the phone's bottom menu (m3, m4). */
+internal val ExpertNavPages = listOf(ExpertPage.OVERVIEW, ExpertPage.ROUTES, ExpertPage.EXITS, ExpertPage.PREVIEW, ExpertPage.EVENTS)
 
 /** The controller alone starts networking and acknowledges applied revisions. */
 @Composable
@@ -68,9 +71,13 @@ fun DesktopExpert(
     onIntent: (ExpertIntent) -> Unit,
     modifier: Modifier = Modifier,
     frameAnimateIn: Boolean = true,
+    configLibrary: (@Composable (Modifier) -> Unit)? = null,
+    appSettings: (@Composable (Modifier) -> Unit)? = null,
 ) {
-    // v2: entering Expert (launch or mode change) always opens the pult.
-    var page by remember { mutableStateOf(ExpertPage.OVERVIEW) }
+    // G3: the section is remembered for the session (mode switches included); a new launch opens the pult.
+    var pageName by rememberSaveable { mutableStateOf(ExpertPage.OVERVIEW.name) }
+    val page = ExpertPage.valueOf(pageName)
+    val openPage: (ExpertPage) -> Unit = { pageName = it.name }
     val pageStates = rememberSaveableStateHolder()
     var confirmation by remember { mutableStateOf<ExpertIntent?>(null) }
     var recordedFlow by remember { mutableStateOf<ExpertConnection?>(null) }
@@ -93,34 +100,43 @@ fun DesktopExpert(
             }
         },
     ) {
-        DesktopWorkspaceSidebar({ onIntent(ExpertIntent.OpenNetworkObservation) }) {
-            WorkspaceNavigationItem(ExpertPage.PROTECTION.title, page == ExpertPage.PROTECTION, { page = ExpertPage.PROTECTION })
+        // m3 / N1, N6: the Expert sections live in the left column (NavigationView), not in a strip at the bottom.
+        DesktopWorkspaceSidebar({ onIntent(ExpertIntent.OpenNetworkObservation) }, title = "LerNET · Эксперт") {
+            Column(Modifier.semantics { contentDescription = "Разделы Эксперта" }) {
+                ExpertNavPages.forEach { item ->
+                    WorkspaceNavigationItem(item.title, page == item, { openPage(item) }, badge = navBadge(item, state))
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            WorkspaceNavigationHeader("Настройки")
+            WorkspaceNavigationItem(ExpertPage.PROTECTION.title, page == ExpertPage.PROTECTION, { openPage(ExpertPage.PROTECTION) })
+            if (configLibrary != null) {
+                WorkspaceNavigationItem(ExpertPage.LIBRARY.title, page == ExpertPage.LIBRARY, { openPage(ExpertPage.LIBRARY) })
+            }
+            if (appSettings != null) {
+                WorkspaceNavigationItem(ExpertPage.APP_SETTINGS.title, page == ExpertPage.APP_SETTINGS, { openPage(ExpertPage.APP_SETTINGS) })
+            }
         }
-        Column(Modifier.weight(1f).fillMaxHeight()) {
         app.lernet.ui.controls.ExpertFramedBox(
             app.lernet.ui.controls.ExpertFrameSpec.Windows,
-            Modifier.weight(1f).fillMaxWidth(),
+            Modifier.weight(1f).fillMaxHeight(),
             lit = if (state.phase == ExpertPhase.RUNNING) 1f else 0.35f,
             animateIn = frameAnimateIn && !state.reducedMotion,
         ) {
         Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(Modifier.weight(1f)) {
-                    Text(
-                        if (page == ExpertPage.OVERVIEW) "Управление сетью" else page.title,
-                        style = MaterialTheme.typography.headlineMedium
-                    )
-                    Text(
-                        if (page == ExpertPage.ROUTES) {
-                            "Правила устройства, конфигов и папок"
-                        } else {
-                            "Экспертный режим · твои правила для каждого соединения"
-                        },
-                        color = ExpertColors.muted
-                    )
+                    Text(page.title, style = MaterialTheme.typography.headlineMedium)
+                    // X9: the mode subtitle only on the pult; other pages explain themselves.
+                    val subtitle = when (page) {
+                        ExpertPage.OVERVIEW -> "Эксперт · твои правила для каждого соединения"
+                        ExpertPage.ROUTES -> "Правила устройства, конфигов и папок"
+                        ExpertPage.APP_SETTINGS -> "Общие настройки приложения: действуют и в режиме VPN"
+                        ExpertPage.LIBRARY -> "Те же конфиги и папки, что в режиме VPN"
+                        else -> null
+                    }
+                    subtitle?.let { Text(it, color = ExpertColors.muted) }
                 }
-                // The pult card already says the state next to the switch: the chip would repeat it.
-                if (page != ExpertPage.OVERVIEW) ExpertTag(phaseName(state.phase), if (state.phase == ExpertPhase.RUNNING) ExpertColors.green else ExpertColors.muted)
                 ExpertWorkspaceMenu(state, onIntent)
             }
             state.error?.let { ExpertMessage("Операция не завершена", it, error = true) }
@@ -134,39 +150,38 @@ fun DesktopExpert(
             pageStates.SaveableStateProvider(page.name) {
                 when (page) {
                     ExpertPage.OVERVIEW -> ExpertLiveOverview(
-                        state, onIntent, Modifier.weight(1f), { confirmation = it },
-                        openEvents = { page = ExpertPage.EVENTS },
+                        state, onIntent, Modifier.weight(1f), { confirmation = it }, openPage = openPage,
                     )
                     ExpertPage.ROUTES -> ExpertRoutes(state, onIntent, Modifier.weight(1f))
                     ExpertPage.PREVIEW -> ExpertRoutePreview(
-                        state, Modifier.weight(1f), onIntent, { page = ExpertPage.ROUTES }, recordedFlow = recordedFlow,
+                        state, Modifier.weight(1f), onIntent, { openPage(ExpertPage.ROUTES) }, recordedFlow = recordedFlow,
                         showRecordedPath = recordedPathOnly, requestToken = previewRequest,
                     )
-                    ExpertPage.EXITS -> ExpertExits(state, onIntent, Modifier.weight(1f)) { page = ExpertPage.ROUTES }
+                    ExpertPage.EXITS -> ExpertExits(state, onIntent, Modifier.weight(1f)) { openPage(ExpertPage.ROUTES) }
                     ExpertPage.EVENTS -> ExpertEvents(
                         state, onIntent, Modifier.weight(1f),
                         simulate = {
                             recordedFlow = it
                             recordedPathOnly = false
                             previewRequest++
-                            page = ExpertPage.PREVIEW
+                            openPage(ExpertPage.PREVIEW)
                         },
                         showPath = {
                             recordedFlow = it
                             recordedPathOnly = true
                             previewRequest++
-                            page = ExpertPage.PREVIEW
+                            openPage(ExpertPage.PREVIEW)
                         },
                     )
                     ExpertPage.PROTECTION -> ExpertProtectionPage(state, onIntent, Modifier.weight(1f)) { confirmation = it }
+                    ExpertPage.LIBRARY -> configLibrary?.invoke(Modifier.weight(1f).fillMaxWidth())
+                    ExpertPage.APP_SETTINGS -> appSettings?.invoke(Modifier.weight(1f).fillMaxWidth())
                 }
             }
             if (state.hasDraftChanges || (state.phase == ExpertPhase.RUNNING && state.appliedRevision != null && state.hasUnappliedChanges)) {
                 DraftActions(state, validation, onIntent) { confirmation = it }
             }
         }
-        }
-        ExpertBottomBar(page) { page = it }
         }
     }
     when (confirmation) {
@@ -419,22 +434,10 @@ private fun ProtectionRow(title: String, enforced: Boolean, explanation: String)
     Spacer(Modifier.height(2.dp))
 }
 
-@Composable
-private fun ExpertBottomBar(page: ExpertPage, onPage: (ExpertPage) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().background(ExpertColors.background).padding(horizontal = 24.dp, vertical = 8.dp)
-            .semantics { contentDescription = "Разделы Эксперта" },
-        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-    ) {
-        ExpertBottomPages.forEach { item ->
-            val selected = page == item
-            androidx.compose.material3.TextButton(
-                onClick = { onPage(item) },
-                colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                    containerColor = if (selected) ExpertColors.amber.copy(alpha = 0.16f) else androidx.compose.ui.graphics.Color.Transparent,
-                    contentColor = if (selected) ExpertColors.amber else ExpertColors.muted,
-                ),
-            ) { Text(item.title, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal) }
-        }
+private fun navBadge(page: ExpertPage, state: ExpertUiState): String? = when (page) {
+    ExpertPage.EXITS -> state.exits.takeIf { it.isNotEmpty() }?.let { exits ->
+        "${exits.count { it.phase == app.lernet.engine.policy.ExitPhase.READY }}/${exits.size}"
     }
+    ExpertPage.EVENTS -> state.connections.count { it.active == true }.takeIf { it > 0 }?.toString()
+    else -> null
 }
