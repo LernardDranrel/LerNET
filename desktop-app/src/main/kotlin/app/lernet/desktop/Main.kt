@@ -603,7 +603,7 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
                     onOpenJournal = { tab = Tab.DIAGNOSTICS })
                 Tab.ROUTES -> DesktopRoutes(ui.saved, controller, routeOwnerId)
                 Tab.DIAGNOSTICS -> Diagnostics(ui.saved, tunnel, diagnostics, connectionHistory, trace, traceDetailsRequest, controller)
-                Tab.SETTINGS -> Settings(ui.saved, controller, onRequestElevation,
+                Tab.SETTINGS -> Settings(ui.saved, controller, onRequestElevation, onOpenNetwork = onOpenNetwork,
                     localProxy = ui.localProxy.takeIf { tunnel.status == TunnelStatus.RUNNING },
                     locked = ui.busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RECONNECTING))
             }
@@ -1908,159 +1908,196 @@ private fun bytesText(value: Long): String = when {
     else -> "$value Б"
 }
 
+/** S5: a field applies itself once it is valid and the person stopped typing; no separate «Сохранить». */
+@Composable
+private fun AutoApply(value: String, valid: Boolean, changed: Boolean, apply: () -> Unit) {
+    LaunchedEffect(value, valid, changed) {
+        if (valid && changed) {
+            delay(700)
+            apply()
+        }
+    }
+}
+
+/** S1/S7 order, the same on the phone: Подключение → Защита от утечек → Помощь → Приложение → Для опытных. */
 @Composable
 internal fun Settings(saved: StoredState, controller: DesktopController, onRequestElevation: () -> Unit,
-    localProxy: LocalProxyAccess? = null, locked: Boolean = false) {
-    var mtu by remember(saved.tunMtu) { mutableStateOf(saved.tunMtu.toString()) }
-    var directDns by remember(saved.directDnsServer) { mutableStateOf(saved.directDnsServer) }
-    var dnsPolicy by remember(saved.defaultDnsPolicy) { mutableStateOf(saved.defaultDnsPolicy) }
-    var logLevel by remember(saved.logLevel) { mutableStateOf(saved.logLevel) }
-    var healthUrl by remember(saved.healthUrl) { mutableStateOf(saved.healthUrl) }
-    var journalMb by remember(saved.journalMaxMb) { mutableStateOf(saved.journalMaxMb.toString()) }
-    val mtuValid = mtu.toIntOrNull()?.let { it in 1280..9000 } == true
-    val dnsValid = EngineDefaults.validIpv4(directDns.trim())
-    var advanced by remember { mutableStateOf(false) }
-    val defaultsChanged = mtu != saved.tunMtu.toString() ||
-        directDns.trim() != saved.directDnsServer || dnsPolicy != saved.defaultDnsPolicy || logLevel != saved.logLevel
-    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Panel(Modifier.testTag("settings_run_mode")) { SettingsRunMode(saved, controller, onRequestElevation, localProxy, locked) }
-        Panel { DesktopUpdateCard() }
+    localProxy: LocalProxyAccess? = null, locked: Boolean = false, onOpenNetwork: (() -> Unit)? = null,
+    onOpenApps: (() -> Unit)? = null) {
+    var expertPage by rememberSaveable { mutableStateOf(false) }
+    if (expertPage) {
+        SettingsForExperts(saved, controller) { expertPage = false }
+        return
+    }
+    Column(Modifier.fillMaxWidth().widthIn(max = 860.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SettingsGroupTitle("Подключение")
+        Panel(Modifier.testTag("settings_run_mode")) {
+            SettingsRunMode(saved, controller, onRequestElevation, localProxy, locked)
+            // S2: the proxy password belongs to the proxy mode and is shown only there.
+            if (controller.effectiveMode(saved.profiles.firstOrNull { it.id == saved.selectedProfileId }) == RunMode.PROXY) {
+                HorizontalDivider(color = desktopColors.outlineVariant)
+                ProxyPasswordSettings(saved, controller)
+            }
+        }
         Panel {
-            SettingHeading(SecurityTexts.PANEL_TAG, SecurityTexts.PANEL_TITLE, SecurityTexts.PANEL_BODY)
+            SecurityToggle("Запускать при входе в систему",
+                "LerNET запустится в трее и, если VPN был включён, сам подключит его снова. Кнопка «Отключить» отменяет это до следующего подключения.",
+                saved.autostart, controller::setAutostart)
+            if (onOpenApps != null) {
+                HorizontalDivider(color = desktopColors.outlineVariant)
+                SettingsLink("Программы мимо VPN", "Выберите программы, которые выходят в интернет напрямую", onOpenApps)
+            }
+        }
+        SettingsGroupTitle("Защита от утечек")
+        Panel {
+            Text(SecurityTexts.PANEL_BODY, color = muted, fontSize = 12.sp)
             SecurityToggle(SecurityTexts.CRASH_GUARD, SecurityTexts.CRASH_GUARD_HINT, saved.crashGuard, controller::setCrashGuard)
             SecurityToggle(SecurityTexts.STRICT_ROUTE, SecurityTexts.STRICT_ROUTE_HINT, saved.strictRoute, controller::setStrictRoute)
             Text(SecurityTexts.APPLIES_ON_RECONNECT, color = muted, fontSize = 12.sp)
         }
-        Panel { ProxyPasswordSettings(saved, controller) }
+        SettingsGroupTitle("Помощь")
         Panel {
-            Text("Параметры подключения", style = MaterialTheme.typography.titleLarge)
-            Text("Общие значения для конфигов. Если конфиг содержит собственную настройку, она имеет приоритет. Изменения вступят в силу при следующем подключении.",
-                color = muted, style = MaterialTheme.typography.bodyMedium)
-            HorizontalDivider(color = desktopColors.outlineVariant)
-            SettingHeading("DNS", "Кто определяет адреса сайтов",
-                "DNS переводит имя сайта в IP-адрес. Выберите источник настройки рядом с адресом сервера.")
-            Box(Modifier.fillMaxWidth()) {
-                SegmentedChoice(listOf("TUNNEL" to "Через VPN", "UNDERLAY" to "Напрямую", "PROFILE" to "Из конфига"), dnsPolicy) { dnsPolicy = it }
+            SettingsLink("Сохранить журнал", "Файл для разработчика; ключи и пароли из него убраны", onClick = {
+                val dialog = FileDialog(null as Frame?, "Сохранить журнал", FileDialog.SAVE)
+                dialog.file = "LerNET-журнал-" + java.time.LocalDate.now() + ".txt"
+                dialog.isVisible = true
+                dialog.file?.let { controller.saveJournal(Path.of(dialog.directory, it)) }
+                dialog.dispose()
+            })
+            if (onOpenNetwork != null) {
+                HorizontalDivider(color = desktopColors.outlineVariant)
+                SettingsLink("Анализ сети", "Адаптеры, DNS и пути Windows в одной таблице", onOpenNetwork)
+            }
+        }
+        SettingsGroupTitle("Приложение")
+        Panel { DesktopUpdateCard() }
+        Panel {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("LerNET $APP_VERSION · ядро sing-box-lx " + WindowsBoxProcess.PINNED_CORE_VERSION, fontWeight = FontWeight.SemiBold)
+                    Text("Встроенное проверенное ядро, одинаковое на Android и Windows.", color = muted, fontSize = 12.sp)
+                }
+                // S8: an explicit copy button instead of a hidden gesture.
+                TextButton(onClick = { copyToClipboard("LerNET $APP_VERSION · sing-box-lx ${WindowsBoxProcess.PINNED_CORE_VERSION}") }) {
+                    Text("Скопировать")
+                }
+            }
+        }
+        Panel(Modifier.testTag("settings_advanced")) {
+            SettingsLink("Для опытных", "DNS, MTU, соединения XHTTP, рукопожатие TLS, адрес проверки, журнал", onClick = { expertPage = true })
+        }
+    }
+}
+
+@Composable
+private fun SettingsGroupTitle(title: String) {
+    Text(title, color = blue, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp))
+}
+
+@Composable
+private fun SettingsLink(title: String, subtitle: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = muted, fontSize = 12.sp)
+        }
+        Text("›", color = muted, fontSize = 20.sp)
+    }
+}
+
+/** «Для опытных»: the technical settings on their own page (the phone has the same page). */
+@Composable
+private fun SettingsForExperts(saved: StoredState, controller: DesktopController, onBack: () -> Unit) {
+    var mtu by remember(saved.tunMtu) { mutableStateOf(saved.tunMtu.toString()) }
+    var directDns by remember(saved.directDnsServer) { mutableStateOf(saved.directDnsServer) }
+    var healthUrl by remember(saved.healthUrl) { mutableStateOf(saved.healthUrl) }
+    var journalMb by remember(saved.journalMaxMb) { mutableStateOf(saved.journalMaxMb.toString()) }
+    val mtuValid = mtu.toIntOrNull()?.let { it in 1280..9000 } == true
+    val dnsValid = EngineDefaults.validIpv4(directDns.trim())
+    val healthValid = healthUrl.trim().startsWith("https://") && healthUrl.trim().length > 8
+    val journalValid = journalMb.toIntOrNull()?.let { it in 1..500 } == true
+    AutoApply(mtu, mtuValid, mtu != saved.tunMtu.toString()) { controller.setDefaults(mtu.toInt(), saved.directDnsServer, saved.logLevel) }
+    AutoApply(directDns, dnsValid, directDns.trim() != saved.directDnsServer) { controller.setDefaults(saved.tunMtu, directDns.trim(), saved.logLevel) }
+    AutoApply(healthUrl, healthValid, healthUrl.trim() != saved.healthUrl) { controller.setHealthUrl(healthUrl) }
+    AutoApply(journalMb, journalValid, journalMb != saved.journalMaxMb.toString()) { controller.setJournalMaxMb(journalMb.toInt()) }
+    Column(Modifier.fillMaxWidth().widthIn(max = 860.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onBack) { Text("← Настройки") }
+            Text("Для опытных", style = MaterialTheme.typography.titleLarge)
+        }
+        Text("Значение применяется, как только оно верное, и действует со следующего подключения. Настройки самого конфига важнее этих.",
+            color = muted, fontSize = 12.sp)
+        Panel {
+            SettingHeading("", "DNS: кто определяет адреса сайтов", "")
+            SegmentedChoice(listOf("TUNNEL" to "Через VPN", "UNDERLAY" to "Напрямую", "PROFILE" to "Из конфига"), saved.defaultDnsPolicy) {
+                controller.setDefaultDnsPolicy(DnsPolicy.valueOf(it))
             }
             OutlinedTextField(directDns, { directDns = it }, modifier = Modifier.fillMaxWidth(),
-                label = { Text(if (dnsPolicy == "PROFILE") "Резервный DNS · IPv4" else "DNS-сервер · IPv4") },
+                label = { Text(if (saved.defaultDnsPolicy == "PROFILE") "Резервный DNS · IPv4" else "DNS-сервер · IPv4") },
                 placeholder = { Text("1.1.1.1") }, isError = !dnsValid, singleLine = true,
-                supportingText = { Text(if (!dnsValid) "Введите один IPv4-адрес, например 1.1.1.1." else "Один IPv4-адрес. Список через запятую здесь не поддерживается.") })
-            Text(if (dnsPolicy == "PROFILE")
-                "Если в конфиге есть DNS, используются его серверы и правила. Импортированный JSON может содержать несколько серверов; их выбор задаёт конфигурация. Если DNS в конфиге отсутствует, используется адрес выше. Он также нужен для прямых DNS-зависимостей."
-            else if (dnsPolicy == "TUNNEL") "По умолчанию. Адреса сайтов запрашиваются через VPN в зашифрованном виде, поэтому сеть не видит, какие сайты вы открываете. Напрямую идёт только запрос адреса самого VPN-сервера. Если на каком-то сервере так не работает (бывает, когда хостинг сервера режет DNS), выберите для этого конфига «DNS сети»."
-            else "Для DNS используется адрес, заданный здесь, через прямое подключение мимо VPN: сеть и провайдер видят имена сайтов. Несколько DNS можно задать в JSON конфига и выбрать «Из конфига».",
-                color = muted, fontSize = 12.sp, lineHeight = 18.sp)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Button(onClick = {
-                    controller.setDefaultDnsPolicy(DnsPolicy.valueOf(dnsPolicy))
-                    controller.setDefaults(mtu.toInt(), directDns.trim(), logLevel)
-                }, enabled = defaultsChanged && mtuValid && dnsValid) { Text("Сохранить параметры") }
-                Text(if (defaultsChanged) "Есть несохранённые изменения" else "Параметры сохранены", color = muted, fontSize = 12.sp)
-            }
+                supportingText = { Text(if (!dnsValid) "Введите один IPv4-адрес, например 1.1.1.1." else "Один IPv4-адрес.") })
+            Text(when (saved.defaultDnsPolicy) {
+                "PROFILE" -> "Если в конфиге есть DNS, используются его серверы и правила. Если нет — адрес выше."
+                "TUNNEL" -> "По умолчанию. Адреса сайтов запрашиваются через VPN: сеть не видит, какие сайты вы открываете. Если на каком-то сервере так не работает, выберите для этого конфига «Напрямую»."
+                else -> "Адреса сайтов запрашиваются у этого DNS напрямую, мимо VPN: сеть и провайдер видят имена сайтов."
+            }, color = muted, fontSize = 12.sp, lineHeight = 18.sp)
         }
-        // Same as on Android: rarely needed knobs are folded into «Дополнительно», closed by default.
         Panel {
-            Row(
-                Modifier.fillMaxWidth().clickable { advanced = !advanced }.testTag("settings_advanced"),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Дополнительно", style = MaterialTheme.typography.titleLarge)
-                    Text("MTU, соединения XHTTP, журнал, рукопожатие TLS, адрес проверки связи",
-                        color = muted, fontSize = 12.sp)
-                }
-                FolderChevron(advanced)
-            }
-        }
-        if (advanced) Panel {
-            SettingHeading("MTU", "Размер пакета VPN",
-                "Максимальный размер IP-пакета в виртуальном сетевом адаптере, в байтах. Влияет только на режим VPN.")
+            SettingHeading("", "MTU: размер пакета VPN",
+                "Максимальный размер IP-пакета в виртуальном адаптере, в байтах. Влияет только на режим VPN.")
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(mtu, { mtu = it.filter(Char::isDigit).take(4) }, modifier = Modifier.width(160.dp),
                     label = { Text("MTU, байт") }, isError = !mtuValid, singleLine = true,
                     supportingText = { Text(if (mtuValid) "1280–9000" else "Допустимо 1280–9000") })
                 TextButton(onClick = { mtu = "1500" }) { Text("По умолчанию: 1500") }
             }
-            Text("Больше — меньше накладных расходов, но слишком крупные пакеты могут теряться или дробиться. Меньше — проще пройти сеть с ограничениями, но больше пакетов и нагрузка.",
-                color = muted, fontSize = 12.sp, lineHeight = 18.sp)
-            SettingAdvice("Как подобрать", "Начните с 1500. Если сайты или загрузки зависают, сравните 1400 и 1280 на тех же задачах после переподключения. Оставьте наибольшее значение со стабильной работой. Универсальной формулы для любого VPN нет; обычный пинг не измеряет MTU всего пути.")
-            HorizontalDivider(Modifier.padding(vertical = 5.dp), color = desktopColors.outlineVariant)
-            SettingHeading("XHTTP", "Соединения с сервером",
-                "Сколько соединений с сервером держит XHTTP. По умолчанию два: все запросы идут по ним, новые соединения не открываются пачкой. Настройка применяется, только если конфиг не задаёт собственный XMUX.")
-            SecurityToggle("Один канал",
-                "Весь трафик пойдёт одним соединением. Включите, если в вашей сети глушат новые соединения. Минус: одна медленная загрузка может притормозить остальное. Вступит в силу при следующем подключении.",
-                saved.xmuxChannels == app.lernet.engine.compile.XhttpMode.SINGLE_CHANNEL, controller::setXmuxSingleChannel)
-            HorizontalDivider(Modifier.padding(vertical = 5.dp), color = desktopColors.outlineVariant)
-            Text("Подробность журнала", fontWeight = FontWeight.SemiBold)
-            Box(Modifier.fillMaxWidth()) {
-                SegmentedChoice(listOf("debug" to "debug", "info" to "info", "warn" to "warn", "error" to "error"), logLevel) { logLevel = it }
-            }
-            Text(when (logLevel) {
-                "debug" -> "Подробная диагностика для поиска ошибки. Создаёт больше записей."
-                "warn" -> "Только предупреждения и ошибки; меньше подробностей о подключении."
-                "error" -> "Только ошибки; успешные события подключения не записываются."
-                else -> "Основные события, предупреждения и ошибки. Подходит для повседневной работы."
-            }, color = muted, fontSize = 12.sp)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Button(onClick = {
-                    controller.setDefaultDnsPolicy(DnsPolicy.valueOf(dnsPolicy))
-                    controller.setDefaults(mtu.toInt(), directDns.trim(), logLevel)
-                }, enabled = defaultsChanged && mtuValid && dnsValid) { Text("Сохранить параметры") }
-                Text(if (defaultsChanged) "Есть несохранённые изменения" else "Параметры сохранены", color = muted, fontSize = 12.sp)
-            }
+            SettingAdvice("Как подобрать", "Начните с 1500. Если сайты или загрузки зависают, сравните 1400 и 1280 после переподключения и оставьте наибольшее значение со стабильной работой.")
         }
-        if (advanced) Panel {
-            SettingHeading("TLS", "Рукопожатие TLS",
-                "Для сетей, где фильтр режет или теряет первое сообщение защищённого соединения. Действует для узлов VLESS, VMess, Trojan с TLS или Reality. Значения из самого конфига важнее. Вступит в силу при следующем подключении.")
+        Panel {
+            SettingHeading("", "Соединения с сервером (XHTTP)",
+                "По умолчанию два соединения, все запросы идут по ним. Действует, только если конфиг не задаёт своё.")
+            SecurityToggle("Один канал",
+                "Весь трафик пойдёт одним соединением. Включите, если в вашей сети глушат новые соединения. Минус: одна медленная загрузка может притормозить остальное.",
+                saved.xmuxChannels == app.lernet.engine.compile.XhttpMode.SINGLE_CHANNEL, controller::setXmuxSingleChannel)
+        }
+        Panel {
+            SettingHeading("", "Рукопожатие TLS",
+                "Для сетей, где фильтр режет первое сообщение защищённого соединения.")
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Дробить первое сообщение TLS", Modifier.weight(1f))
                 Switch(saved.tlsRecordFragment, onCheckedChange = {
                     controller.setTlsHandshake(it, app.lernet.engine.compile.RealityKeyShare.fromStorage(saved.realityKeyShare))
                 })
             }
-            Text("Разбивает приветствие на несколько записей TLS (record_fragment). Помогает, если соединение рвётся или молчит сразу после начала рукопожатия. Немного замедляет подключение. По умолчанию выключено.",
+            Text("Помогает, если соединение рвётся сразу после начала рукопожатия. Немного замедляет подключение.",
                 color = muted, fontSize = 12.sp, lineHeight = 18.sp)
             Text("Обмен ключами Reality", fontWeight = FontWeight.SemiBold)
-            Box(Modifier.fillMaxWidth()) {
-                SegmentedChoice(listOf("" to "Как в отпечатке", "hybrid" to "Гибридный", "classical" to "Короткий"),
-                    app.lernet.engine.compile.RealityKeyShare.fromStorage(saved.realityKeyShare).storage) {
-                    controller.setTlsHandshake(saved.tlsRecordFragment, app.lernet.engine.compile.RealityKeyShare.fromStorage(it))
-                }
+            SegmentedChoice(listOf("" to "Как в отпечатке", "hybrid" to "Гибридный", "classical" to "Короткий"),
+                app.lernet.engine.compile.RealityKeyShare.fromStorage(saved.realityKeyShare).storage) {
+                controller.setTlsHandshake(saved.tlsRecordFragment, app.lernet.engine.compile.RealityKeyShare.fromStorage(it))
             }
-            Text("«Короткий» убирает большой постквантовый ключ из приветствия — оно меньше и реже теряется. Работает только с серверами Xray старше 26.9.8; с новыми серверами связь не установится.",
+            Text("«Короткий» убирает большой постквантовый ключ из приветствия. Работает только с серверами Xray старше 26.9.8.",
                 color = muted, fontSize = 12.sp, lineHeight = 18.sp)
-        }
-        if (advanced) Panel {
-            SettingHeading("HTTPS", "Проверка работоспособности",
-                "Через этот адрес проверяется интернет через выбранный конфиг: перед подключением и во время работы VPN.")
-            OutlinedTextField(healthUrl, { healthUrl = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Адрес проверки") },
-                singleLine = true, isError = !healthUrl.startsWith("https://"))
-            Text("Приложение проверяет путь через VPN только по поводу: после подключения, после смены сети и когда трафик уходит, а ответов нет. Проверка идёт в уже открытом соединении, без особого заголовка. После неудачи повторяет её через случайные 3–8 секунд. Две неудачи подряд запускают переподключение или смену сервера внутри папки, если она включена. Используйте небольшой HTTPS-ресурс, доступный через VPN.",
-                color = muted, fontSize = 12.sp, lineHeight = 18.sp)
-            Button(onClick = { controller.setHealthUrl(healthUrl) }, enabled = healthUrl.startsWith("https://") && healthUrl != saved.healthUrl) { Text("Сохранить адрес") }
-        }
-        if (advanced) Panel {
-            SettingHeading("ЛОГИ", "Хранение журнала", "Логи хранятся в папке данных LerNET. Указанный объём делится между двумя файлами журнала.")
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(journalMb, { journalMb = it.filter(Char::isDigit).take(3) }, modifier = Modifier.width(160.dp),
-                    label = { Text("Лимит, МБ") }, singleLine = true,
-                    isError = journalMb.toIntOrNull()?.let { it in 1..500 } != true)
-                Button(onClick = { controller.setJournalMaxMb(journalMb.toInt()) },
-                    enabled = journalMb.toIntOrNull()?.let { it in 1..500 && it != saved.journalMaxMb } == true) { Text("Сохранить") }
-            }
         }
         Panel {
-            SettingHeading("ЗАПУСК", "Автозапуск", "LerNET сам возвращает VPN после перезагрузки компьютера, как и на телефоне.")
-            SecurityToggle("Запускать при входе в систему",
-                "LerNET запустится в трее и, если VPN был включён, сам подключит его снова. Кнопка «Отключить» отменяет это до следующего подключения.",
-                saved.autostart, controller::setAutostart)
+            SettingHeading("", "Адрес проверки связи",
+                "Через него проверяется интернет через выбранный конфиг: после подключения, после смены сети и когда ответов нет.")
+            OutlinedTextField(healthUrl, { healthUrl = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Адрес проверки") },
+                singleLine = true, isError = !healthValid,
+                supportingText = { Text(if (healthValid) "Небольшой HTTPS-ресурс, доступный через VPN" else "Адрес должен начинаться с https://") })
         }
-        if (advanced) Panel {
-            // Only the bundled, hash-checked core runs: the leak guard lets exactly this file through Windows.
-            SettingHeading("ЯДРО", "sing-box-lx " + WindowsBoxProcess.PINNED_CORE_VERSION,
-                "LerNET работает только со своим встроенным ядром: оно проверено и одинаково на Android и Windows.")
+        Panel {
+            SettingHeading("", "Журнал", "Журнал хранится в папке данных LerNET. Объём делится между двумя файлами.")
+            OutlinedTextField(journalMb, { journalMb = it.filter(Char::isDigit).take(3) }, modifier = Modifier.width(200.dp),
+                label = { Text("Размер журнала, МБ") }, singleLine = true, isError = !journalValid,
+                supportingText = { Text("1–500") })
+            Text("Подробность журнала", fontWeight = FontWeight.SemiBold)
+            SegmentedChoice(listOf("debug" to "Всё", "info" to "Обычная", "warn" to "Предупреждения", "error" to "Ошибки"), saved.logLevel) {
+                controller.setDefaults(saved.tunMtu, saved.directDnsServer, it)
+            }
         }
     }
 }
@@ -2163,16 +2200,11 @@ private fun SecurityToggle(title: String, hint: String, checked: Boolean, onChan
 }
 
 @Composable
-internal fun SettingHeading(tag: String, title: String, description: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Surface(color = blue.copy(alpha = .12f), shape = RoundedCornerShape(6.dp)) {
-                Text(tag, color = blue, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
-            }
-            Text(title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-        }
-        Text(description, color = muted, fontSize = 12.sp, lineHeight = 18.sp)
+internal fun SettingHeading(@Suppress("UNUSED_PARAMETER") tag: String, title: String, description: String) {
+    // S6: one heading style for every group; the old coloured plaques are gone.
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Text(title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+        if (description.isNotBlank()) Text(description, color = muted, fontSize = 12.sp, lineHeight = 18.sp)
     }
 }
 
