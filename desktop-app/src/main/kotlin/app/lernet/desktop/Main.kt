@@ -226,13 +226,13 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
             expertUi?.phase == ExpertPhase.RUNNING -> "lernet-icon-running.png"
             expertUi?.phase == ExpertPhase.FAILED -> "lernet-icon-failed.png"
             else -> when (tunnel.status) {
-            TunnelStatus.RUNNING -> when {
-                ui.healthFailures >= 2 -> "lernet-icon-failed.png"
-                ui.healthVerified == true -> "lernet-icon-running.png"
+                TunnelStatus.RUNNING -> when {
+                    ui.healthFailures >= 2 -> "lernet-icon-failed.png"
+                    ui.healthVerified == true -> "lernet-icon-running.png"
+                    else -> "lernet-icon.png"
+                }
+                TunnelStatus.FAILED -> "lernet-icon-failed.png"
                 else -> "lernet-icon.png"
-            }
-            TunnelStatus.FAILED -> "lernet-icon-failed.png"
-            else -> "lernet-icon.png"
             }
         },
     )

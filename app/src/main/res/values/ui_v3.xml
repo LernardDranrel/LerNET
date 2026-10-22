@@ -102,7 +102,7 @@
     <string name="settings_leaks_value">в настройках Android</string>
     <string name="settings_leaks_help">Включает сам Android: «Постоянный VPN» и «Блокировать соединения без VPN» для LerNET. Тогда, если LerNET закроется, телефон не пустит трафик мимо VPN. LerNET не может включить это за вас.</string>
     <string name="settings_share_log_row">Отправить журнал разработчику</string>
-    <string name="settings_network_row">Анализ сети устройства</string>
+    <string name="settings_network_row">Анализ сети</string>
     <string name="settings_updates_row">Проверять обновления раз в сутки</string>
     <string name="settings_updates_now">Проверить сейчас</string>
     <string name="settings_experts_row">Для опытных</string>
