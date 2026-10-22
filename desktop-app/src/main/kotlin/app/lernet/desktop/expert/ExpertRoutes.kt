@@ -636,9 +636,9 @@ internal fun ExpertGraph(
             }
         }, content = { transform ->
             GraphCard(
-                root, transform, "Весь трафик", "Начало схемы", selectedRoot, false, null,
+                root, transform, app.lernet.engine.text.SchemaWords.ROOT_TITLE, app.lernet.engine.text.SchemaWords.ROOT_SUBTITLE, selectedRoot, false, null,
                 defaultEdit, { drag(PolicyCanvasKeys.ROOT, root, it, transform) },
-                target = "Проверка условий → ИНАЧЕ",
+                target = app.lernet.engine.text.SchemaWords.BRANCHING,
                 highlightTone = pathTone, onAdd = addRoot, draggable = !readOnly,
                 highlighted = highlightedRoot || highlightedNodes.isNotEmpty(),
                 onDragStart = { draggingKey = PolicyCanvasKeys.ROOT }, onDragEnd = ::commitDrag, onDragCancel = ::cancelDrag

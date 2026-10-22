@@ -169,10 +169,10 @@ internal fun ExpertGraph(
                 border = if (selectedKey == PolicyCanvasKeys.ROOT || highlightRoot) BorderStroke(2.dp, pathColor) else null,
             ) {
                 SchemaNodeSurface(Modifier.fillMaxWidth().weight(1f)) {
-                    Text(
-                        scopeTitle(tree.scope, bundle), style = MaterialTheme.typography.titleSmall,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    )
+                    // The same face as on Windows: «Весь трафик · Начало схемы · Проверка условий → ИНАЧЕ»;
+                    // the scope is named in the picker above.
+                    Text(app.lernet.engine.text.SchemaWords.ROOT_TITLE, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(app.lernet.engine.text.SchemaWords.ROOT_SUBTITLE, style = MaterialTheme.typography.bodySmall)
                     Text(stringResource(R.string.expert_branching_root), style = MaterialTheme.typography.bodySmall)
                 }
                 if (!readOnly) nodeActions?.invoke(null)

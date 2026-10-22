@@ -2,7 +2,7 @@
 <resources>
     <string name="expert_otherwise_title">ИНАЧЕ</string>
     <string name="expert_otherwise_hint">Если ни одно условие на этом уровне не подошло</string>
-    <string name="expert_branching_root">Проверить дочерние ветки</string>
+    <string name="expert_branching_root">Проверка условий → ИНАЧЕ</string>
     <string name="expert_otherwise_child_exit_hint">Выход для оставшегося трафика задаётся в дочерней ветке «ИНАЧЕ». Её можно продолжить новыми условиями.</string>
     <string name="expert_otherwise_condition_required">Добавь условие. Для оставшегося трафика используй ветку ИНАЧЕ.</string>
     <string name="expert_add_otherwise">+ ИНАЧЕ</string>

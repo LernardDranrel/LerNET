@@ -279,6 +279,17 @@ class PlatformTextParityTest {
     }
 
     @Test
+    fun schemaWordsMatchWindows() {
+        val words = app.lernet.engine.text.SchemaWords
+        same("route_schema", words.VIEW_SCHEMA)
+        same("route_list", words.VIEW_LIST)
+        same("expert_align_graph", words.ALIGN)
+        same("expert_branching_root", words.BRANCHING)
+        same("expert_otherwise_title", words.OTHERWISE)
+        same("expert_otherwise_hint", words.OTHERWISE_HINT)
+    }
+
+    @Test
     fun statusStripMatchesWindows() {
         same("status_connected", StatusWords.CONNECTED)
         assertEquals(StatusWords.connected("Нидерланды", dnsOk = false),

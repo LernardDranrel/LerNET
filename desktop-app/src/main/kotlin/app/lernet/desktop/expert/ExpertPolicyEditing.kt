@@ -173,7 +173,7 @@ object ExpertPolicyEditing {
     }
 
     fun conditionSummary(node: PolicyNode): String {
-        if (PolicyOtherwise.isOtherwise(node)) return "Трафик, которому не подошли предыдущие ветки"
+        if (PolicyOtherwise.isOtherwise(node)) return app.lernet.engine.text.SchemaWords.OTHERWISE_HINT
         if (node.conditions.blocks.isEmpty()) return "Весь трафик этой ветки"
         val join = if (node.conditions.join == MatchJoin.AND) " И " else " ИЛИ "
         return node.conditions.blocks.joinToString(join) { block ->

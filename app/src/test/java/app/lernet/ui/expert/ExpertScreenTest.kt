@@ -67,7 +67,7 @@ class ExpertScreenTest {
                 }
             }
         }
-        rule.onNodeWithText("Проверить дочерние ветки").assertIsDisplayed()
+        rule.onNodeWithText("Начало схемы").assertIsDisplayed()
         rule.onNodeWithContentDescription(rule.activity.getString(app.lernet.R.string.expert_schema_help)).assertIsDisplayed()
         capture("android-expert-schema-compact.png")
     }

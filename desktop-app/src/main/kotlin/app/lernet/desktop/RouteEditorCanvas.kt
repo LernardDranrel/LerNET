@@ -83,8 +83,8 @@ internal enum class RouteEditorView { SCHEME, LIST }
 
 @Composable
 internal fun RouteEditorViewToggle(view: RouteEditorView, onChange: (RouteEditorView) -> Unit) {
-    FilterChip(view == RouteEditorView.SCHEME, { onChange(RouteEditorView.SCHEME) }, label = { Text("Схема") })
-    FilterChip(view == RouteEditorView.LIST, { onChange(RouteEditorView.LIST) }, label = { Text("Список") })
+    FilterChip(view == RouteEditorView.SCHEME, { onChange(RouteEditorView.SCHEME) }, label = { Text(app.lernet.engine.text.SchemaWords.VIEW_SCHEMA) })
+    FilterChip(view == RouteEditorView.LIST, { onChange(RouteEditorView.LIST) }, label = { Text(app.lernet.engine.text.SchemaWords.VIEW_LIST) })
 }
 
 @Composable
@@ -240,7 +240,7 @@ internal fun RouteEditorCanvas(
                     TextButton(onClick = {
                         arrange()
                         fitted = false
-                    }) { Text("Выровнять") }
+                    }) { Text(app.lernet.engine.text.SchemaWords.ALIGN) }
                 }
             }
         }
