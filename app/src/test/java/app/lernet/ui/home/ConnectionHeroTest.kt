@@ -15,6 +15,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.dp
 import app.lernet.config.model.Profile
 import app.lernet.config.model.ProfileSource
@@ -119,9 +120,10 @@ class ConnectionHeroTest {
         rule.onNodeWithText("Правила").assertIsEnabled().performClick()
         rule.runOnIdle { assertThat(openedOwner).isEqualTo(profile.id) }
         rule.onNodeWithText(profile.name).assertIsDisplayed()
-        rule.onNodeWithText("46 мс").assertIsDisplayed()
-        rule.onNodeWithText("147 мс").assertIsDisplayed()
-        rule.onNodeWithText("Открывается ли интернет").assertIsDisplayed()
+        // m1: one «Связь» card below the button; on a 844 dp screen it is reached by scrolling.
+        rule.onNodeWithText("отвечает · 46 мс").performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText("работает · 147 мс").performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText("Интернет через VPN").performScrollTo().assertIsDisplayed()
         val screenshot = File("build/reports/ui/mobile-home.png")
         screenshot.parentFile?.mkdirs()
         rule.runOnIdle {
