@@ -640,8 +640,7 @@ class ConnectionController(
                 val json = stampedConfigJson()
                 val mode = machineState.snapshot.mode
                 armConnectTimeout()
-                // Hop map is a sibling job — never awaited by tunnel dial / Connected.
-                scheduleTrace(force = true)
+                // The path check sends packets past the VPN: it runs only by the user's button (refreshHop/previewHop).
                 CrashTrail.mark("controller StartEngine mode=$mode jsonBytes=${json.length}")
                 val restoreGate = pendingRestoreGate
                 scope.launch {
@@ -684,7 +683,6 @@ class ConnectionController(
                 connectTimeoutJob?.cancel()
                 groupProbeJob?.cancel()
                 failoverSwitchJob?.cancel()
-                scheduleTrace(force = true)
                 val restoreGate = pendingRestoreGate
                 pendingRecheck = command.takeIf { it.delayMs >= RecheckJitter.MIN_MS }
                 if (pendingRecheck != null) {
@@ -1243,7 +1241,8 @@ class ConnectionController(
      * destination once dial succeeds — without restarting the walk or blocking Connect.
      */
     private fun sealSilentPathIfDialOk() {
-        if (!hopUp || shownHopRunning) return
+        // Nothing to seal unless the user ran the path check.
+        if (!pathTraced || !hopUp || shownHopRunning) return
         val host = pendingEndpoint?.host ?: return
         if (HopPath.answered(shownHops).isNotEmpty()) return
         if (shownHops.any { it.synthetic && !it.timedOut }) return

@@ -52,8 +52,8 @@ class DesktopConnectionTest {
     @Test fun invalidActiveRuleShowsStartupErrorAndWritesJournal() {
         val directory = Files.createTempDirectory("lernet-import-connection")
         val store = DesktopStore(directory)
-        // Even if validation regresses, this path cannot start a real core.
-        val imported = DesktopTransfer.merge(StoredState(corePath = directory.resolve("missing.exe").toString()), androidArchive())
+        // Validation stops the start before the core is installed or launched (a Windows exe cannot run here anyway).
+        val imported = DesktopTransfer.merge(StoredState(), androidArchive())
         val saved = imported.copy(rules = imported.rules.map { rule -> rule.copy(apps = emptyList(), domains = listOf("invalid domain"),
             blocksJson = ConditionCodec.encode(RuleConditions(blocks = listOf(
                 ConditionBlock(ConditionKind.DOMAIN, listOf("invalid domain"))

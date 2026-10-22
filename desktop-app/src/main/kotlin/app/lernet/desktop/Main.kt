@@ -1765,7 +1765,7 @@ private fun TraceView(trace: TraceSnapshot, detailsRequest: Int, onRefresh: () -
                 TextButton(onClick = onRefresh) { Text("Проверить путь") }
                 TextButton(onClick = { expanded = !expanded }, enabled = trace.hops.isNotEmpty()) { Text(if (expanded) "Свернуть" else "Подробности") }
             }
-            Text(trace.message.ifBlank { "Путь появится после проверки. Подключаться для этого не нужно." }, color = muted, fontSize = 12.sp)
+            Text(trace.message.ifBlank { "Путь проверяется только по кнопке «Проверить путь»: проверка идёт мимо VPN. Подключаться для этого не нужно." }, color = muted, fontSize = 12.sp)
             if (trace.hops.isNotEmpty()) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text("Компьютер", color = desktopColors.onSurface, fontSize = 12.sp)
@@ -1842,7 +1842,6 @@ private fun bytesText(value: Long): String = when {
 @Composable
 internal fun Settings(saved: StoredState, controller: DesktopController, onRequestElevation: () -> Unit,
     localProxy: LocalProxyAccess? = null, locked: Boolean = false) {
-    var path by remember(saved.corePath) { mutableStateOf(saved.corePath) }
     var mtu by remember(saved.tunMtu) { mutableStateOf(saved.tunMtu.toString()) }
     var xmuxMin by remember(saved.xmuxConcurrency) { mutableStateOf(saved.xmuxConcurrency.substringBefore('-')) }
     var xmuxMax by remember(saved.xmuxConcurrency) { mutableStateOf(saved.xmuxConcurrency.substringAfter('-')) }
@@ -1905,7 +1904,7 @@ internal fun Settings(saved: StoredState, controller: DesktopController, onReque
             ) {
                 Column(Modifier.weight(1f)) {
                     Text("Дополнительно", style = MaterialTheme.typography.titleLarge)
-                    Text("MTU, XMUX, журнал, рукопожатие TLS, адрес проверки связи, путь к ядру",
+                    Text("MTU, XMUX, журнал, рукопожатие TLS, адрес проверки связи",
                         color = muted, fontSize = 12.sp)
                 }
                 FolderChevron(advanced)
@@ -2006,10 +2005,9 @@ internal fun Settings(saved: StoredState, controller: DesktopController, onReque
             }
         }
         if (advanced) Panel {
+            // Only the bundled, hash-checked core runs: the leak guard lets exactly this file through Windows.
             SettingHeading("ЯДРО", "sing-box-lx " + WindowsBoxProcess.PINNED_CORE_VERSION,
-                "Встроенное ядро поддерживает Android-конфиги и XHTTP. Пустое поле использует комплектную версию.")
-            OutlinedTextField(path, { path = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Свой путь к sing-box.exe") }, singleLine = true)
-            Button(onClick = { controller.setCorePath(path) }, enabled = path != saved.corePath) { Text("Сохранить путь") }
+                "LerNET работает только со своим встроенным ядром: оно проверено и одинаково на Android и Windows.")
         }
     }
 }

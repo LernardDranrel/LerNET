@@ -88,7 +88,6 @@ data class StoredState(
     val rules: List<StoredRule> = emptyList(),
     val selectedProfileId: String? = null,
     val mode: String = "FULL_VPN",
-    val corePath: String = "",
     val rulePositions: Map<String, RulePosition> = emptyMap(),
     val tunMtu: Int = 1500,
     val xmuxConcurrency: String = "16-16",

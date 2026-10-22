@@ -432,8 +432,7 @@ class DesktopController(
     private fun checkOutbound(profile: StoredProfile, saved: StoredState): OutboundProbeResult {
         observeEndpointRoute(profile)
         val result = runCatching {
-            val executable = saved.corePath.takeIf { it.isNotBlank() }?.let(Path::of)
-                ?: synchronized(coreInstallLock) { BundledCore.install(store.workDirectory()) }
+            val executable = synchronized(coreInstallLock) { BundledCore.install(store.workDirectory()) }
             OutboundProbe.check(profile, saved, executable, store.workDirectory())
         }.getOrElse { OutboundProbeResult(message = app.lernet.engine.text.UserText.of(it, "Не удалось проверить связь через VPN")) }
         if (result.latencyMs == null) {
@@ -731,7 +730,6 @@ class DesktopController(
         }
     }
 
-    fun setCorePath(path: String) = change { it.copy(corePath = path.trim()) }
     fun setMode(mode: RunMode) = switchMode(null, mode)
     fun effectiveMode(profile: StoredProfile? = null): RunMode = DesktopRunMode.effective(
         profile?.modeOverride ?: state.value.saved.mode, WindowsElevation.isElevated,
@@ -965,11 +963,10 @@ class DesktopController(
                 check(assembled.isValid) { assembled.errors.joinToString("; ") }
                 assembled.notes.forEach(tunnel::logDiagnostic)
                 observeEndpointRoute(profileAtStart)
-                traceSelected()
+                // The path check sends packets past the VPN: only the «Проверить путь» button starts it.
                 prepareRuleSets()
                 tunnel.journalMaxMb = savedAtStart.journalMaxMb
-                val path = savedAtStart.corePath.takeIf { it.isNotBlank() }?.let(Path::of)
-                    ?: synchronized(coreInstallLock) { BundledCore.install(store.workDirectory()) }
+                val path = synchronized(coreInstallLock) { BundledCore.install(store.workDirectory()) }
                 synchronized(connectLock) {
                     synchronized(this) {
                         if (connectGeneration.get() != ticket || expertReserved.get()) return@thread

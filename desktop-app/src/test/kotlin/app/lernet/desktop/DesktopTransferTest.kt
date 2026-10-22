@@ -84,7 +84,7 @@ class DesktopTransferTest {
     }
 
     @Test fun `workspace transaction preserves already remapped identities and platform preferences`() {
-        val preferences = saved.copy(corePath = "C:\\custom\\sing-box.exe", tunMtu = 1400, healthUrl = "https://health.example/204")
+        val preferences = saved.copy(tunMtu = 1400, healthUrl = "https://health.example/204")
         val bundle = TransferCodec.decode(DesktopTransfer.export(saved))
         val materialized = DesktopTransfer.materializeWorkspace(preferences, bundle)
         assertEquals(bundle.profiles.map { it.id }, materialized.profiles.map { it.id })
@@ -93,7 +93,6 @@ class DesktopTransferTest {
         assertEquals(bundle.profiles.single().selectedOutboundId, materialized.profiles.single().selectedOutboundId)
         assertEquals("grp_group", materialized.rules.first().profileId)
         assertEquals(group.id, materialized.profiles.single().groupId)
-        assertEquals(preferences.corePath, materialized.corePath)
         assertEquals(preferences.tunMtu, materialized.tunMtu)
         assertEquals(preferences.healthUrl, materialized.healthUrl)
         assertEquals(saved.rulePositions, materialized.rulePositions)
