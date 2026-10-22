@@ -475,7 +475,7 @@ private fun RouteScheme(
         }
         positioned(root) {
             RouteEditorNodeActions(rootSelected, onAddRoot) {
-                RouteEditorNodeFace("Весь трафик", "Начало схемы", "Выход выбранного конфига", routeBlue,
+                RouteEditorNodeFace(app.lernet.engine.text.SchemaWords.ROOT_TITLE, app.lernet.engine.text.SchemaWords.ROOT_SUBTITLE, app.lernet.engine.text.SchemaWords.VPN_ROOT_TARGET, routeBlue,
                     rootSelected, Modifier.clickable { onSelect(null) })
             }
         }

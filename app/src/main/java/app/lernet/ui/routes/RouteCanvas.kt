@@ -403,51 +403,13 @@ private fun canvasNodes(
 
 @Composable
 private fun RootNode() {
+    // The same face as on Windows. The yellow «переопределено системой» badge and «Служебные правила LerNET»
+    // looked like a warning on every screen; Windows never showed them.
+    val words = app.lernet.engine.text.SchemaWords
     SchemaNodeSurface {
-        Text(
-            stringResource(R.string.route_parent_root),
-            color = MaterialTheme.colorScheme.onSurface,
-            style = MaterialTheme.typography.titleMedium,
-        )
-        SystemBadge(Modifier.fillMaxWidth())
-        Text(
-            stringResource(R.string.route_system_why),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall,
-        )
-    }
-}
-
-@Composable
-internal fun SystemBadge(modifier: Modifier = Modifier) {
-    FilterChip(
-        selected = true,
-        onClick = {},
-        enabled = false,
-        label = { Text(stringResource(R.string.cfg_overridden)) },
-        modifier = modifier.lernetButton(),
-        colors = FilterChipDefaults.filterChipColors(
-            disabledSelectedContainerColor = LerNetWarn,
-            disabledLabelColor = LerNetBlack,
-        ),
-    )
-}
-
-@Composable
-internal fun SystemRulesCard(modifier: Modifier = Modifier) {
-    Column(
-        modifier
-            .fillMaxWidth()
-            .padding(vertical = LerNetDimens.cardGap),
-        verticalArrangement = Arrangement.spacedBy(LerNetDimens.cardGap),
-    ) {
-        Text(stringResource(R.string.route_system_strip), style = MaterialTheme.typography.titleSmall)
-        SystemBadge()
-        Text(
-            stringResource(R.string.route_system_why),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall,
-        )
+        Text(words.ROOT_TITLE, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium)
+        Text(words.ROOT_SUBTITLE, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        Text(words.VPN_ROOT_TARGET, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
     }
 }
 

@@ -131,6 +131,27 @@ class UiV3ScreensTest {
         shot("android-config-editor")
     }
 
+    private fun rule(id: String, title: String, suffix: String, action: String, sort: Int) = app.lernet.config.repo.RuleNodeRecord(
+        id = id, profileId = "work", parentId = null, enabled = true, sortIndex = sort, action = action, apps = emptyList(),
+        domains = emptyList(), domainSuffixes = listOf(suffix), ipCidrs = emptyList(), geoip = emptyList(), title = title,
+    )
+
+    // The same two rules as the Windows picture win-rules (folder «Работа»).
+    private val rulesState = app.lernet.ui.routes.RouteEditorUiState(
+        ownerId = "work", profileName = "Работа", loading = false,
+        nodes = listOf(rule("r1", "Рабочие сайты", "corp.example", "proxy", 0), rule("r2", "Банки напрямую", "bank.example", "direct", 1)),
+    )
+
+    @Test fun rulesList() {
+        rule.setContent { LerNetTheme { app.lernet.ui.routes.RouteEditorScreen(rulesState, {}, {}) } }
+        shot("android-rules-list")
+    }
+
+    @Test fun rulesSchema() {
+        rule.setContent { LerNetTheme { app.lernet.ui.routes.RouteEditorScreen(rulesState.copy(asList = false), {}, {}) } }
+        shot("android-rules-schema")
+    }
+
     @Test fun drawer() {
         // The drawer has an endless animation; time is advanced by hand (as in HomeStatesScreenshotTest).
         rule.mainClock.autoAdvance = false

@@ -113,11 +113,13 @@ internal fun OrphanHotbar(
         }
     }
     Column(modifier) {
-        TextButton(
+        // «Без папки (0)» was shown on every screen; Windows has no such line. Only when there is something to place.
+        val orphans = RouteFolders.orphans(state.nodes).size
+        if (orphans > 0 || orphansOpen) TextButton(
             onClick = { onIntent(RouteEditorIntent.SetOrphansOpen(true)) },
             modifier = Modifier.padding(horizontal = LerNetDimens.screenPadding).lernetButton(),
         ) {
-            Text(stringResource(R.string.route_orphans, RouteFolders.orphans(state.nodes).size))
+            Text(stringResource(R.string.route_orphans, orphans))
         }
         ModalNavigationDrawer(
             modifier = Modifier.weight(1f),
@@ -155,7 +157,6 @@ private fun FolderColumn(
             )
         }
         FolderHeader(state, folderId, onIntent)
-        if (folderId == null) SystemRulesCard()
         ElseRepairNotice(state.fieldErrors, onIntent)
         if (state.terminalRejected || RouteFolders.hasNested(state.nodes)) {
             Text(stringResource(R.string.route_terminal), color = MaterialTheme.colorScheme.error)

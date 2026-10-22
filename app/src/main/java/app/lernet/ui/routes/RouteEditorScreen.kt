@@ -300,7 +300,6 @@ private fun SchemaHelpSheet(onDismiss: () -> Unit) {
             Text(stringResource(R.string.canvas_help_edge))
             Text(stringResource(R.string.canvas_help_read))
             Text(stringResource(R.string.canvas_help_else))
-            Text(stringResource(R.string.canvas_help_system))
             TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End).lernetButton()) {
                 Text(stringResource(R.string.done))
             }

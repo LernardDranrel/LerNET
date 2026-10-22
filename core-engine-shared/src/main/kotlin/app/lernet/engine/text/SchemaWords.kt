@@ -8,6 +8,8 @@ object SchemaWords {
     const val ROOT_TITLE = "Весь трафик"
     const val ROOT_SUBTITLE = "Начало схемы"
     /** A node with child branches: its own target is not used, the children and then ИНАЧЕ are checked. */
+    /** VPN «Правила»: what the root leads to when no rule matched. */
+    const val VPN_ROOT_TARGET = "Выход выбранного конфига"
     const val BRANCHING = "Проверка условий → ИНАЧЕ"
     const val OTHERWISE = "ИНАЧЕ"
     const val OTHERWISE_HINT = "Если ни одно условие на этом уровне не подошло"

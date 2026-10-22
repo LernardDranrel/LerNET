@@ -437,7 +437,7 @@
     <string name="diag_row_path">%1$s → %2$s → %3$s → %4$s</string>
     <string name="diag_row_path_no_rule">%1$s → %2$s → %3$s</string>
     <string name="canvas_help">Справка по схеме</string>
-    <string name="canvas_help_root">Корень — вход всего трафика конфига (или папки).</string>
+    <string name="canvas_help_root">«Весь трафик» — начало схемы: сюда входит весь трафик конфига (или папки).</string>
     <string name="canvas_help_rule">Любое правило, включая «Иначе», может получить вложенные правила: выделите блок и нажмите плюс рядом с ним. Прежнее действие сохранится в дочернем «Иначе». Вложенные правила проверяются, только если совпало условие родителя. Действие определяют конечные правила.</string>
     <string name="canvas_help_priority">Приоритет — порядок соседей одного родителя. Выключите ладошку и перетащите блок влево или вправо на схеме либо вверх или вниз в списке. Меньший номер проверяется раньше. «Иначе» всегда остаётся последним.</string>
     <string name="canvas_help_pipe">Отдельное соединение — ещё одно подключение к тому же серверу. Каждое такое подключение заметно сети, поэтому без нужды их лучше не добавлять. Для ветки с вложенными правилами результат определяют конечные правила.</string>
@@ -467,7 +467,6 @@
     <string name="import_field_outbounds">Выходные подключения</string>
     <string name="import_field_line">Строка %1$s</string>
     <string name="import_error_line">%1$s: %2$s</string>
-    <string name="canvas_help_system">Служебные правила LerNET. Их нельзя менять</string>
     <string name="route_system_why">Служебные правила LerNET. Их нельзя менять</string>
     <string name="group_empty_drop">В папке пока нет конфигов. Нажмите «Добавить в папку».</string>
     <string name="group_add_member">Добавить в папку</string>

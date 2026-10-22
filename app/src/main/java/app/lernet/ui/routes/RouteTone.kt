@@ -56,12 +56,8 @@ fun outcomeCaption(action: String, pipeName: String, branching: Boolean = false)
     val via = stringResource(R.string.action_proxy)
     val mode = when (tone) {
         RouteTone.NAMED -> if (branching) stringResource(R.string.action_proxy_branch) else pipeName
-        RouteTone.VIA ->
-            if (branching) {
-                stringResource(R.string.action_proxy_branch)
-            } else {
-                stringResource(R.string.action_proxy_stub)
-            }
+        // «Через VPN», as on Windows; «· основной канал» added a word the user never chose.
+        RouteTone.VIA -> return via
         RouteTone.DIRECT -> return stringResource(R.string.action_direct)
         RouteTone.BLOCK -> return stringResource(R.string.action_block)
     }
