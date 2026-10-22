@@ -100,11 +100,11 @@ internal fun NetworkObservationScreen(
     Scaffold(
         topBar = {
             // One line on any phone width: the copy action is an icon, not a word that pushes the title.
-            TopAppBar(title = { Text("Анализ сети", maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }, navigationIcon = {
+            TopAppBar(title = { Text(NetworkWords.TITLE, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }, navigationIcon = {
                 IconButton(onClick = onBack) { Icon(LerNetSymbols.arrowBack(), "Назад") }
             }, actions = {
                 IconButton(onClick = {
-                    snapshot?.let { clipboard.setText(AnnotatedString(NetworkTable.copyText(it, table, "Анализ сети · Android · снимок ${time(it.finishedAt)}"))) }
+                    snapshot?.let { clipboard.setText(AnnotatedString(NetworkTable.copyText(it, table, NetworkWords.TITLE + " · Android · снимок ${time(it.finishedAt)}"))) }
                 }, enabled = snapshot != null, modifier = Modifier.testTag("network_copy_all")) {
                     Icon(androidx.compose.material.icons.Icons.Outlined.ContentCopy, "Скопировать всё")
                 }
@@ -116,7 +116,7 @@ internal fun NetworkObservationScreen(
         LazyColumn(Modifier.fillMaxSize().padding(padding), state = listState, contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             item {
-                Text(NetworkWords.TITLE, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text(NetworkWords.OVERVIEW, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
                 Text("Параметр, значение и что обычно. Отличия от обычного подсвечены.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(12.dp))
