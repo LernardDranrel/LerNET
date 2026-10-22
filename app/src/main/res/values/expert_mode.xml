@@ -104,7 +104,7 @@
     <string name="expert_journal_empty">Событий пока нет</string>
     <string name="expert_unknown_app">Приложение не определено Android</string>
     <string name="expert_observation_rule">Веток в пути: %1$d</string>
-    <string name="expert_safety_title">Правила защиты</string>
+    <string name="expert_safety_title">Защита при отказе</string>
     <string name="expert_safety_body">Защита действует внутри работающего туннеля. Для блокировки при остановке самого VPN включи системные «Постоянный VPN» и «Блокировать соединения без VPN». Эти настройки задаёт Android.</string>
     <string name="expert_android_settings">Настройки VPN Android</string>
     <string name="expert_lockdown_verified">Android подтверждает системную блокировку соединений без VPN.</string>

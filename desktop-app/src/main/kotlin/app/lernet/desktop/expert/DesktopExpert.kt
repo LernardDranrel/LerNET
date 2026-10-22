@@ -351,11 +351,12 @@ private fun ExpertProtectionPage(
     var health by remember { mutableStateOf(false) }
     ExpertScrollableColumn(modifier) {
         // Audit X7: one page «Защита и DNS» — DNS and the connection checks are rows here, not items in ⋮.
-        ExpertPanel("DNS и проверки") {
-            ExpertLinkRow("DNS Эксперта", "Какие серверы отвечают за адреса сайтов в твоей схеме", !state.busy) { dns = true }
-            ExpertLinkRow("Проверки связи", "Как часто и куда Эксперт проверяет выходы", !state.busy) { health = true }
+        val words = app.lernet.engine.text.ExpertWords
+        ExpertPanel("") {
+            ExpertLinkRow(words.DNS_ROW, words.DNS_ROW_HINT, !state.busy) { dns = true }
+            ExpertLinkRow(words.HEALTH_ROW, words.HEALTH_ROW_HINT, !state.busy) { health = true }
         }
-        ExpertPanel("Защита при отказе") {
+        ExpertPanel(words.SAFETY_TITLE) {
             ProtectionRow(
                 "Недоступен отдельный выход", state.protection.exitFailureEnforced,
                 "Для трафика, совпавшего с защищённой веткой, прямой запасной путь запрещён."

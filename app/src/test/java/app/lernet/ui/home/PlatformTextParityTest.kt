@@ -265,6 +265,11 @@ class PlatformTextParityTest {
         same("expert_sleeping_none", ExpertWords.SLEEPING_NONE)
         same("expert_external_add", ExpertWords.EXTERNAL_ADD)
         same("expert_external_edit", ExpertWords.EXTERNAL_EDIT)
+        same("expert_dns_row", ExpertWords.DNS_ROW)
+        same("expert_dns_row_hint", ExpertWords.DNS_ROW_HINT)
+        same("expert_health_row", ExpertWords.HEALTH_ROW)
+        same("expert_health_row_hint", ExpertWords.HEALTH_ROW_HINT)
+        same("expert_safety_title", ExpertWords.SAFETY_TITLE)
         assertEquals("Скорость ещё не измерена", ExpertWords.eventsRate(null, null))
         assertEquals("Скорость 2 из 3: ↑ 1,5 КБ/с · ↓ 2 МБ/с", ExpertWords.eventsRate(1536, 2L * 1024 * 1024, 2, 3))
         assertEquals(

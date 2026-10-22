@@ -56,4 +56,12 @@ object ExpertWords {
     /** The phone said «внешний прокси», Windows «внешний выход»; the empty-page text speaks of a «выход». */
     const val EXTERNAL_ADD = "Добавить внешний выход"
     const val EXTERNAL_EDIT = "Изменить внешний выход"
+
+    // «Защита и DNS»
+    const val DNS_ROW = "DNS Эксперта"
+    const val DNS_ROW_HINT = "Через какой выход и какие серверы спрашивать адреса сайтов"
+    const val HEALTH_ROW = "Проверки связи"
+    const val HEALTH_ROW_HINT = "Как часто и куда Эксперт проверяет выходы"
+    /** The card of facts below the two rows; what it lists is platform-specific (Android settings, Windows guard). */
+    const val SAFETY_TITLE = "Защита при отказе"
 }

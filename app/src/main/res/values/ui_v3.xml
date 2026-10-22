@@ -21,7 +21,7 @@
     <string name="expert_dns_row">DNS Эксперта</string>
     <string name="expert_dns_row_hint">Через какой выход и какие серверы спрашивать адреса сайтов</string>
     <string name="expert_health_row">Проверки связи</string>
-    <string name="expert_health_row_hint">Как и как часто проверять выходы</string>
+    <string name="expert_health_row_hint">Как часто и куда Эксперт проверяет выходы</string>
     <string name="settings_from_expert">Это общие настройки приложения. Они действуют и в режиме VPN, и в Эксперте.</string>
     <!-- Mode switch (N19) -->
     <string name="mode_switch">Режим</string>
