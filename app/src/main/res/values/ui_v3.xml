@@ -121,4 +121,37 @@
     <string name="apps_system">Показать системные</string>
     <string name="apps_all_on">Все через VPN</string>
     <string name="apps_reconnect">Чтобы изменения подействовали, переподключите VPN.</string>
+    <!-- Request journal (m5) -->
+    <string name="journal_search">Приложение или сайт</string>
+    <string name="journal_all">Все</string>
+    <string name="journal_vpn">Через VPN</string>
+    <string name="journal_direct">Напрямую</string>
+    <string name="journal_silent">Без ответа</string>
+    <string name="journal_badge_vpn">VPN</string>
+    <string name="journal_badge_direct">напрямую</string>
+    <string name="journal_badge_block">запрет</string>
+    <string name="journal_rule">правило «%1$s»</string>
+    <string name="journal_no_reply">нет ответа</string>
+    <string name="journal_live_pause">Приостановить живую запись</string>
+    <string name="journal_live_resume">Включить живую запись</string>
+    <string name="journal_live_on">Живая запись включена: строки сохраняются для «Сохранить запись».</string>
+    <string name="journal_more">Действия журнала</string>
+    <string name="journal_copy">Скопировать журнал</string>
+    <string name="journal_share">Отправить журнал</string>
+    <string name="journal_save_record">Сохранить запись</string>
+    <string name="journal_hint">Нажмите строку — подробности в нижнем листе. В ⋮: скопировать, отправить журнал, сохранить запись, анализ сети.</string>
+    <string name="journal_nothing_found">Ничего не найдено. Измените поиск или фильтр.</string>
+    <string name="journal_details">Подробнее</string>
+    <string name="journal_check">Проверить отклик адреса</string>
+    <string name="journal_where">Куда</string>
+    <string name="journal_site">Сайт</string>
+    <string name="journal_how">Как</string>
+    <string name="journal_kind">Вид связи</string>
+    <string name="journal_app_protocol">Что внутри</string>
+    <string name="journal_rule_title">Правило</string>
+    <string name="journal_state">Состояние</string>
+    <string name="journal_bytes">Передано</string>
+    <string name="journal_via_vpn">через VPN</string>
+    <string name="journal_via_direct">напрямую, без VPN</string>
+    <string name="journal_via_named">через VPN, канал «%1$s»</string>
 </resources>

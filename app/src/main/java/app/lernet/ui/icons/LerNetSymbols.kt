@@ -98,4 +98,10 @@ object LerNetSymbols {
 
     @Composable
     fun file(): Painter = painterResource(SymbolR.drawable.materialsymbols_ic_upload_file_outlined)
+
+    @Composable
+    fun pause(): Painter = painterResource(SymbolR.drawable.materialsymbols_ic_pause_circle_outlined)
+
+    @Composable
+    fun record(): Painter = painterResource(SymbolR.drawable.materialsymbols_ic_radio_button_checked_outlined)
 }

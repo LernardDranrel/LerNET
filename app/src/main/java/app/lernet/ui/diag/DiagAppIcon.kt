@@ -37,6 +37,17 @@ internal fun rememberAppFace(uid: Int?, pid: Long?, processApp: String?): AppFac
     }
 }
 
+/** The same identity outside composition, for search and filters in the journal. */
+internal fun resolveAppFace(packages: PackageManager, uid: Int?, pid: Long?, processApp: String?): AppFace =
+    AppIdentity.resolve(
+        uid = uid,
+        pid = pid,
+        packagesForUid = packagesFor(packages, uid),
+        processPackages = listOfNotNull(processApp),
+        hasLauncher = { pkg -> launcherVisible(packages, pkg) },
+        labelForPackage = { pkg -> applicationLabelOrNull(packages, pkg) },
+    )
+
 @Composable
 internal fun appFaceTitle(face: AppFace): String = when (face) {
     is AppFace.Installed -> face.label

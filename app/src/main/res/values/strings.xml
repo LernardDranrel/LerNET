@@ -477,8 +477,8 @@
     <string name="diag_feed_expand">Развернуть ленту</string>
     <string name="diag_feed_collapse">Свернуть ленту</string>
     <string name="diag_unknown_app">Неизвестное приложение</string>
-    <string name="diag_system">Система</string>
-    <string name="diag_uid">uid %1$d</string>
+    <string name="diag_system">Системное приложение</string>
+    <string name="diag_uid">Приложение (uid %1$d)</string>
     <string name="diag_pid">pid %1$s</string>
     <string name="diag_status_open">идёт</string>
     <string name="diag_status_ok">ок</string>

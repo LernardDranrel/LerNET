@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -67,11 +68,51 @@ import app.lernet.ui.routes.liveRouteTone
 import app.lernet.ui.status.silenceBanner
 import app.lernet.ui.status.silenceTitle
 import app.lernet.ui.theme.LerNetDimens
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.ImeAction
+import app.lernet.engine.live.LiveVia
+import app.lernet.ui.routes.RouteTone
 import app.lernet.ui.theme.LerNetOk
 import app.lernet.ui.theme.lernetButton
 import java.util.Locale
 import kotlinx.coroutines.flow.Flow
 
+/** Audit J7 (mockup m5): what the user filters by — through the VPN, direct, no reply. */
+internal enum class JournalFilter(val label: Int) {
+    ALL(R.string.journal_all), VPN(R.string.journal_vpn), DIRECT(R.string.journal_direct), SILENT(R.string.journal_silent),
+}
+
+internal fun journalTone(row: LiveConn): RouteTone = liveRouteTone(row.via, row.outbound, row.pipeLabel)
+
+internal fun journalMatches(row: LiveConn, title: String, query: String, filter: JournalFilter): Boolean {
+    val tone = journalTone(row)
+    val kind = when (filter) {
+        JournalFilter.ALL -> true
+        JournalFilter.VPN -> tone == RouteTone.VIA || tone == RouteTone.NAMED
+        JournalFilter.DIRECT -> tone == RouteTone.DIRECT
+        JournalFilter.SILENT -> row.status == LiveConnStatus.UNFINISHED
+    }
+    val q = query.trim()
+    return kind && (q.isEmpty() || listOfNotNull(title, row.domain, row.dest, row.app, row.rule).any { it.contains(q, ignoreCase = true) })
+}
+
+/**
+ * Audit J1–J8 (mockup m5): «Журнал запросов» — search and filter chips instead of pages and wide buttons,
+ * ⏸ for the live record, actions in ⋮, details in a bottom sheet. Status is the strip above (G1).
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DiagScreen(
@@ -82,10 +123,16 @@ fun DiagScreen(
     onOpenNetwork: () -> Unit = {},
 ) {
     val metrics = rememberCompactMetrics()
-    var actionsOpen by remember { mutableStateOf(false) }
-    var feedFull by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    var menu by remember { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var filter by rememberSaveable { mutableStateOf(JournalFilter.ALL) }
+    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    // J4: the bar slides away while the list scrolls and comes back on the way up.
+    val scroll = TopAppBarDefaults.enterAlwaysScrollBehavior()
     ObserveDiagEvents(events)
     Scaffold(
+        modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
@@ -96,48 +143,199 @@ fun DiagScreen(
                     }
                 },
                 actions = {
-                    TextButton(onClick = onOpenNetwork) { Text(stringResource(R.string.expert_device_network)) }
+                    IconButton(onClick = { onIntent(DiagIntent.SetRecording(!state.recording)) }, Modifier.testTag("journal_live")) {
+                        Icon(
+                            if (state.recording) LerNetSymbols.pause() else LerNetSymbols.record(),
+                            contentDescription = stringResource(if (state.recording) R.string.journal_live_pause else R.string.journal_live_resume),
+                            tint = if (state.recording) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = { menu = true }, Modifier.testTag("journal_more")) {
+                        Icon(LerNetSymbols.more(), contentDescription = stringResource(R.string.journal_more))
+                    }
+                    DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(text = { Text(stringResource(R.string.journal_copy)) }, onClick = { menu = false; onIntent(DiagIntent.CopyLogs) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.journal_share)) }, onClick = { menu = false; onIntent(DiagIntent.ShareLogs) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.journal_save_record)) }, onClick = { menu = false; onIntent(DiagIntent.ExportRecording) })
+                        HorizontalDivider()
+                        DropdownMenuItem(text = { Text(stringResource(R.string.expert_device_network)) }, onClick = { menu = false; onOpenNetwork() })
+                    }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+                scrollBehavior = scroll,
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background,
+                    scrolledContainerColor = MaterialTheme.colorScheme.background),
             )
         },
     ) { padding ->
-        Column(
-            Modifier
-                .padding(padding)
-                .fillMaxSize()
-                .padding(horizontal = metrics.gutter),
-            verticalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap),
-        ) {
-            if (!feedFull) {
-                Header(state, onIntent)
-                TextButton(onClick = { actionsOpen = !actionsOpen }, modifier = Modifier.lernetButton()) {
-                    Text(stringResource(if (actionsOpen) R.string.diag_actions_hide else R.string.diag_actions))
-                }
-                if (actionsOpen) {
-                    Actions(onIntent)
-                    Text(
-                        stringResource(R.string.diag_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                TextButton(onClick = { feedFull = true }, modifier = Modifier.lernetButton()) {
-                    Text(stringResource(R.string.diag_feed_expand))
-                }
-            } else {
-                TextButton(onClick = { feedFull = false }, modifier = Modifier.lernetButton()) {
-                    Text(stringResource(R.string.diag_feed_collapse))
-                }
+        val rows = debugSampleRows(state.rows)
+        val packages = context.packageManager
+        val titles = remember(rows) { HashMap<String, String>() }
+        val system = stringResource(R.string.diag_system)
+        val uidTitle = stringResource(R.string.diag_uid, 0)
+        fun title(row: LiveConn): String = titles.getOrPut(row.id) {
+            when (val face = resolveAppFace(packages, row.uid, row.pid, row.app)) {
+                is AppFace.Installed -> face.label
+                AppFace.System -> system
+                is AppFace.Uid -> uidTitle.replace("0", face.uid.toString())
+                is AppFace.Pid -> "pid ${face.pid}"
             }
-            val rows = debugSampleRows(state.rows)
-            if (!state.vpnUp) {
-                EmptyNote(stringResource(R.string.diag_need_vpn))
-            } else if (rows.isEmpty()) {
-                EmptyNote(stringResource(R.string.diag_empty))
-            }
-            DiagPages(state, rows, onIntent, Modifier.weight(1f))
         }
+        val visible = rows.filter { journalMatches(it, title(it), query, filter) }
+        LazyColumn(
+            Modifier.padding(padding).fillMaxSize().padding(horizontal = metrics.gutter).testTag("journal_list"),
+            contentPadding = PaddingValues(vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            item {
+                OutlinedTextField(
+                    query, { query = it }, Modifier.fillMaxWidth().testTag("journal_search"), singleLine = true,
+                    placeholder = { Text(stringResource(R.string.journal_search)) },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                )
+            }
+            item {
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    JournalFilter.entries.forEach { option ->
+                        FilterChip(filter == option, { filter = option }, label = { Text(stringResource(option.label)) },
+                            modifier = Modifier.testTag("journal_filter_${option.name.lowercase()}"))
+                    }
+                }
+            }
+            item { SilenceNote(state) }
+            if (state.recording) item {
+                Text(stringResource(R.string.journal_live_on), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary)
+            }
+            when {
+                !state.vpnUp && rows.isEmpty() -> item { EmptyNote(stringResource(R.string.diag_need_vpn)) }
+                rows.isEmpty() -> item { EmptyNote(stringResource(R.string.diag_empty)) }
+                visible.isEmpty() -> item { EmptyNote(stringResource(R.string.journal_nothing_found)) }
+            }
+            items(visible, key = { it.id }) { row ->
+                JournalRow(row, title(row)) { selectedId = row.id }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
+            }
+            if (rows.isNotEmpty()) item {
+                Text(stringResource(R.string.journal_hint), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+            }
+        }
+        val selected = rows.firstOrNull { it.id == selectedId }
+        if (selected != null) {
+            ModalBottomSheet(onDismissRequest = { selectedId = null }) {
+                JournalDetails(selected, title(selected), if (state.pingId == selected.id) state.pingText else null) {
+                    onIntent(DiagIntent.Ping(selected))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun JournalRow(row: LiveConn, title: String, onClick: () -> Unit) {
+    val face = rememberAppFace(row.uid, row.pid, row.app)
+    val tone = journalTone(row)
+    val host = row.domain?.takeIf { it.isNotBlank() } ?: row.dest
+    val tail = when {
+        row.status == LiveConnStatus.UNFINISHED -> stringResource(R.string.journal_no_reply)
+        !row.rule.isNullOrBlank() -> stringResource(R.string.journal_rule, row.rule!!)
+        else -> null
+    }
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(onClick = onClick).padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        DiagAppIcon(face)
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(listOfNotNull(host, tail).joinToString(" · "), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        JournalBadge(tone)
+    }
+}
+
+@Composable
+private fun JournalBadge(tone: RouteTone) {
+    val (label, color) = when (tone) {
+        RouteTone.VIA, RouteTone.NAMED -> stringResource(R.string.journal_badge_vpn) to MaterialTheme.colorScheme.primary
+        RouteTone.DIRECT -> stringResource(R.string.journal_badge_direct) to MaterialTheme.colorScheme.tertiary
+        RouteTone.BLOCK -> stringResource(R.string.journal_badge_block) to MaterialTheme.colorScheme.error
+    }
+    Text(label, style = MaterialTheme.typography.labelMedium, color = color,
+        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(color.copy(alpha = .14f)).padding(horizontal = 8.dp, vertical = 3.dp))
+}
+
+/** Audit J5/J8: plain words and one bottom sheet, the same facts as before. */
+@Composable
+private fun JournalDetails(row: LiveConn, title: String, ping: String?, onPing: () -> Unit) {
+    val model = DiagSnapshot.of(row)
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    var contentOpen by remember(row.id) { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp).testTag("journal_details"),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            DiagAppIcon(rememberAppFace(row.uid, row.pid, row.app))
+            Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            JournalBadge(journalTone(row))
+        }
+        DetailLine(stringResource(R.string.journal_where), model.dest)
+        model.domain?.let { DetailLine(stringResource(R.string.journal_site), it) }
+        DetailLine(stringResource(R.string.journal_how), when (journalTone(row)) {
+            RouteTone.DIRECT -> stringResource(R.string.journal_via_direct)
+            RouteTone.NAMED -> stringResource(R.string.journal_via_named, model.pipe)
+            RouteTone.BLOCK -> stringResource(R.string.journal_badge_block)
+            RouteTone.VIA -> stringResource(R.string.journal_via_vpn)
+        })
+        DetailLine(stringResource(R.string.journal_rule_title), model.rule ?: stringResource(R.string.diag_rule_unavailable))
+        DetailLine(stringResource(R.string.journal_state), when (model.status) {
+            LiveConnStatus.OPEN -> stringResource(R.string.diag_status_open)
+            LiveConnStatus.CLOSED -> stringResource(R.string.diag_status_ok)
+            LiveConnStatus.UNFINISHED -> stringResource(R.string.diag_status_silent)
+        })
+        DetailLine(stringResource(R.string.journal_bytes), "↑ ${TrafficDisplay.formatBytes(model.uplink)} · ↓ ${TrafficDisplay.formatBytes(model.downlink)}")
+        val transport = listOfNotNull(model.transport, model.ipVersion?.let { "IPv$it" }).joinToString(" · ")
+        if (transport.isNotEmpty()) DetailLine(stringResource(R.string.journal_kind), transport)
+        model.protocol?.let { DetailLine(stringResource(R.string.journal_app_protocol), it) }
+        if (model.routeChain.isNotEmpty()) Text(stringResource(R.string.diag_route_chain, model.routeChain.joinToString(" → ")),
+            style = MaterialTheme.typography.bodySmall, color = muted)
+        model.uid?.let { Text("uid $it", style = MaterialTheme.typography.bodySmall, color = muted) }
+        model.pid?.let { PidLine(it) }
+        if (model.hasCapturedContent) {
+            TextButton(onClick = { contentOpen = !contentOpen }, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(stringResource(if (contentOpen) R.string.diag_payload_hide else R.string.diag_payload_show))
+            }
+            if (contentOpen) {
+                val body = MaterialTheme.typography.bodySmall
+                model.requestLine?.let { Text(stringResource(R.string.diag_snap_path, it), style = body) }
+                model.headers?.let { Text(stringResource(R.string.diag_snap_headers, it), style = body) }
+                model.body?.let { Text(stringResource(R.string.diag_snap_body, it), style = body) }
+                if (model.bodyTruncated) Text(stringResource(R.string.diag_body_truncated), style = body, color = muted)
+            }
+        } else {
+            Text(stringResource(if (model.wire == DiagSnapshot.Wire.TLS) R.string.diag_payload_encrypted else R.string.diag_payload_unavailable),
+                style = MaterialTheme.typography.bodySmall, color = muted)
+        }
+        OutlinedButton(onClick = onPing, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("journal_ping")) {
+            Text(stringResource(R.string.journal_check))
+        }
+        if (!ping.isNullOrBlank()) {
+            val fail = ping == stringResource(R.string.diag_ping_fail)
+            Text(stringResource(R.string.diag_ping, ping), style = MaterialTheme.typography.bodyMedium,
+                color = if (fail) MaterialTheme.colorScheme.error else LerNetOk)
+        }
+    }
+}
+
+@Composable
+private fun DetailLine(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(110.dp))
+        Text(value, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
     }
 }
 
@@ -193,188 +391,6 @@ private fun shareRecording(context: Context, text: String, shareFailed: String) 
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun Header(state: DiagUiState, onIntent: (DiagIntent) -> Unit) {
-    val dnsLabel = if (state.dnsOk) {
-        stringResource(R.string.diag_dns_ok)
-    } else {
-        stringResource(R.string.diag_dns_dead)
-    }
-    val channelLabel = when (state.snapshot.channel) {
-        ChannelHealth.UNKNOWN -> null
-        ChannelHealth.HOP_UP -> stringResource(R.string.channel_up)
-        ChannelHealth.HOP_DOWN -> stringResource(R.string.channel_down)
-        ChannelHealth.HOP_LOST -> stringResource(R.string.channel_lost)
-        ChannelHealth.DATA_STALLED -> stringResource(R.string.channel_stalled)
-        ChannelHealth.PIPE_SILENT,
-        ChannelHealth.TUNNEL_DEAD,
-        -> silenceTitle(state.snapshot.channel, state.snapshot.pipeSilentCount, state.snapshot.pipeTunnelCount)
-    }
-    val recordCd = stringResource(R.string.diag_live_record)
-    PanelCard {
-        FlowRow(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            FilterChip(
-                selected = state.dnsOk,
-                onClick = {},
-                enabled = false,
-                label = { Text(dnsLabel) },
-            )
-            if (channelLabel != null) {
-                FilterChip(
-                    selected = !ChannelWatch.isHonestlyUnhealthy(state.snapshot.channel),
-                    onClick = {},
-                    enabled = false,
-                    label = { Text(channelLabel) },
-                )
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(stringResource(R.string.diag_live_record), style = MaterialTheme.typography.titleSmall)
-                Switch(
-                    checked = state.recording,
-                    onCheckedChange = { onIntent(DiagIntent.SetRecording(it)) },
-                    modifier = Modifier.semantics { contentDescription = recordCd },
-                )
-            }
-        }
-        SilenceNote(state)
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun Actions(onIntent: (DiagIntent) -> Unit) {
-    Column(
-        Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap),
-    ) {
-        OutlinedButton(
-            onClick = { onIntent(DiagIntent.CopyLogs) },
-            modifier = Modifier.fillMaxWidth().lernetButton(),
-        ) {
-            Icon(LerNetSymbols.copy(), contentDescription = null)
-            Spacer(Modifier.size(8.dp))
-            Text(stringResource(R.string.diag_copy_text))
-        }
-        OutlinedButton(
-            onClick = { onIntent(DiagIntent.ShareLogs) },
-            modifier = Modifier.fillMaxWidth().lernetButton(),
-        ) {
-            Icon(LerNetSymbols.share(), contentDescription = null)
-            Spacer(Modifier.size(8.dp))
-            Text(stringResource(R.string.share_last_log))
-        }
-        OutlinedButton(
-            onClick = { onIntent(DiagIntent.ExportRecording) },
-            modifier = Modifier.fillMaxWidth().lernetButton(),
-        ) {
-            Icon(LerNetSymbols.download(), contentDescription = null)
-            Spacer(Modifier.size(8.dp))
-            Text(stringResource(R.string.diag_export_recording))
-        }
-    }
-}
-
-@Composable
-private fun DiagPages(
-    state: DiagUiState,
-    rows: List<LiveConn>,
-    onIntent: (DiagIntent) -> Unit,
-    modifier: Modifier,
-) {
-    val listState = rememberLazyListState()
-    LaunchedEffect(state.page) { listState.scrollToItem(0) }
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap)) {
-        Text(
-            stringResource(R.string.diag_journal_size, state.journalBytes, state.journalCeiling),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(
-                onClick = { onIntent(DiagIntent.NewerPage) },
-                enabled = state.page > 0,
-                modifier = Modifier.lernetButton(),
-            ) {
-                Text(stringResource(R.string.diag_page_next))
-            }
-            Text(stringResource(R.string.diag_page, state.page + 1, state.pageCount))
-            TextButton(
-                onClick = { onIntent(DiagIntent.OlderPage) },
-                enabled = state.page + 1 < state.pageCount,
-                modifier = Modifier.lernetButton(),
-            ) {
-                Text(stringResource(R.string.diag_page_prev))
-            }
-        }
-        LazyColumn(
-            state = listState,
-            verticalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap),
-            modifier = Modifier.weight(1f),
-        ) {
-            items(rows, key = { it.id }) { row ->
-                ConnRow(
-                    row = row,
-                    ping = if (state.pingId == row.id) state.pingText else null,
-                    expanded = state.expandedId == row.id,
-                    onClick = { onIntent(DiagIntent.Ping(row)) },
-                    onExpand = { onIntent(DiagIntent.ToggleRow(row.id)) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ConnRow(
-    row: LiveConn,
-    ping: String?,
-    expanded: Boolean,
-    onClick: () -> Unit,
-    onExpand: () -> Unit,
-) {
-    val face = rememberAppFace(row.uid, row.pid, row.app)
-    val tone = liveRouteTone(row.via, row.outbound, row.pipeLabel)
-    ListItem(
-        modifier = Modifier
-            .drawBehind {
-                val bar = 4.dp.toPx()
-                drawRect(tone.ink(), size = Size(bar, size.height))
-            }
-            .clickable(onClick = onClick),
-        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-        leadingContent = { DiagAppIcon(face) },
-        headlineContent = {
-            Column {
-                Text(appFaceTitle(face), maxLines = 1, overflow = TextOverflow.Ellipsis, color = tone.ink())
-                val pid = row.pid
-                if (pid != null && face !is AppFace.Pid) {
-                    PidLine(pid)
-                }
-            }
-        },
-        supportingContent = {
-            Column {
-                Text(
-                    connPath(row),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                ConnDetails(row, ping, expanded, onExpand)
-            }
-        },
-    )
-}
-
 @Composable
 private fun SilenceNote(state: DiagUiState) {
     val channel = state.snapshot.channel
@@ -404,24 +420,6 @@ private fun debugSampleRows(live: List<LiveConn>): List<LiveConn> {
 }
 
 @Composable
-private fun connPath(row: LiveConn): String {
-    val host = row.domain?.takeIf { it.isNotBlank() } ?: row.dest
-    val rule = row.rule?.takeIf { it.isNotBlank() }
-    val pipe = when {
-        row.pipeLabel == "direct" -> stringResource(R.string.action_direct_help)
-        row.pipeLabel == "proxy" -> stringResource(R.string.route_pipe_default)
-        else -> row.pipeLabel
-    }
-    val status = when (row.status) {
-        LiveConnStatus.OPEN -> stringResource(R.string.diag_status_open)
-        LiveConnStatus.CLOSED -> stringResource(R.string.diag_status_ok)
-        LiveConnStatus.UNFINISHED -> stringResource(R.string.diag_status_silent)
-    }
-    return if (rule == null) stringResource(R.string.diag_row_path_no_rule, host, pipe, status)
-    else stringResource(R.string.diag_row_path, host, rule, pipe, status)
-}
-
-@Composable
 private fun EmptyNote(text: String) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -436,110 +434,3 @@ private fun EmptyNote(text: String) {
     }
 }
 
-@Composable
-private fun ConnDetails(row: LiveConn, ping: String?, expanded: Boolean, onExpand: () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap)) {
-        val domain = row.domain
-        if (!domain.isNullOrBlank()) {
-            Text(domain, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        row.transport?.let {
-            Text(stringResource(R.string.diag_transport, it.uppercase(Locale.ROOT)), style = MaterialTheme.typography.bodySmall)
-        }
-        row.protocol?.let { Text(stringResource(R.string.diag_protocol, it), style = MaterialTheme.typography.bodySmall) }
-        TextButton(onClick = onExpand, modifier = Modifier.lernetButton()) {
-            val label = if (expanded) R.string.diag_snapshot_hide else R.string.diag_snapshot_show
-            Text(stringResource(label))
-        }
-        if (expanded) {
-            ConnSnapshotPanel(row)
-        }
-        if (!ping.isNullOrBlank()) {
-            val fail = ping == stringResource(R.string.diag_ping_fail)
-            Text(
-                stringResource(R.string.diag_ping, ping),
-                style = MaterialTheme.typography.bodySmall,
-                color = if (fail) MaterialTheme.colorScheme.error else LerNetOk,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ConnSnapshotPanel(row: LiveConn) {
-    val model = DiagSnapshot.of(row)
-    val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    val body = MaterialTheme.typography.bodySmall
-    var contentOpen by remember(row.id) { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap)) {
-        Text(stringResource(R.string.diag_snap_dest, model.dest), style = body)
-        model.domain?.let { Text(stringResource(R.string.diag_snap_domain, it), style = body) }
-        val transport = listOfNotNull(model.transport, model.ipVersion?.let { "IPv$it" }).joinToString(" · ")
-        if (transport.isNotEmpty()) Text(stringResource(R.string.diag_transport, transport), style = body)
-        Text(
-            stringResource(
-                R.string.diag_snap_protocol,
-                model.protocol ?: stringResource(R.string.diag_protocol_unavailable),
-            ),
-            style = body,
-            color = if (model.protocol == null) muted else MaterialTheme.colorScheme.onSurface,
-        )
-        Text(
-            stringResource(
-                R.string.diag_snap_rule,
-                model.rule ?: stringResource(R.string.diag_rule_unavailable),
-            ),
-            style = body,
-            color = if (model.rule == null) muted else MaterialTheme.colorScheme.onSurface,
-        )
-        Text(stringResource(R.string.diag_snap_pipe, pipeLabel(model.pipe)), style = body)
-        if (model.routeChain.isNotEmpty()) {
-            Text(stringResource(R.string.diag_route_chain, model.routeChain.joinToString(" → ")), style = body)
-        }
-        Text(stringResource(R.string.diag_snap_status, statusLabel(model.status)), style = body)
-        Text(
-            stringResource(
-                R.string.diag_snap_bytes,
-                TrafficDisplay.formatBytes(model.uplink),
-                TrafficDisplay.formatBytes(model.downlink),
-            ),
-            style = body,
-        )
-        model.uid?.let { Text(stringResource(R.string.diag_uid, it), style = body, color = muted) }
-        model.pid?.let { PidLine(it) }
-        if (model.hasCapturedContent) {
-            TextButton(onClick = { contentOpen = !contentOpen }, modifier = Modifier.lernetButton()) {
-                Text(stringResource(if (contentOpen) R.string.diag_payload_hide else R.string.diag_payload_show))
-            }
-            if (contentOpen) {
-                model.requestLine?.let { Text(stringResource(R.string.diag_snap_path, it), style = body) }
-                model.headers?.let { Text(stringResource(R.string.diag_snap_headers, it), style = body) }
-                model.body?.let { Text(stringResource(R.string.diag_snap_body, it), style = body) }
-                if (model.bodyTruncated) Text(stringResource(R.string.diag_body_truncated), style = body, color = muted)
-            }
-        } else {
-            Text(
-                stringResource(
-                    if (model.wire == DiagSnapshot.Wire.TLS) R.string.diag_payload_encrypted
-                    else R.string.diag_payload_unavailable,
-                ),
-                style = body,
-                color = muted,
-            )
-        }
-    }
-}
-
-@Composable
-private fun pipeLabel(pipe: String): String = when (pipe) {
-    "direct" -> stringResource(R.string.action_direct_help)
-    "proxy" -> stringResource(R.string.route_pipe_default)
-    else -> pipe
-}
-
-@Composable
-private fun statusLabel(status: LiveConnStatus): String = when (status) {
-    LiveConnStatus.OPEN -> stringResource(R.string.diag_status_open)
-    LiveConnStatus.CLOSED -> stringResource(R.string.diag_status_ok)
-    LiveConnStatus.UNFINISHED -> stringResource(R.string.diag_status_silent)
-}
