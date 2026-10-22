@@ -139,10 +139,8 @@ class ExpertHealthSettingsTest {
         }
         try {
             render(scene)
-            nodes(scene).first {
-                "Настройки экспертного режима" in it.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty() &&
-                    it.config.getOrNull(SemanticsActions.OnClick) != null
-            }.config[SemanticsActions.OnClick].action!!.invoke()
+            // X7: health checks are a row on the «Защита и DNS» page, no longer a ⋮ menu item.
+            click(scene, "Защита и DNS")
             render(scene)
             click(scene, "Проверки связи")
             assertThat(nodes(scene).any { texts(it).contains("Сохранить в черновик · Ctrl+Enter") }).isTrue()
@@ -154,7 +152,6 @@ class ExpertHealthSettingsTest {
     }
 
     private fun render(scene: ImageComposeScene) {
-        println("DBGTEXTS: " + nodes(scene).flatMap { texts(it) })  // DBG
         repeat(3) { scene.render(0).close() }
     }
 
@@ -167,7 +164,6 @@ class ExpertHealthSettingsTest {
     }
 
     private fun screenshot(scene: ImageComposeScene, name: String) {
-        println("DBGTEXTS[$name]: " + nodes(scene).flatMap { texts(it) })  // DBG
         render(scene)
         scene.render(0).use { image ->
             val bytes = requireNotNull(image.encodeToData(EncodedImageFormat.PNG)).use { it.bytes }

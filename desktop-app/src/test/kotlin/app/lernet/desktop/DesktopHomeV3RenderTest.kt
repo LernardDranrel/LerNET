@@ -66,8 +66,10 @@ class DesktopHomeV3RenderTest {
         try {
             shot(scene, "windows-v3-home")
             val all = texts(scene)
-            listOf("Конфиги · 4", "Работа", "Дом", "Отключено", "пропущено", "Правила", "Последние запросы",
+            // m1: «Правила» in the config line, one attention zone, «Журнал запросов» row instead of recent requests.
+            listOf("Конфиги · 4", "Работа", "Дом", "Отключено", "Правила", "Журнал запросов",
                 "Пропущенные условия", "Анализ сети ↗").forEach { assertThat(all).contains(it) }
+            assertThat(all).doesNotContain("Последние запросы")
             assertThat(all).doesNotContain("Режим подключения")
             assertThat(all.any { "Telegram с телефона" in it && "не работает" in it }).isTrue()
         } finally { scene.close(); controller.close() }
@@ -95,9 +97,11 @@ class DesktopHomeV3RenderTest {
         try {
             shot(scene, "windows-v3-home-holding")
             val all = texts(scene)
-            listOf("Нет связи · VPN держим", "Что пробовали", "Конфиг из другой папки", "Выключить VPN", "напрямую").forEach {
+            listOf("Нет связи · VPN держим", "Что пробовали", "Конфиг из другой папки", "Выключить VPN").forEach {
                 assertThat(all).contains(it)
             }
+            // The switch-off warning says the traffic would go direct.
+            assertThat(all.any { "Выключить VPN" in it && "напрямую" in it }).isTrue()
         } finally { scene.close(); controller.close() }
     }
 

@@ -42,7 +42,8 @@ class DesktopBasicV2RenderTest {
             click(scene, "Настройки")
             screenshot(scene, "windows-basic-v2-settings")
             assertThat(nodes(scene).any { "MTU, байт" in texts(it) }).isFalse()
-            click(scene, "Дополнительно")
+            // S1: the advanced knobs are a separate «Для опытных» page.
+            click(scene, "Для опытных")
             screenshot(scene, "windows-basic-v2-settings-advanced")
             assertThat(nodes(scene).any { "MTU, байт" in texts(it) }).isTrue()
         } finally {
@@ -63,7 +64,6 @@ class DesktopBasicV2RenderTest {
     }
 
     private fun screenshot(scene: ImageComposeScene, name: String) {
-        println("DBGTEXTS[$name]: " + nodes(scene).flatMap { texts(it) })  // DBG
         var t = 0L
         repeat(4) { scene.render(t).close(); t += 500_000_000L }
         scene.render(t).use { image ->

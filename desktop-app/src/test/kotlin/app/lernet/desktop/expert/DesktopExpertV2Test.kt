@@ -74,9 +74,10 @@ class DesktopExpertV2Test {
         try {
             screenshot(scene, "windows-expert-v2-pult")
             assertThat(nodes(scene).any { "14 дн 06 ч" in texts(it) }).isTrue()
-            listOf("Схема" to "schema", "Конфиги" to "configs", "Правила" to "rules", "События" to "events").forEach { (title, file) ->
-                val tab = nodes(scene).last { title in texts(it) && it.config.getOrNull(SemanticsActions.OnClick) != null }
-                assertThat(tab.boundsInRoot.bottom).isAtLeast(800f)
+            // N1: the sections live in the left column (196 dp), not in a strip at the bottom.
+            listOf("Схема" to "schema", "Конфиги" to "configs", "Проверка пути" to "rules", "События" to "events").forEach { (title, file) ->
+                val tab = nodes(scene).first { title in texts(it) && it.config.getOrNull(SemanticsActions.OnClick) != null }
+                assertThat(tab.boundsInRoot.right).isAtMost(196f)
                 tab.config[SemanticsActions.OnClick].action!!.invoke()
                 screenshot(scene, "windows-expert-v2-$file")
             }
@@ -124,10 +125,10 @@ class DesktopExpertV2Test {
             }
         }
         try {
-            val tab = nodes(scene).last { "Конфиги" in texts(it) && it.config.getOrNull(SemanticsActions.OnClick) != null }
+            val tab = nodes(scene).first { "Конфиги" in texts(it) && it.config.getOrNull(SemanticsActions.OnClick) != null }
             tab.config[SemanticsActions.OnClick].action!!.invoke()
             screenshot(scene, "windows-expert-v2-configs-table")
-            listOf("КОНФИГ", "СОСТОЯНИЕ", "ЗАДЕРЖКА", "Amsterdam", "42 мс", "Разбудить", "Усыпить").forEach { word ->
+            listOf("КОНФИГ", "СОСТОЯНИЕ", "ОТКЛИК", "Amsterdam", "42 мс", "Разбудить", "Усыпить").forEach { word ->
                 assertThat(nodes(scene).any { word in texts(it) }).isTrue()
             }
         } finally {
@@ -164,7 +165,6 @@ class DesktopExpertV2Test {
     }
 
     private fun screenshot(scene: ImageComposeScene, name: String) {
-        println("DBGTEXTS[$name]: " + nodes(scene).flatMap { texts(it) })  // DBG
         var t = 0L
         repeat(4) { scene.render(t).close(); t += 500_000_000L }
         scene.render(t).use { image ->

@@ -86,8 +86,9 @@ class ExpertOffscreenTest {
         }
         try {
             screenshot(scene, "overview")
-            assertThat(nodes(scene).any { texts(it).contains("Управление сетью") }).isTrue()
-            listOf("Схема", "Проверка пути", "Выходы", "Соединения", "События", "Защита").forEach { title ->
+            assertThat(nodes(scene).any { texts(it).contains("Эксперт · твои правила для каждого соединения") }).isTrue()
+            // v3 sections (m3): «Выходы» became «Конфиги», connections live in «События», protection is «Защита и DNS».
+            listOf("Схема", "Проверка пути", "Конфиги", "События", "Защита и DNS").forEach { title ->
                 val navigation = nodes(scene).first {
                     texts(it).contains(title) && it.config.getOrNull(SemanticsActions.OnClick) != null
                 }
@@ -97,8 +98,7 @@ class ExpertOffscreenTest {
                     when (title) {
                         "Схема" -> "schema"
                         "Проверка пути" -> "preview"
-                        "Выходы" -> "exits"
-                        "Соединения" -> "traffic"
+                        "Конфиги" -> "exits"
                         "События" -> "events"
                         else -> "protection"
                     }
@@ -133,8 +133,9 @@ class ExpertOffscreenTest {
         }
         try {
             screenshot(scene, "overview-narrow")
+            // The v2 pult starts with the lever (a switch), not a «Включить управление» button.
             val start = nodes(scene).first {
-                texts(it).contains("Включить управление") &&
+                it.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty().any { d -> d.startsWith("Постоянный туннель") } &&
                     it.config.getOrNull(SemanticsActions.OnClick) != null
             }
             assertThat(start.config.getOrNull(SemanticsProperties.Disabled)).isNull()
@@ -227,9 +228,10 @@ class ExpertOffscreenTest {
         }
         try {
             screenshot(scene, "saved-pending-apply-large-text")
-            assertThat(nodes(scene).any { texts(it).contains("Сохранена: 2 · применена: 1") }).isTrue()
-            assertThat(nodes(scene).any { texts(it).contains("Вернуть применённую версию в черновик") }).isTrue()
-            assertThat(nodes(scene).any { texts(it).contains("Применить к работающему TUN") }).isTrue()
+            // Saved revision 2 is not the running revision 1: the pult says so in plain words and offers both ways.
+            assertThat(nodes(scene).any { texts(it).contains("Есть изменения · применятся после «Применить»") }).isTrue()
+            assertThat(nodes(scene).any { texts(it).contains("Вернуть работающую схему в редактор") }).isTrue()
+            assertThat(nodes(scene).any { texts(it).contains("Применить сейчас") }).isTrue()
         } finally {
             scene.close()
         }
@@ -257,7 +259,7 @@ class ExpertOffscreenTest {
         }
         try {
             screenshot(scene, "external-editor")
-            click(scene, "Сохранить профиль · Ctrl+Enter")
+            click(scene, "Сохранить конфиг · Ctrl+Enter")
             val first = intents.single() as ExpertIntent.SaveExternalExit
             assertThat(first.profileId).isEqualTo("stable-profile")
             assertThat(first.expectedFingerprint).isEqualTo("expected-fingerprint")
@@ -269,7 +271,7 @@ class ExpertOffscreenTest {
             screenshot(scene, "external-editor-write-failed")
             assertThat(closed).isFalse()
             assertThat(nodes(scene).any { texts(it).contains("Запись не завершена") }).isTrue()
-            click(scene, "Сохранить профиль · Ctrl+Enter")
+            click(scene, "Сохранить конфиг · Ctrl+Enter")
             val retry = intents.last() as ExpertIntent.SaveExternalExit
             assertThat(retry.requestId).isNotEqualTo(first.requestId)
             assertThat(retry.request.host).isEqualTo("127.0.0.1")
@@ -310,7 +312,7 @@ class ExpertOffscreenTest {
         try {
             screenshot(scene, "corporate-editor")
             assertThat(nodes(scene).any { texts(it).contains("Подтверждённый адаптер") }).isTrue()
-            click(scene, "Сохранить профиль · Ctrl+Enter")
+            click(scene, "Сохранить конфиг · Ctrl+Enter")
             val save = intents.single() as ExpertIntent.SaveExternalExit
             assertThat(save.request.kind).isEqualTo(ExternalExitKind.CORPORATE_INTERFACE)
             assertThat(save.request.binding).isEqualTo(binding)
@@ -344,7 +346,7 @@ class ExpertOffscreenTest {
             screenshot(scene, "advanced-interface-details")
             assertThat(nodes(scene).any { texts(it).contains("Номер: 23") }).isTrue()
             assertThat(nodes(scene).any { texts(it).contains("GUID: ${binding.guid}") }).isTrue()
-            assertThat(nodes(scene).none { texts(it).contains("Сохранить профиль · Ctrl+Enter") }).isTrue()
+            assertThat(nodes(scene).none { texts(it).contains("Сохранить конфиг · Ctrl+Enter") }).isTrue()
             assertThat(intents).isEmpty()
         } finally {
             scene.close()
@@ -388,7 +390,6 @@ class ExpertOffscreenTest {
     }
 
     private fun screenshot(scene: ImageComposeScene, name: String) {
-        println("DBGTEXTS[$name]: " + nodes(scene).flatMap { texts(it) })  // DBG
         repeat(3) { scene.render(0).close() }
         scene.render(0).use { image ->
             val bytes = requireNotNull(image.encodeToData(EncodedImageFormat.PNG)).use { it.bytes }
