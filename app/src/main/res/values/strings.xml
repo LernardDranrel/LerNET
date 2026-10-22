@@ -314,8 +314,8 @@
     <string name="cfg_log">Журнал</string>
     <string name="cfg_route_prefix">Системные правила</string>
     <string name="cfg_engine">Итоговые настройки подключения</string>
-    <string name="cfg_engine_show">Показать снимок</string>
-    <string name="cfg_engine_hide">Скрыть снимок</string>
+    <string name="cfg_engine_show">Показать итоговый JSON</string>
+    <string name="cfg_engine_hide">Скрыть JSON</string>
     <string name="cfg_save">Сохранить</string>
     <string name="cfg_saved">Конфиг записан. Туннель не переподключался.</string>
     <string name="cfg_port_error">Порт от 1 до 65535</string>
