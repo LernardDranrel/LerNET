@@ -4,7 +4,9 @@ import app.lernet.engine.policy.BudgetNotice
 import app.lernet.engine.policy.LinkHold
 import app.lernet.engine.policy.LinkJudge
 import app.lernet.engine.text.EditorWords
+import app.lernet.engine.text.ExpertWords
 import app.lernet.engine.text.HomeWords
+import app.lernet.engine.text.ImportWords
 import app.lernet.engine.text.JournalWords
 import app.lernet.engine.text.SettingsWords
 import app.lernet.engine.text.StatusWords
@@ -227,6 +229,37 @@ class PlatformTextParityTest {
         same("cfg_json_secret_hint", EditorWords.JSON_SECRET)
         same("cfg_save", EditorWords.SAVE)
         assertEquals(EditorWords.fingerprintDefault("firefox"), strings.getValue("cfg_fingerprint_default").replace("%1\$s", "firefox"))
+    }
+
+    @Test
+    fun importWordsMatchWindows() {
+        same("import_title", ImportWords.TITLE)
+        same("import_input_example", ImportWords.INPUT_EXAMPLE)
+        same("paste_clipboard", ImportWords.PASTE)
+        same("import_from_file", ImportWords.FROM_FILE)
+        same("import_action", ImportWords.ACTION)
+        same("importing", ImportWords.BUSY)
+        same("profile_name", ImportWords.NAME)
+        same("profile_name_hint", ImportWords.NAME_HINT)
+    }
+
+    @Test
+    fun expertPultWordsMatchWindows() {
+        same("expert_tile_exits", ExpertWords.TILE_EXITS)
+        same("expert_tile_connections", ExpertWords.TILE_CONNECTIONS)
+        same("expert_tile_protection", ExpertWords.TILE_PROTECTION)
+        same("expert_tile_protection_on", ExpertWords.PROTECTION_ON)
+        same("expert_tile_protection_check", ExpertWords.PROTECTION_CHECK)
+        same("expert_activity_search", ExpertWords.ACTIVITY_SEARCH)
+        same("expert_activity_all", ExpertWords.FILTER_ALL)
+        same("expert_activity_active", ExpertWords.FILTER_ACTIVE)
+        same("expert_activity_long", ExpertWords.FILTER_LONG)
+        same("expert_activity_closed", ExpertWords.FILTER_CLOSED)
+        same("expert_activity_empty", ExpertWords.ACTIVITY_EMPTY)
+        assertEquals("ещё нет", ExpertWords.exitsValue(0, 0))
+        assertEquals("2 из 3", ExpertWords.exitsValue(2, 3))
+        assertEquals("1 активное", ExpertWords.connectionsValue(1))
+        assertEquals("11 активных", ExpertWords.connectionsValue(11))
     }
 
     @Test

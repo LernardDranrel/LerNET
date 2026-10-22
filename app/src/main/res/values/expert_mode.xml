@@ -198,7 +198,7 @@
     <string name="expert_connection_unknown">Состояние соединения не передано ядром</string>
     <string name="expert_connection_exit">Фактический выход: %1$s</string>
     <string name="expert_connection_started">Начало: %1$s</string>
-    <string name="expert_activity_search">Приложение или адрес назначения</string>
+    <string name="expert_activity_search">Приложение, сайт или адрес</string>
     <string name="expert_activity_all">Все</string>
     <string name="expert_activity_active">Активные</string>
     <string name="expert_activity_closed">Завершённые</string>

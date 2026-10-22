@@ -103,7 +103,7 @@ fun DesktopExpert(
         },
     ) {
         // m3 / N1, N6: the Expert sections live in the left column (NavigationView), not in a strip at the bottom.
-        DesktopWorkspaceSidebar({ onIntent(ExpertIntent.OpenNetworkObservation) }, title = "LerNET · Эксперт") {
+        DesktopWorkspaceSidebar({ onIntent(ExpertIntent.OpenNetworkObservation) }) { // the mode is in the VPN | Эксперт switch above; «LerNET · Эк…» was cut
             Column(Modifier.semantics { contentDescription = "Разделы Эксперта" }) {
                 ExpertNavPages.forEach { item ->
                     WorkspaceNavigationItem(item.title, page == item, { openPage(item) }, badge = navBadge(item, state))
@@ -128,7 +128,8 @@ fun DesktopExpert(
         Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(Modifier.weight(1f)) {
-                    Text(page.title, style = MaterialTheme.typography.headlineMedium)
+                    // G4 (as in VPN mode and on the phone): the active item in the left column names the page,
+                    // no second title above the content.
                     // X9: the mode subtitle only on the pult; other pages explain themselves.
                     val subtitle = when (page) {
                         ExpertPage.OVERVIEW -> "Эксперт · твои правила для каждого соединения"
@@ -264,14 +265,14 @@ private fun ExpertWorkspaceMenu(state: ExpertUiState, onIntent: (ExpertIntent) -
                 }, enabled = !state.busy
             )
             DropdownMenuItem(
-                text = { Text("Импортировать схему") },
+                text = { Text("Импортировать рабочую схему") },
                 onClick = {
                     menu = false
                     onIntent(ExpertIntent.Import)
                 }, enabled = !state.busy
             )
             DropdownMenuItem(
-                text = { Text("Экспортировать схему") },
+                text = { Text("Сохранить рабочую схему в файл") },
                 onClick = {
                     menu = false
                     onIntent(ExpertIntent.Export)

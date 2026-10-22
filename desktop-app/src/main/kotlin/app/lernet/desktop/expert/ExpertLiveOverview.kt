@@ -82,19 +82,16 @@ internal fun ExpertLiveOverview(
 @Composable
 internal fun ExpertSummaryTiles(state: ExpertUiState, openPage: (ExpertPage) -> Unit) {
     val working = state.exits.count { it.phase == app.lernet.engine.policy.ExitPhase.READY }
-    val sleeping = state.exits.count { it.phase == app.lernet.engine.policy.ExitPhase.SLEEPING }
+    val words = app.lernet.engine.text.ExpertWords
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        SummaryTile(
-            "Конфиги",
-            if (state.exits.isEmpty()) "ещё нет" else "$working работают" + if (sleeping > 0) " · $sleeping спят" else "",
-            Modifier.weight(1f),
-        ) { openPage(ExpertPage.EXITS) }
-        SummaryTile("Соединения", "${state.connections.count { it.active == true }} активных", Modifier.weight(1f)) {
+        // The phone's tiles, word for word (ExpertWords).
+        SummaryTile(words.TILE_EXITS, words.exitsValue(working, state.exits.size), Modifier.weight(1f)) { openPage(ExpertPage.EXITS) }
+        SummaryTile(words.TILE_CONNECTIONS, words.connectionsValue(state.connections.count { it.active == true }), Modifier.weight(1f)) {
             openPage(ExpertPage.EVENTS)
         }
         val guarded = state.protection.exitFailureEnforced && state.protection.dnsFollowsPolicy
         SummaryTile(
-            "Защита", if (guarded) "включена" else "не подтверждена", Modifier.weight(1f),
+            words.TILE_PROTECTION, if (guarded) words.PROTECTION_ON else words.PROTECTION_CHECK, Modifier.weight(1f),
             valueColor = if (guarded) ExpertColors.green else ExpertColors.amber,
         ) { openPage(ExpertPage.PROTECTION) }
     }
@@ -166,7 +163,6 @@ private fun TunControl(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, c
                     when {
                         pult == app.lernet.engine.policy.PultStatus.OFF && state.protection.systemGuardEnforced ->
                             "Выключено · защита Windows блокирует обычный выход"
-                        pult == app.lernet.engine.policy.PultStatus.WORKING -> "Работает · соединения идут по твоей схеме"
                         else -> app.lernet.engine.policy.ExpertPult.headline(pult)
                     },
                     color = accent, style = MaterialTheme.typography.bodyMedium
@@ -223,9 +219,11 @@ internal fun ExpertLiveStreams(
     showPath: (ExpertConnection) -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
-    var activeOnly by rememberSaveable { mutableStateOf(false) }
-    var finishedOnly by rememberSaveable { mutableStateOf(false) }
-    var longOnly by rememberSaveable { mutableStateOf(false) }
+    // The phone's one-choice filter «Все · Активные · Длительные · Завершённые»; «С защитой» is an extra toggle (owner question).
+    var stateFilter by rememberSaveable { mutableStateOf("ALL") }
+    val activeOnly = stateFilter == "ACTIVE"
+    val finishedOnly = stateFilter == "CLOSED"
+    val longOnly = stateFilter == "LONG"
     var protectedOnly by rememberSaveable { mutableStateOf(false) }
     var selected by remember { mutableStateOf<ExpertConnection?>(null) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -261,12 +259,12 @@ internal fun ExpertLiveStreams(
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         OutlinedTextField(
             query, { query = it }, Modifier.fillMaxWidth(), singleLine = true,
-            label = { Text("Программа, сайт или адрес") }
+            label = { Text(app.lernet.engine.text.ExpertWords.ACTIVITY_SEARCH) }
         )
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            FilterChip(activeOnly, { activeOnly = !activeOnly; if (activeOnly) finishedOnly = false }, label = { Text("Активные") })
-            FilterChip(longOnly, { longOnly = !longOnly }, label = { Text("Длительные") })
-            FilterChip(finishedOnly, { finishedOnly = !finishedOnly; if (finishedOnly) activeOnly = false }, label = { Text("Завершённые") })
+            val words = app.lernet.engine.text.ExpertWords
+            listOf("ALL" to words.FILTER_ALL, "ACTIVE" to words.FILTER_ACTIVE, "LONG" to words.FILTER_LONG, "CLOSED" to words.FILTER_CLOSED)
+                .forEach { (value, label) -> FilterChip(stateFilter == value, { stateFilter = value }, label = { Text(label) }) }
             FilterChip(protectedOnly, { protectedOnly = !protectedOnly }, label = { Text("С защитой") })
         }
         Text(
@@ -351,10 +349,9 @@ private fun TrafficColumn(
                     if (flows.isEmpty()) {
                         item {
                             Text(
-                                if (state.phase == ExpertPhase.STOPPED) {
-                                    "Включи туннель для наблюдения"
-                                } else {
-                                    "Подходящих соединений пока нет"
+                                when {
+                                    state.connections.isEmpty() -> app.lernet.engine.text.ExpertWords.ACTIVITY_EMPTY
+                                    else -> "Подходящих соединений нет. Измени поиск или фильтр."
                                 },
                                 color = ExpertColors.muted, fontSize = 13.sp
                             )

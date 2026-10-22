@@ -11,10 +11,9 @@
     <string name="expert_actions_hint">Применение схемы, пробуждение и отказ выходов, смена выхода. Новые сверху.</string>
     <!-- Expert: pult tiles (m4) -->
     <string name="expert_tile_exits">Конфиги</string>
-    <string name="expert_tile_exits_value">%1$d / %2$d</string>
     <string name="expert_tile_connections">Соединения</string>
     <string name="expert_tile_protection">Защита</string>
-    <string name="expert_tile_protection_on">вкл</string>
+    <string name="expert_tile_protection_on">включена</string>
     <string name="expert_tile_protection_check">проверь</string>
     <string name="expert_tile_open">Открыть «%1$s»</string>
     <string name="expert_section_simulation_short">Проверка</string>

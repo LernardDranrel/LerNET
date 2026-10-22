@@ -63,8 +63,9 @@ class HomeStatesScreenshotTest {
     private fun render(name: String, state: HomeUiState) {
         rule.setContent {
             LerNetTheme {
+                // As in the app (LerNetAppRoot passes it): the VPN | Эксперт switch is on the home, as on Windows.
                 HomeScreen(state = state, onIntent = {}, onOpenDrawer = {}, onOpenSettings = {}, onOpenDiag = {},
-                    onOpenRoutes = {}, onRefreshHop = {})
+                    onOpenRoutes = {}, onRefreshHop = {}, onOpenExpert = {})
             }
         }
         save(name)

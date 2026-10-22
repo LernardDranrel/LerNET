@@ -122,9 +122,10 @@ internal fun NetworkObservationScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(if (snapshot == null) "Локальный снимок" else "Снимок ${time(snapshot.finishedAt)} · Android", style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { pauseMotion = !pauseMotion }, enabled = !systemReducedMotion) {
-                        Text(if (reduceMotion) "Без движения" else "Анимации вкл.", style = MaterialTheme.typography.labelSmall)
-                    }
+                    // The same switch and word as on Windows.
+                    Text("Меньше движения", style = MaterialTheme.typography.labelSmall)
+                    androidx.compose.material3.Switch(reduceMotion, { pauseMotion = it }, enabled = !systemReducedMotion,
+                        modifier = Modifier.padding(start = 6.dp))
                 }
                 if (state.collecting) {
                     if (!reduceMotion) LinearProgressIndicator(Modifier.fillMaxWidth())

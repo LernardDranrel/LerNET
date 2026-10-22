@@ -3,6 +3,7 @@
 package app.lernet.desktop
 
 import app.lernet.engine.text.HomeWords
+import app.lernet.engine.text.ImportWords
 import app.lernet.engine.text.JournalWords
 import app.lernet.engine.text.SettingsWords
 import app.lernet.config.net.LocalProxyAccess
@@ -335,6 +336,16 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
                                             expertStartPending = true
                                         }
                                         else -> expert.dispatch(intent)
+                                    }
+                                }, appSettings = { area ->
+                                    // As the phone's ⋮ → «Настройки приложения»: the common settings without leaving Expert
+                                    // (the slot existed but was never filled, so Windows Expert had no way to them).
+                                    Box(area) {
+                                        Settings(ui.saved, controller, onRequestElevation = {
+                                            WindowsElevation.relaunchAsAdministrator()
+                                                .onSuccess { expert?.close(); controller.close(); exitApplication() }
+                                                .onFailure { controller.showMessage(app.lernet.engine.text.UserText.of(it, "Не удалось запросить права администратора")) }
+                                        }, onOpenNetwork = { networkWindowOpen = true }, locked = ui.busy)
                                     }
                                 })
                                 if (splash.visible) DesktopExpertSplash()
@@ -2404,7 +2415,7 @@ private fun ImportDialog(groupName: String?, onDismiss: () -> Unit, onImport: (S
     var error by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (groupName == null) "Импорт конфига" else "Импорт в папку «$groupName»") },
+        title = { Text(if (groupName == null) ImportWords.TITLE else ImportWords.intoFolder(groupName)) },
         text = {
             Column {
                 Text("Ссылка на сервер (vless://…), JSON-конфиг, архив LerNET или адрес подписки", color = muted)
@@ -2412,7 +2423,7 @@ private fun ImportDialog(groupName: String?, onDismiss: () -> Unit, onImport: (S
                     TextButton(onClick = {
                         value = runCatching { Toolkit.getDefaultToolkit().systemClipboard.getData(DataFlavor.stringFlavor) as String }
                             .getOrElse { error = "Не удалось прочитать буфер обмена"; value }
-                    }) { Text("Вставить") }
+                    }) { Text(ImportWords.PASTE) }
                     TextButton(onClick = {
                         val picker = FileDialog(null as Frame?, "Выбрать конфигурацию", FileDialog.LOAD)
                         picker.isVisible = true
@@ -2425,13 +2436,14 @@ private fun ImportDialog(groupName: String?, onDismiss: () -> Unit, onImport: (S
                                 .onFailure { error = app.lernet.engine.text.UserText.of(it, "Не удалось прочитать файл") }
                         }
                         picker.dispose()
-                    }) { Text("Из файла") }
+                    }) { Text(ImportWords.FROM_FILE) }
                 }
-                OutlinedTextField(value, { value = it }, modifier = Modifier.fillMaxWidth().height(170.dp), label = { Text("Конфигурация") })
+                OutlinedTextField(value, { value = it }, modifier = Modifier.fillMaxWidth().height(170.dp),
+                    placeholder = { Text(ImportWords.INPUT_EXAMPLE) })
                 if (error.isNotBlank()) Text(error, color = desktopColors.error, fontSize = 12.sp)
             }
         },
-        confirmButton = { TextButton(onClick = { onImport(value.trim()) }, enabled = value.isNotBlank()) { Text("Импортировать") } },
+        confirmButton = { TextButton(onClick = { onImport(value.trim()) }, enabled = value.isNotBlank()) { Text(ImportWords.ACTION) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
     )
 }

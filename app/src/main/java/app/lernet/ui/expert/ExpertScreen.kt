@@ -750,9 +750,10 @@ private fun ExpertTiles(runtime: app.lernet.engine.policy.ExpertRuntimeState, st
     val active = runtime.connections.count { it.active == true }
     val protectionOk = runtime.inactiveNodeIds.isEmpty()
     Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ExpertTile(stringResource(R.string.expert_tile_exits), stringResource(R.string.expert_tile_exits_value, working, exits.size),
+        // Same values as on Windows (ExpertWords): «2 из 3», «3 активных».
+        ExpertTile(stringResource(R.string.expert_tile_exits), app.lernet.engine.text.ExpertWords.exitsValue(working, exits.size),
             Modifier.weight(1f).testTag("expert_tile_exits")) { open(ExpertSection.EXITS) }
-        ExpertTile(stringResource(R.string.expert_tile_connections), active.toString(),
+        ExpertTile(stringResource(R.string.expert_tile_connections), app.lernet.engine.text.ExpertWords.connectionsValue(active),
             Modifier.weight(1f).testTag("expert_open_events")) { open(ExpertSection.JOURNAL) }
         ExpertTile(stringResource(R.string.expert_tile_protection),
             stringResource(if (protectionOk) R.string.expert_tile_protection_on else R.string.expert_tile_protection_check),
