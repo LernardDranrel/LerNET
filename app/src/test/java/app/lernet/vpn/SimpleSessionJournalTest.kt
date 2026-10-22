@@ -25,6 +25,24 @@ class SimpleSessionJournalTest {
         assertNull(SimpleSessionJournal(path).read())
     }
 
+    @Test fun restoredSessionKeepsBypassedAppsAndTlsSettingsForTheNextFailover() {
+        val path = folder.root.toPath().resolve("session.json")
+        val full = config().copy(
+            defaults = EngineDefaults(1400, 1, "9.9.9.9", tlsRecordFragment = true, realityKeyShare = "classical",
+                bypassApps = listOf("com.bank", "org.mail")),
+        )
+        SimpleSessionJournal(path).write(full)
+        assertEquals(full.defaults, SimpleSessionJournal(path).read()!!.config().defaults)
+    }
+
+    @Test fun journalFromAnOlderBuildStillReads() {
+        val path = folder.root.toPath().resolve("session.json")
+        SimpleSessionJournal(path).write(config())
+        val old = String(Files.readAllBytes(path)).replace(Regex(""",\"(tlsRecordFragment|realityKeyShare|bypassApps)\":[^,}]*"""), "")
+        Files.write(path, old.toByteArray())
+        assertEquals(config(), SimpleSessionJournal(path).read()!!.config())
+    }
+
     @Test fun proxyModeDoesNotBecomeAnAlwaysOnVpnAndNewStartInvalidatesOldGeneration() {
         val journal = SimpleSessionJournal(folder.root.toPath().resolve("session.json"))
         journal.write(config())

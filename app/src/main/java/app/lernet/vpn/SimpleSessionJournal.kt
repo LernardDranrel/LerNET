@@ -34,10 +34,19 @@ internal data class StoredSimpleSession(
     val proxyTag: String?,
     val dnsPolicy: DnsPolicy,
     val xmuxChannels: Int = app.lernet.engine.compile.XhttpMode.DEFAULT_CHANNELS,
+    // A restored session can fail over and compile the next config with these defaults:
+    // without them the bypassed apps and the TLS settings were lost after a reboot.
+    val tlsRecordFragment: Boolean = false,
+    val realityKeyShare: String = "",
+    val bypassApps: List<String> = emptyList(),
 ) {
     fun config() = SimpleSessionConfig(
         profileId, outboundId, compiledJson, mode, logLevel,
-        EngineDefaults(tunMtu = tunMtu, xmuxChannels = xmuxChannels, directDnsServer = directDnsServer), proxyTag, dnsPolicy
+        EngineDefaults(
+            tunMtu = tunMtu, xmuxChannels = xmuxChannels, directDnsServer = directDnsServer,
+            tlsRecordFragment = tlsRecordFragment, realityKeyShare = realityKeyShare, bypassApps = bypassApps,
+        ),
+        proxyTag, dnsPolicy
     )
 }
 
@@ -51,7 +60,9 @@ internal class SimpleSessionJournal(private val path: Path) {
         val record = config?.takeIf { it.mode == RunMode.FULL_VPN }?.let {
             StoredSimpleSession(UUID.randomUUID().toString(), it.profileId, it.outboundId, it.compiledJson,
                 it.mode, it.logLevel, it.defaults.tunMtu, directDnsServer = it.defaults.directDnsServer,
-                proxyTag = it.proxyTag, dnsPolicy = it.dnsPolicy, xmuxChannels = it.defaults.xmuxChannels
+                proxyTag = it.proxyTag, dnsPolicy = it.dnsPolicy, xmuxChannels = it.defaults.xmuxChannels,
+                tlsRecordFragment = it.defaults.tlsRecordFragment, realityKeyShare = it.defaults.realityKeyShare,
+                bypassApps = it.defaults.bypassApps,
             )
         }
         Files.createDirectories(path.parent)

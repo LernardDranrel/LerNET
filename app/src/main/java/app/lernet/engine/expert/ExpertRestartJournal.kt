@@ -37,6 +37,10 @@ internal object ExpertRestartFingerprint {
                     put("tun_mtu", defaults.tunMtu)
                     put("xmux_channels", defaults.xmuxChannels)
                     put("direct_dns_server", defaults.directDnsServer)
+                    // Only when set, so the digest of an unchanged older install stays the same.
+                    if (defaults.tlsRecordFragment) put("tls_record_fragment", true)
+                    if (defaults.realityKeyShare.isNotEmpty()) put("reality_key_share", defaults.realityKeyShare)
+                    if (defaults.bypassApps.isNotEmpty()) put("bypass_apps", JsonArray(defaults.bypassApps.sorted().map(::JsonPrimitive)))
                 }
             )
             put("compile_inputs", JsonArray(compileInputs.map(::JsonPrimitive)))
