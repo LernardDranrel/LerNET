@@ -985,6 +985,9 @@ internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boole
                         }, value = channelLatency?.let { "$it мс" } ?: "—",
                             healthy = channelLatency != null, modifier = Modifier.weight(1f))
                     }
+                    probes[selected.id]?.budgetWaitMs?.let { wait ->
+                        Text(app.lernet.engine.policy.BudgetNotice.full(wait, expert = false), color = muted, fontSize = 12.sp)
+                    }
                     probes[selected.id]?.let { probe ->
                         if (!probe.checking && probe.tunnelLatencyMs == null && probe.tunnelMessage.isNotBlank()) {
                             Text(app.lernet.engine.text.UserText.clean(probe.tunnelMessage, "Через этот конфиг интернет не открывается."),
@@ -1483,6 +1486,7 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
                     if (compact) {
                         // One short line under the name instead of two metric columns: the name keeps the full width.
                         val (word, tone) = when {
+                            probe?.budgetWaitMs != null -> app.lernet.engine.policy.BudgetNotice.short(probe.budgetWaitMs) to muted
                             probe?.checking == true -> "Проверяем…" to muted
                             probe?.tunnelLatencyMs != null -> "Работает · ${probe.tunnelLatencyMs} мс" to green
                             probe?.latencyMs != null && probe.tunnelMessage.isBlank() -> "Сервер отвечает · ${probe.latencyMs} мс" to muted
@@ -1490,7 +1494,10 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
                             probe != null -> "Сервер не отвечает" to desktopColors.error
                             else -> "" to muted
                         }
-                        if (word.isNotEmpty()) Text(word, color = tone, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (word.isNotEmpty()) {
+                            Text(word, color = tone, fontSize = 11.sp, maxLines = if (probe?.budgetWaitMs != null) 2 else 1,
+                                overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
                 Box {
@@ -1529,6 +1536,9 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
                 TextButton(onClick = onProbe, enabled = probe?.checking != true,
                     modifier = Modifier.size(28.dp).semantics { contentDescription = "Проверить связь" },
                     contentPadding = PaddingValues(0.dp)) { PingGlyph(blue) }
+            }
+            if (!compact) probe?.budgetWaitMs?.let { wait ->
+                Text(app.lernet.engine.policy.BudgetNotice.short(wait), color = muted, fontSize = 11.sp)
             }
         }
     }

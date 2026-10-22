@@ -222,6 +222,12 @@ class ConnectionController(
     /** Takes one new connection to the active server from the budget; false = not now. */
     fun takeActiveBudget(): Boolean = activeKey()?.let { handshakeBudget.tryTake(it, clock()) } ?: true
 
+    /** How long [key]'s budget still forbids one more new connection (a check of another server). */
+    fun budgetWaitMs(key: HandshakeKey): Long = handshakeBudget.waitMs(key, clock())
+
+    /** Takes one new connection to [key]'s server from the budget; false = not now. */
+    fun takeBudget(key: HandshakeKey): Boolean = handshakeBudget.tryTake(key, clock())
+
     private fun activeKey(): HandshakeKey? = _snapshot.value.activeOutboundId?.let(outboundKeys::get)
 
     fun setFailoverHandlers(

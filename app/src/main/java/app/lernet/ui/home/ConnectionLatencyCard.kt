@@ -16,6 +16,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.lernet.R
 import app.lernet.engine.ConnectionState
+import app.lernet.engine.policy.BudgetNotice
 import app.lernet.ui.components.PanelCard
 import app.lernet.ui.theme.LerNetOk
 import app.lernet.ui.theme.lernetButton
@@ -71,6 +72,13 @@ internal fun ConnectionLatencyCard(state: HomeUiState, onIntent: (HomeIntent) ->
                 ),
                 healthy = tunnelMs != null && probe?.running != true,
                 modifier = Modifier.weight(1f),
+            )
+        }
+        probe?.budgetWaitMs?.let { wait ->
+            Text(
+                stringResource(R.string.probe_budget_wait, BudgetNotice.seconds(wait)),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

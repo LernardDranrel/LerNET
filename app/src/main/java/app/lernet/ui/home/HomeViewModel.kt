@@ -91,6 +91,8 @@ data class ProfileProbe(
     val requestId: Long = 0,
     /** The server was reached through the running VPN, not from this network directly. */
     val throughTunnel: Boolean = false,
+    /** The check waits for the handshake budget; time left, shown instead of a silent spinner. */
+    val budgetWaitMs: Long? = null,
 )
 
 sealed class HomeIntent {
@@ -465,9 +467,21 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    /** Waits until the active server's handshake budget allows one more connection, then takes it. */
-    private suspend fun awaitActiveBudget() {
-        while (!controller.takeActiveBudget()) delay(controller.activeBudgetWaitMs().coerceAtLeast(1_000L))
+    /**
+     * Waits until the handshake budget allows one more connection ([key]'s server, or the active one
+     * when null) and takes it. Meanwhile the row of [id] shows how long, refreshed every second.
+     */
+    private suspend fun awaitBudget(id: String, requestId: Long, key: app.lernet.engine.policy.HandshakeKey?) {
+        fun show(waitMs: Long?) = overlay.update { old ->
+            val probe = old.probes[id]
+            if (probe?.requestId == requestId) old.copy(probes = old.probes + (id to probe.copy(budgetWaitMs = waitMs))) else old
+        }
+        while (!(key?.let(controller::takeBudget) ?: controller.takeActiveBudget())) {
+            val wait = key?.let(controller::budgetWaitMs) ?: controller.activeBudgetWaitMs()
+            show(wait)
+            delay(wait.coerceIn(200L, 1_000L))
+        }
+        show(null)
     }
 
     private suspend fun probeProfiles(ids: List<String>) {
@@ -494,14 +508,20 @@ class HomeViewModel @Inject constructor(
                     active -> ProfileProbe(reachable = true, tcpMs = snapshot.serverTcpMs)
                     else -> {
                         val access = if (connected) (app.lernet.config.net.AppTraffic.route as? app.lernet.config.net.AppTraffic.Route.Through)?.access else null
-                        // Through the tunnel every check is one more connection via the active server.
-                        if (access != null) awaitActiveBudget()
+                        // Through the tunnel every check is one more connection via the active server;
+                        // without it, one more connection straight to that server.
+                        val key = if (access != null) {
+                            null
+                        } else {
+                            app.lernet.engine.policy.HandshakeKey.fromOutboundJson(profiles[id]?.selectedOutbound()?.singBoxJson)
+                        }
+                        if (access != null || key != null) awaitBudget(id, requestId, key)
                         val result = probe.check(endpoint, access, userAsked = true)
                         ProfileProbe(tcpMs = result?.latencyMs, reachable = result?.ok == true, throughTunnel = result?.throughTunnel == true)
                     }
                 }
                 val tunnel = if (active) {
-                    awaitActiveBudget()
+                    awaitBudget(id, requestId, null)
                     AndroidTunnelProbe.measure(LocalListeners.appProxy(snapshot.compiledJson))
                 } else {
                     null

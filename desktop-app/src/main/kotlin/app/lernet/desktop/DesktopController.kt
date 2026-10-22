@@ -437,7 +437,7 @@ class DesktopController(
                 when (BackupReach.route(access != null, EndpointProbe.isTcp(profile), userAsked = true)) {
                     ReachRoute.TUNNEL -> {
                         // Through the tunnel every check is one more connection via the active server.
-                        awaitActiveBudget()
+                        if (!awaitBudgetShowing(profile.id, ticket, null)) return@forEachIndexed
                         val result = EndpointProbe.checkThroughTunnel(profile, access!!)
                         if (probeTickets[profile.id] != ticket) return@forEachIndexed
                         // A full-path check would start a second core that dials the server from this
@@ -447,13 +447,16 @@ class DesktopController(
                         ))) }
                     }
                     else -> {
+                        // A direct handshake to this server is one more connection: it counts against its budget.
+                        val key = keyOf(profile)
+                        if (key != null && !awaitBudgetShowing(profile.id, ticket, key)) return@forEachIndexed
                         val tcp = EndpointProbe.check(profile)
                         if (probeTickets[profile.id] != ticket) return@forEachIndexed
                         mutable.update { it.copy(probes = it.probes + (profile.id to tcp.copy(
                             checking = true, tunnelMessage = "Проверяем канал через узел…",
                         ))) }
                         // The second core opens a connection to this server: it counts against its budget.
-                        keyOf(profile)?.let { key -> awaitBudget(key) }
+                        if (key != null && !awaitBudgetShowing(profile.id, ticket, key)) return@forEachIndexed
                         val outbound = checkOutbound(profile, saved)
                         if (probeTickets[profile.id] != ticket) return@forEachIndexed
                         mutable.update { it.copy(probes = it.probes + (profile.id to tcp.copy(
@@ -1064,15 +1067,32 @@ class DesktopController(
     private fun takeActiveBudget(): Boolean =
         activeProfileKey()?.let { handshakeBudget.tryTake(it, System.currentTimeMillis()) } ?: true
 
-    /** Waits until the active server's handshake budget allows one more connection, then takes it. */
-    private fun awaitActiveBudget() {
-        while (!takeActiveBudget()) runCatching { Thread.sleep(activeBudgetWait().coerceAtLeast(1_000L)) }.onFailure { return }
-    }
-
-    private fun awaitBudget(key: HandshakeKey) {
-        while (!handshakeBudget.tryTake(key, System.currentTimeMillis())) {
-            runCatching { Thread.sleep(handshakeBudget.waitMs(key, System.currentTimeMillis()).coerceAtLeast(1_000L)) }.onFailure { return }
+    /**
+     * Waits until the handshake budget allows one more connection ([key]'s server, or the active one
+     * when null) and takes it. Meanwhile the check of [profileId] says how long, refreshed every second
+     * (see BudgetNotice). False when the check was replaced by a newer one or the wait was interrupted.
+     */
+    private fun awaitBudgetShowing(profileId: String, ticket: Long, key: HandshakeKey?): Boolean {
+        fun show(waitMs: Long?) = mutable.update { ui ->
+            val probe = ui.probes[profileId]
+            if (probe != null && probeTickets[profileId] == ticket) ui.copy(probes = ui.probes + (profileId to probe.copy(budgetWaitMs = waitMs))) else ui
         }
+        while (true) {
+            val budgetKey = key ?: activeProfileKey() ?: break
+            val now = System.currentTimeMillis()
+            if (handshakeBudget.tryTake(budgetKey, now)) break
+            if (probeTickets[profileId] != ticket) return false
+            val wait = handshakeBudget.waitMs(budgetKey, now)
+            show(wait)
+            try {
+                Thread.sleep(wait.coerceIn(200L, 1_000L))
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return false
+            }
+        }
+        show(null)
+        return true
     }
 
     private fun activeBudgetWait(): Long =

@@ -813,6 +813,8 @@ private fun ProfileActionBlock(
             Text(
                 when {
                     moving -> stringResource(R.string.drawer_move_selected)
+                    probe?.budgetWaitMs != null ->
+                        stringResource(R.string.probe_budget_wait_short, app.lernet.engine.policy.BudgetNotice.seconds(probe.budgetWaitMs))
                     probe?.running == true -> stringResource(R.string.drawer_probe_running)
                     probe?.reachable == true && probe.tcpMs == null -> "${protocolOf(profile)} · подключён"
                     probe?.reachable == true && probe.throughTunnel -> "${protocolOf(profile)} · через VPN ${probe.tcpMs} мс"
@@ -820,7 +822,7 @@ private fun ProfileActionBlock(
                     probe != null -> "${protocolOf(profile)} · ${stringResource(R.string.diag_ping_fail)}"
                     else -> protocolOf(profile)
                 },
-                maxLines = 1,
+                maxLines = if (probe?.budgetWaitMs != null) 2 else 1,
                 overflow = TextOverflow.Ellipsis,
             )
         },

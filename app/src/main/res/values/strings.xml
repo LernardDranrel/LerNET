@@ -75,6 +75,9 @@
     <string name="drawer_drag_target_hint">Наведите на папку или конфиг</string>
     <string name="drawer_move_selected">Перемещение: выберите место</string>
     <string name="drawer_probe_running">Проверяем…</string>
+    <!-- Same words as BudgetNotice (Windows): the check waits for the handshake budget. -->
+    <string name="probe_budget_wait_short">Проверю через %1$d с, чтобы не привлекать внимание блокировщика</string>
+    <string name="probe_budget_wait">Проверю через %1$d с, чтобы не привлекать внимание блокировщика · можете не ждать, результат появится здесь</string>
     <string name="drawer_folder_probe">Отвечают: %1$d из %2$d</string>
     <string name="drawer_folder_checking">Проверка: %1$d из %2$d</string>
     <string name="drawer_move_up">Выше</string>

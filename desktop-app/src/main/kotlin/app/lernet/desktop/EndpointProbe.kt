@@ -24,6 +24,8 @@ data class ProbeResult(
     val tunnelLatencyMs: Long? = null,
     val tunnelMessage: String = "",
     val serverProtocol: String = "TCP",
+    /** The check waits for the handshake budget; shown as BudgetNotice instead of a silent «Проверяем…». */
+    val budgetWaitMs: Long? = null,
 )
 
 /** Direct TCP/TLS handshake to the endpoint; the HTTP channel is checked separately. */
