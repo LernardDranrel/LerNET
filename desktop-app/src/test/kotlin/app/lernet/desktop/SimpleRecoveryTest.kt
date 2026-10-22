@@ -25,7 +25,15 @@ class SimpleRecoveryTest {
             // Same pauses as Android: 5, 15, 30, 30 s (each up to a quarter longer, capped at 30 s), never 1–2 s.
             val steps = listOf(5_000L..6_250L, 15_000L..18_750L, 30_000L..30_000L, 30_000L..30_000L)
             for (attempt in 1..SimpleRecovery.QUICK_ATTEMPTS) {
-                assertThat(SimpleRecovery.pauseMs(attempt)).isIn(com.google.common.collect.Range.closed(steps[attempt - 1].first, steps[attempt - 1].last))
+                assertThat(SimpleRecovery.pauseMs(attempt)).isIn(
+                    com.google.common.collect.Range.closed(
+                        steps[attempt - 1].first,
+                        steps[
+                            attempt -
+                                1
+                        ].last
+                    )
+                )
             }
             val recheck = SimpleRecovery.pauseMs(SimpleRecovery.QUICK_ATTEMPTS + 1 + it % 20)
             assertThat(recheck).isAtLeast(45_000L)

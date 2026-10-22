@@ -20,6 +20,7 @@ import app.lernet.engine.compile.ConfigAssembler
 import app.lernet.engine.compile.EnginePlatform
 import app.lernet.engine.compile.EngineDefaults
 import app.lernet.engine.compile.OutboundPatch
+import app.lernet.engine.compile.XhttpMode
 import app.lernet.routing.GeoRuleSets
 import app.lernet.routing.ConditionBlock
 import app.lernet.routing.ConditionCodec
@@ -173,6 +174,7 @@ class DesktopController(
     private val observedConnections = LinkedHashMap<String, LiveConnection>()
     private val mutableHistory = MutableStateFlow<List<LiveConnection>>(emptyList())
     val connectionHistory: StateFlow<List<LiveConnection>> = mutableHistory
+
     /** Configs that died rest 2 → 10 → 30 min; kept in the work folder, so the list survives a restart. */
     internal val penalties = ConfigPenalties().also { list ->
         val file = store.workDirectory().resolve(PENALTIES_FILE)
@@ -182,13 +184,21 @@ class DesktopController(
                 .onFailure { tunnel.logDiagnostic("Не удалось сохранить список отдыхающих конфигов: ${it.javaClass.simpleName}") }
         }
     }
+
     /** LerNET's own new connections per server+SNI: at most 3 per minute ([HandshakeBudget]). */
     private val handshakeBudget = HandshakeBudget()
+
     /** Rounds in a row in which neither the active config nor any folder config answered. */
     private val silentRounds = java.util.concurrent.atomic.AtomicInteger(0)
+
     @Volatile private var lastRestartAt = 0L
+
+    /** When the pending recovery retry starts; a network change brings it forward. */
+    @Volatile private var pendingRecoveryDue: java.util.concurrent.atomic.AtomicLong? = null
+
     /** Asks the monitor loop for one tunnel check (within its cooldown). */
     private val hintRequest = AtomicBoolean(false)
+
     /** Asks the monitor loop to hold and look again after this many ms; -1 = none. */
     private val holdRequest = AtomicLong(-1L)
     private val failoverRunner = FailoverRunner()
@@ -212,8 +222,22 @@ class DesktopController(
         var failedChecks = 0
         var lastNetwork = runCatching { WindowsTunnelHealth.networkSignature() }.getOrDefault("")
         var lastNetworkScanAt = 0L
+        var lastReplies = 0L
         while (monitorOpen) {
             val status = tunnel.state.value.status
+            // Also while a wanted connection is down and waits for its retry: a new network cuts that pause.
+            var networkMoved = false
+            val scanAt = System.currentTimeMillis()
+            if ((status == TunnelStatus.RUNNING || desiredConnection) && scanAt - lastNetworkScanAt >= 3_000) {
+                lastNetworkScanAt = scanAt
+                runCatching { WindowsTunnelHealth.networkSignature() }.onSuccess { signature ->
+                    if (signature != lastNetwork) {
+                        lastNetwork = signature
+                        networkMoved = true
+                        onNetworkChanged(scanAt, running = status == TunnelStatus.RUNNING)
+                    }
+                }
+            }
             if (status == TunnelStatus.RUNNING) {
                 mutableDiagnostics.value = runCatching { coreApi.poll() }
                     .getOrElse { previous -> CoreDiagnostics(error = previous.message ?: "Нет данных от ядра") }
@@ -240,20 +264,15 @@ class DesktopController(
                 if (sign != null) onBlockingSuspected(sign)
                 if (hintRequest.getAndSet(false)) schedule.onHint(now)
                 holdRequest.getAndSet(-1L).takeIf { it >= 0L }?.let { schedule.planHold(now, it) }
-                if (now - lastNetworkScanAt >= 3_000) {
-                    lastNetworkScanAt = now
-                    runCatching { WindowsTunnelHealth.networkSignature() }.onSuccess { signature ->
-                        if (signature != lastNetwork) {
-                            lastNetwork = signature
-                            networkChangedAt = now
-                            // A new network may revive configs that failed on the old one (their level stays).
-                            penalties.onNetworkChanged(now)
-                            backupHealth.clear()
-                            backupRotation.reset()
-                            schedule.onNetworkChanged(now)
-                            synchronized(blockingDetector) { blockingDetector.reset() }
-                            mutable.update { it.copy(healthMessage = "Сеть изменилась · проверяем VPN", healthVerified = null) }
-                        }
+                if (networkMoved) {
+                    schedule.onNetworkChanged(now)
+                    mutable.update { it.copy(healthMessage = "Сеть изменилась · проверяем VPN", healthVerified = null) }
+                }
+                // Replies through the VPN exit: the config works, whatever was suspected (same as Android).
+                if (traffic.replies > lastReplies) {
+                    lastReplies = traffic.replies
+                    if (silentRounds.get() > 0 || state.value.hold != null) {
+                        state.value.saved.selectedProfileId?.let(::onConfigWorks)
                     }
                 }
                 if (nextBackupAt == 0L) nextBackupAt = now + BackupRotation.nextDelayMs()
@@ -288,7 +307,9 @@ class DesktopController(
                             } else {
                                 // One more request through the node: it opens a connection, so it is budgeted too.
                                 val nodeAlive = takeActiveBudget() &&
-                                    runCatching { coreApi.delay(tag, saved.healthUrl, TunnelProbeSchedule.CHECK_TIMEOUT_MS.toInt()) }.isSuccess
+                                    runCatching {
+                                        coreApi.delay(tag, saved.healthUrl, TunnelProbeSchedule.CHECK_TIMEOUT_MS.toInt())
+                                    }.isSuccess
                                 if (ticket == connectGeneration.get() && tunnel.state.value.status == TunnelStatus.RUNNING) {
                                     failedChecks = if (verdict == TunnelProbeSchedule.Verdict.FAILED) 2 else 1
                                     val reason = if (nodeAlive) "Узел отвечает, но путь Windows через VPN не работает"
@@ -448,7 +469,7 @@ class DesktopController(
                 when (BackupReach.route(access != null, EndpointProbe.isTcp(profile), userAsked = true)) {
                     ReachRoute.TUNNEL -> {
                         // Through the tunnel every check is one more connection via the active server.
-                        awaitActiveBudget()
+                        if (!awaitBudgetShowing(profile.id, ticket, null)) return@forEachIndexed
                         val result = EndpointProbe.checkThroughTunnel(profile, access!!)
                         if (probeTickets[profile.id] != ticket) return@forEachIndexed
                         // A full-path check would start a second core that dials the server from this
@@ -457,23 +478,27 @@ class DesktopController(
                             tunnelMessage = "Полный путь проверим при переключении",
                         ))) }
                     }
-                    else -> {
-                        val tcp = EndpointProbe.check(profile)
-                        if (probeTickets[profile.id] != ticket) return@forEachIndexed
-                        mutable.update { it.copy(probes = it.probes + (profile.id to tcp.copy(
-                            checking = true, tunnelMessage = "Проверяем канал через узел…",
-                        ))) }
-                        // The second core opens a connection to this server: it counts against its budget.
-                        keyOf(profile)?.let { key -> awaitBudget(key) }
-                        val outbound = checkOutbound(profile, saved)
-                        if (probeTickets[profile.id] != ticket) return@forEachIndexed
-                        mutable.update { it.copy(probes = it.probes + (profile.id to tcp.copy(
-                            tunnelLatencyMs = outbound.latencyMs,
-                            tunnelMessage = outbound.message,
-                        ))) }
-                    }
+                    else -> probeDirect(profile, ticket, saved)
                 }
             }
+        }
+    }
+
+    /** «Проверить» without the tunnel: a handshake straight to the server, then a request through a second core. */
+    private fun probeDirect(profile: StoredProfile, ticket: Long, saved: StoredState) {
+        // Each of the two is one more connection to this server: both count against its budget.
+        val key = keyOf(profile)
+        if (key != null && !awaitBudgetShowing(profile.id, ticket, key)) return
+        val tcp = EndpointProbe.check(profile)
+        if (probeTickets[profile.id] != ticket) return
+        mutable.update {
+            it.copy(probes = it.probes + (profile.id to tcp.copy(checking = true, tunnelMessage = "Проверяем канал через узел…")))
+        }
+        if (key != null && !awaitBudgetShowing(profile.id, ticket, key)) return
+        val outbound = checkOutbound(profile, saved)
+        if (probeTickets[profile.id] != ticket) return
+        mutable.update {
+            it.copy(probes = it.probes + (profile.id to tcp.copy(tunnelLatencyMs = outbound.latencyMs, tunnelMessage = outbound.message)))
         }
     }
 
@@ -764,7 +789,42 @@ class DesktopController(
         )
     }
 
+    /** Audit N14: the last deleted config can be brought back with «Отменить», as on Android. */
+    data class DeletedProfile(
+        val profile: StoredProfile,
+        val index: Int,
+        val rules: List<StoredRule>,
+        val positions: Map<String, RulePosition>,
+        val wasSelected: Boolean,
+    )
+    private val lastDeleted = MutableStateFlow<DeletedProfile?>(null)
+    val deleted: StateFlow<DeletedProfile?> = lastDeleted
+
+    fun undoDelete() {
+        val item = lastDeleted.value ?: return
+        lastDeleted.value = null
+        change { saved ->
+            if (saved.profiles.any { it.id == item.profile.id }) return@change saved
+            val profiles = saved.profiles.toMutableList().apply { add(item.index.coerceIn(0, size), item.profile) }
+            saved.copy(
+                profiles = profiles,
+                rules = saved.rules + item.rules,
+                rulePositions = saved.rulePositions + item.positions,
+                selectedProfileId = if (item.wasSelected) item.profile.id else saved.selectedProfileId,
+            )
+        }
+    }
+
+    fun dismissDeleted() { lastDeleted.value = null }
+
     fun delete(profileId: String) {
+        val before = state.value.saved
+        before.profiles.indexOfFirst { it.id == profileId }.takeIf { it >= 0 }?.let { index ->
+            val rules = before.rules.filter { it.profileId == profileId }
+            val ids = rules.mapTo(HashSet()) { it.id }
+            lastDeleted.value = DeletedProfile(before.profiles[index], index, rules,
+                before.rulePositions.filterKeys { it in ids }, before.selectedProfileId == profileId)
+        }
         if (state.value.saved.selectedProfileId == profileId) disconnect()
         change { saved ->
             val remaining = saved.profiles.filterNot { it.id == profileId }
@@ -847,10 +907,12 @@ class DesktopController(
     fun setDefaults(mtu: Int, dnsServer: String, logLevel: String) = change {
         it.copy(tunMtu = mtu.coerceIn(1280, 9000), directDnsServer = dnsServer.trim(), logLevel = logLevel)
     }
+
     /** «Один канал»: XHTTP carries everything over one connection instead of two. */
     fun setXmuxSingleChannel(enabled: Boolean) = change {
-        it.copy(xmuxChannels = if (enabled) app.lernet.engine.compile.XhttpMode.SINGLE_CHANNEL else app.lernet.engine.compile.XhttpMode.DEFAULT_CHANNELS)
+        it.copy(xmuxChannels = if (enabled) XhttpMode.SINGLE_CHANNEL else XhttpMode.DEFAULT_CHANNELS)
     }
+
     fun updateProfile(profile: StoredProfile) = change { saved ->
         saved.copy(profiles = saved.profiles.map { if (it.id == profile.id) profile else it })
     }
@@ -1121,13 +1183,25 @@ class DesktopController(
         val tag = if (attempt > SimpleRecovery.QUICK_ATTEMPTS || rounds > 0) "recheck" else "core-failed"
         tunnel.logDiagnostic(RestartLog.line(tag, attempt, pause))
         val hold = if (rounds >= SimpleRecovery.ALL_SILENT_ROUNDS) LinkHold.ALL_SILENT else null
-        mutable.update { it.copy(
-            message = hold?.let { h -> LinkJudge.holdMessage(h, RecheckJitter.label(pause)) }
-                ?: SimpleRecovery.message(simpleGuard.isEngaged(), pause, reason),
-            hold = hold,
-        ) }
+        mutable.update {
+            it.copy(
+                message = hold?.let { h -> LinkJudge.holdMessage(h, RecheckJitter.label(pause)) }
+                    ?: SimpleRecovery.message(simpleGuard.isEngaged(), pause, reason),
+                hold = hold,
+            )
+        }
+        val due = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis() + pause)
+        pendingRecoveryDue = due
         thread(name = "lernet-windows-retry", isDaemon = true) {
-            try { Thread.sleep(pause) } catch (_: InterruptedException) { return@thread }
+            // Sleeps in short steps: a network change may bring the retry forward (see onNetworkChanged).
+            while (System.currentTimeMillis() < due.get()) {
+                try {
+                    Thread.sleep((due.get() - System.currentTimeMillis()).coerceIn(1L, 500L))
+                } catch (_: InterruptedException) {
+                    return@thread
+                }
+            }
+            if (pendingRecoveryDue === due) pendingRecoveryDue = null
             if (desiredConnection && !expertReserved.get() && connectGeneration.get() == ticket &&
                 tunnel.state.value.status in setOf(TunnelStatus.FAILED, TunnelStatus.STOPPED)) {
                 connectInternal(resetFailover = false, holdOnError = true)
@@ -1163,10 +1237,32 @@ class DesktopController(
 
     private fun holdJammed() {
         mutable.update {
-            if (it.hold == LinkHold.ALL_SILENT) it else it.copy(
-                healthMessage = LinkJudge.holdMessage(LinkHold.JAMMED), healthVerified = false, hold = LinkHold.JAMMED,
-            )
+            if (it.hold == LinkHold.ALL_SILENT) {
+                it
+            } else {
+                it.copy(
+                    healthMessage = LinkJudge.holdMessage(LinkHold.JAMMED), healthVerified = false, hold = LinkHold.JAMMED,
+                )
+            }
         }
+    }
+
+    /**
+     * The physical network changed (same as Android): resting configs may be tried again, rounds counted
+     * on the old network are forgotten, and a retry that waits out a long pause starts in a second.
+     */
+    private fun onNetworkChanged(now: Long, running: Boolean) {
+        networkChangedAt = now
+        penalties.onNetworkChanged(now)
+        backupHealth.clear()
+        backupRotation.reset()
+        synchronized(blockingDetector) { blockingDetector.reset() }
+        silentRounds.set(0)
+        mutable.update { it.copy(hold = null) }
+        val due = pendingRecoveryDue ?: return
+        if (running) return
+        due.updateAndGet { minOf(it, now + NETWORK_RETURN_RETRY_MS) }
+        mutable.update { it.copy(message = "Сеть изменилась · переподключаемся") }
     }
 
     /** Replies came back through the config: it works, whatever was suspected before. */
@@ -1187,15 +1283,41 @@ class DesktopController(
     private fun takeActiveBudget(): Boolean =
         activeProfileKey()?.let { handshakeBudget.tryTake(it, System.currentTimeMillis()) } ?: true
 
-    /** Waits until the active server's handshake budget allows one more connection, then takes it. */
-    private fun awaitActiveBudget() {
-        while (!takeActiveBudget()) runCatching { Thread.sleep(activeBudgetWait().coerceAtLeast(1_000L)) }.onFailure { return }
-    }
-
-    private fun awaitBudget(key: HandshakeKey) {
-        while (!handshakeBudget.tryTake(key, System.currentTimeMillis())) {
-            runCatching { Thread.sleep(handshakeBudget.waitMs(key, System.currentTimeMillis()).coerceAtLeast(1_000L)) }.onFailure { return }
+    /**
+     * Waits until the handshake budget allows one more connection ([key]'s server, or the active one
+     * when null) and takes it. Meanwhile the check of [profileId] says how long, refreshed every second
+     * (see BudgetNotice). False when the check was replaced by a newer one or the wait was interrupted.
+     */
+    private fun awaitBudgetShowing(profileId: String, ticket: Long, key: HandshakeKey?): Boolean {
+        fun show(waitMs: Long?) = mutable.update { ui ->
+            val probe = ui.probes[profileId]
+            if (probe != null &&
+                probeTickets[profileId] == ticket
+            ) {
+                ui.copy(probes = ui.probes + (profileId to probe.copy(budgetWaitMs = waitMs)))
+            } else {
+                ui
+            }
         }
+        var taken = false
+        while (!taken) {
+            val budgetKey = key ?: activeProfileKey()
+            val now = System.currentTimeMillis()
+            taken = budgetKey == null || handshakeBudget.tryTake(budgetKey, now)
+            if (!taken) {
+                if (probeTickets[profileId] != ticket) return false
+                val wait = handshakeBudget.waitMs(checkNotNull(budgetKey), now)
+                show(wait)
+                try {
+                    Thread.sleep(wait.coerceIn(200L, 1_000L))
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return false
+                }
+            }
+        }
+        show(null)
+        return true
     }
 
     private fun activeBudgetWait(): Long =
@@ -1243,7 +1365,6 @@ class DesktopController(
         holdRequest.set(delay)
         mutable.update { it.copy(hold = hold, healthMessage = LinkJudge.holdMessage(hold, RecheckJitter.label(delay))) }
     }
-
 
     /**
      * Same rule as Android (shared LinkJudge): no network → keep the tunnel and wait;
@@ -1320,16 +1441,7 @@ class DesktopController(
         for ((index, candidate) in candidates.withIndex()) {
             // Sequential with a random pause, the same rule as on Android: no burst of handshakes.
             if (index > 0) runCatching { Thread.sleep(LinkJudge.candidateGapMs()) }
-            val key = keyOf(candidate)
-            if (key != null) {
-                val wait = handshakeBudget.waitMs(key, System.currentTimeMillis())
-                if (wait > LinkJudge.CANDIDATE_BUDGET_WAIT_MS) {
-                    tunnel.logDiagnostic("Профиль «${candidate.name}» пропущен: лимит новых соединений к серверу")
-                    continue
-                }
-                if (wait > 0L) runCatching { Thread.sleep(wait) }
-                handshakeBudget.record(key, System.currentTimeMillis())
-            }
+            if (!takeCandidateBudget(candidate)) continue
             val tcp = EndpointProbe.check(candidate)
             val outbound = checkOutbound(candidate, saved)
             val probe = tcp.copy(tunnelLatencyMs = outbound.latencyMs, tunnelMessage = outbound.message)
@@ -1363,6 +1475,19 @@ class DesktopController(
             )
         }
         return false
+    }
+
+    /** A candidate check fits its server's budget now or after a short wait (≤ CANDIDATE_BUDGET_WAIT_MS), else it is skipped. */
+    private fun takeCandidateBudget(candidate: StoredProfile): Boolean {
+        val key = keyOf(candidate) ?: return true
+        val wait = handshakeBudget.waitMs(key, System.currentTimeMillis())
+        if (wait > LinkJudge.CANDIDATE_BUDGET_WAIT_MS) {
+            tunnel.logDiagnostic("Профиль «${candidate.name}» пропущен: лимит новых соединений к серверу")
+            return false
+        }
+        if (wait > 0L) runCatching { Thread.sleep(wait) }
+        handshakeBudget.record(key, System.currentTimeMillis())
+        return true
     }
 
     private fun attemptReason(probe: ProbeResult): String = when {
@@ -1520,6 +1645,9 @@ class DesktopController(
 
 /** Resting configs ([ConfigPenalties]) in the work folder, one line per config. */
 private const val PENALTIES_FILE = "config-penalties.txt"
+
+/** A recovery retry that waited out a long pause starts this soon after the network changes (as on Android). */
+private const val NETWORK_RETURN_RETRY_MS = 1_000L
 
 /** A free loopback port for the internal listener; sing-box binds it right after. */
 internal fun freeLoopbackPort(): Int =

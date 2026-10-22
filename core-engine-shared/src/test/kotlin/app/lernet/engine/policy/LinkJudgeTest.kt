@@ -41,7 +41,7 @@ class LinkJudgeTest {
         val jammed = LinkJudge.holdMessage(LinkHold.JAMMED)
         assertTrue(jammed.startsWith("Связь глушат"))
         val silent = LinkJudge.holdMessage(LinkHold.ALL_SILENT, "2 мин")
-        assertTrue(silent.contains("ни один сервер не отвечает"))
+        assertTrue(silent.contains("Сеть есть, но серверы не отвечают"))
         assertTrue(silent.endsWith("проверим снова через 2 мин"))
         // Plain mode speaks «вы»: no «ты»-forms and no jargon.
         listOf(jammed, silent, LinkJudge.message(LinkDecision.SWITCH_NOW), LinkJudge.message(LinkDecision.RETRY_SAME)).forEach { text ->

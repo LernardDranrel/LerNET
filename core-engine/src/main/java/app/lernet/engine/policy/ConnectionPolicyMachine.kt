@@ -69,6 +69,22 @@ class ConnectionPolicyMachine {
     ): Pair<MachineState, List<PolicyCommand>> = when (event) {
         is PolicyEvent.StartRequested -> start(state, context, event)
         PolicyEvent.EngineStarted -> accepted(state)
+        PolicyEvent.OutboundReady -> onOutboundReady(state)
+        PolicyEvent.UserDisconnect -> userDisconnect(state)
+        is PolicyEvent.ProbeCompleted -> onProbe(state, context, event)
+        is PolicyEvent.SwitchFailed -> onSwitchFailed(state, context, event)
+        PolicyEvent.NetworkChanged -> onNetworkChanged(state)
+        PolicyEvent.PermissionDenied ->
+            failNow(state, ConnectionCause.VpnPermissionDenied)
+        else -> onHealth(state, context, event)
+    }
+
+    /** What the running connection reports about itself: traffic, checks, failures. */
+    private fun onHealth(
+        state: MachineState,
+        context: MachineContext,
+        event: PolicyEvent,
+    ): Pair<MachineState, List<PolicyCommand>> = when (event) {
         is PolicyEvent.EngineStatus -> onStatus(state, context, event)
         PolicyEvent.TunnelVerified -> verified(state, context)
         is PolicyEvent.EngineFailed -> when (event.cause) {
@@ -80,11 +96,39 @@ class ConnectionPolicyMachine {
         PolicyEvent.DnsHealthTimeout -> onHint(state)
         PolicyEvent.DnsPathOk -> onDnsPathOk(state)
         PolicyEvent.ConnectTimeout -> onConnectTimeout(state, context)
-        PolicyEvent.OutboundReady -> onOutboundReady(state)
-        PolicyEvent.UserDisconnect -> userDisconnect(state)
-        is PolicyEvent.ProbeCompleted -> onProbe(state, context, event)
-        PolicyEvent.PermissionDenied ->
-            failNow(state, ConnectionCause.VpnPermissionDenied)
+        else -> state to emptyList()
+    }
+
+    /**
+     * A new network: rounds and failures counted on the old one are forgotten and the hold text goes
+     * (the next check decides again). The controller also brings a pending long recheck forward.
+     */
+    private fun onNetworkChanged(state: MachineState): Pair<MachineState, List<PolicyCommand>> {
+        if (isTerminal(state)) return state to emptyList()
+        val snapshot = state.snapshot.copy(hold = null, nextCheckAtMs = null)
+        return state.copy(snapshot = snapshot, silentRounds = 0, consecutiveFailures = 0) to emptyList()
+    }
+
+    /** The checked replacement cannot be started: it rests, the session goes back to its config and waits. */
+    private fun onSwitchFailed(
+        state: MachineState,
+        context: MachineContext,
+        event: PolicyEvent.SwitchFailed,
+    ): Pair<MachineState, List<PolicyCommand>> {
+        // Only the switch the machine ordered; a start the user asked for meanwhile is not undone.
+        if (state.snapshot.state != ConnectionState.CONNECTING) return state to emptyList()
+        state.snapshot.activeOutboundId?.takeIf { it != event.backToOutboundId }?.let { context.penalties.fail(it, context.nowMs()) }
+        val back = state.copy(
+            snapshot = state.snapshot.copy(activeOutboundId = event.backToOutboundId, banner = null),
+            checking = false,
+        )
+        return recheckLater(
+            back,
+            context,
+            event.backToOutboundId,
+            state.consecutiveFailures.coerceAtLeast(1),
+            ConnectionCause.FailoverExhausted(context.group?.name ?: "?"),
+        )
     }
 
     private fun start(
@@ -163,8 +207,11 @@ class ConnectionPolicyMachine {
         }
         val next = state.copy(proxiedReplies = proxied ?: state.proxiedReplies, snapshot = snapshot)
         if (!recovered) return next to emptyList()
-        return if (state.snapshot.state == ConnectionState.CONNECTED) worked(next, context) else
+        return if (state.snapshot.state == ConnectionState.CONNECTED) {
+            worked(next, context)
+        } else {
             next.copy(consecutiveFailures = 0) to emptyList()
+        }
     }
 
     private fun verified(state: MachineState, context: MachineContext): Pair<MachineState, List<PolicyCommand>> =
@@ -287,10 +334,10 @@ class ConnectionPolicyMachine {
      * folder configs that do not rest are checked for real, and only one that answered replaces this one.
      */
     private fun onTunnelDead(state: MachineState, context: MachineContext): Pair<MachineState, List<PolicyCommand>> {
-        if (state.snapshot.state != ConnectionState.CONNECTED || state.checking) {
+        val current = state.snapshot.activeOutboundId
+        if (state.snapshot.state != ConnectionState.CONNECTED || state.checking || current == null) {
             return state to emptyList()
         }
-        val current = state.snapshot.activeOutboundId ?: return state to emptyList()
         val now = context.nowMs()
         val candidates = freeCandidates(context, current, now)
         val decision = LinkJudge.decide(
@@ -300,17 +347,19 @@ class ConnectionPolicyMachine {
             msSinceNetworkChange = context.msSinceNetworkChange(),
             hasAlternative = candidates.isNotEmpty(),
         )
+        val hold = state.snapshot.hold ?: LinkHold.JAMMED
         if (decision == LinkDecision.HOLD && context.msSinceNetworkChange() in 0 until LinkJudge.SETTLE_MS) {
             // The network appeared a moment ago: nothing is blamed on the config yet.
-            val held = state.snapshot.copy(hold = state.snapshot.hold ?: LinkHold.JAMMED, nextCheckAtMs = now + SETTLE_RECHECK_MS)
+            val held = state.snapshot.copy(hold = hold, nextCheckAtMs = now + SETTLE_RECHECK_MS)
             return state.copy(snapshot = held) to listOf(PolicyCommand.HoldCheck(SETTLE_RECHECK_MS))
         }
         context.penalties.fail(current, now)
-        if (decision == LinkDecision.SWITCH_NOW) {
-            val held = state.snapshot.copy(hold = state.snapshot.hold ?: LinkHold.JAMMED, nextCheckAtMs = null)
-            return state.copy(snapshot = held, checking = true) to listOf(PolicyCommand.ProbeGroup(candidates))
+        return if (decision == LinkDecision.SWITCH_NOW) {
+            val held = state.snapshot.copy(hold = hold, nextCheckAtMs = null)
+            state.copy(snapshot = held, checking = true) to listOf(PolicyCommand.ProbeGroup(candidates))
+        } else {
+            silentRound(state, context, now)
         }
-        return silentRound(state, context, now)
     }
 
     /** Nothing answered this round while the core runs: hold, count the round, look again later. */

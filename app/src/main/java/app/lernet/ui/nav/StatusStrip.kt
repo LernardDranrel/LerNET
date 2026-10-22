@@ -52,6 +52,10 @@ internal fun stripStatus(snapshot: ConnectionSnapshot, profileName: String?, exp
         ExpertSessionPhase.FAILED -> return StripStatus(stringResource(R.string.status_expert_failed), StripTone.BAD)
         else -> Unit
     }
+    // Same order as Windows: no config left, but the tunnel is held so nothing leaks.
+    if (snapshot.tried != null && snapshot.state != ConnectionState.DISCONNECTED) {
+        return StripStatus(stringResource(R.string.status_no_link_held), StripTone.WAIT)
+    }
     return when (snapshot.state) {
         ConnectionState.CONNECTED -> when (snapshot.hold) {
             LinkHold.JAMMED -> StripStatus(stringResource(R.string.status_jammed), StripTone.WAIT)

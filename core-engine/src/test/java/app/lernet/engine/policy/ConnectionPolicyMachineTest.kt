@@ -462,6 +462,59 @@ class ConnectionPolicyMachineTest {
     }
 
     @Test
+    fun aNewNetworkForgetsTheSilentRounds() {
+        var now = 0L
+        val context = ctx(nowMs = { now })
+        var state = connected()
+        repeat(3) {
+            now += 60_000
+            state = machine.reduce(state, context, tunnelDead()).first
+        }
+        assertThat(state.snapshot.hold).isEqualTo(LinkHold.ALL_SILENT)
+        val (next, commands) = machine.reduce(state, context, PolicyEvent.NetworkChanged)
+        assertThat(commands).isEmpty()
+        assertThat(next.snapshot.state).isEqualTo(ConnectionState.CONNECTED)
+        assertThat(next.snapshot.hold).isNull()
+        assertThat(next.silentRounds).isEqualTo(0)
+        // On the new network the count starts again: the next silent round is round 1 with a short pause.
+        now += 60_000
+        val (afterDead, again) = machine.reduce(next, context, tunnelDead())
+        assertThat(afterDead.silentRounds).isEqualTo(1)
+        assertThat(afterDead.snapshot.hold).isEqualTo(LinkHold.JAMMED)
+        assertThat(again.filterIsInstance<PolicyCommand.HoldCheck>().single().delayMs).isAtMost(72_000L)
+    }
+
+    @Test
+    fun aNetworkChangeDoesNotWakeAStoppedSession() {
+        val stopped = machine.reduce(connected(), ctx(), PolicyEvent.UserDisconnect).first
+        val (next, commands) = machine.reduce(stopped, ctx(), PolicyEvent.NetworkChanged)
+        assertThat(next.snapshot.state).isEqualTo(ConnectionState.DISCONNECTED)
+        assertThat(commands).isEmpty()
+    }
+
+    @Test
+    fun aReplacementThatCannotStartKeepsTheVpnOnTheOldConfig() {
+        val penalties = ConfigPenalties(random = Random(1))
+        val context = ctx(FailoverSettings(true, "g1"), sampleGroup(), penalties)
+        val checking = machine.reduce(connected(), context, tunnelDead()).first
+        val switching = machine.reduce(checking, context, PolicyEvent.ProbeCompleted(setOf("out-b"), setOf("out-b"))).first
+        assertThat(switching.snapshot.activeOutboundId).isEqualTo("out-b")
+        val (next, commands) = machine.reduce(switching, context, PolicyEvent.SwitchFailed("out-a"))
+        assertThat(next.snapshot.state).isEqualTo(ConnectionState.RECONNECTING)
+        assertThat(next.snapshot.activeOutboundId).isEqualTo("out-a")
+        assertThat(commands.filterIsInstance<PolicyCommand.StopEngine>()).isEmpty()
+        assertThat(commands.filterIsInstance<PolicyCommand.ScheduleRetry>().single().outboundId).isEqualTo("out-a")
+        assertThat(penalties.isResting("out-b", 0L)).isTrue()
+    }
+
+    @Test
+    fun aLateSwitchFailureDoesNotUndoTheUsersOwnStart() {
+        val (next, commands) = machine.reduce(connected(), ctx(), PolicyEvent.SwitchFailed("out-z"))
+        assertThat(next.snapshot.activeOutboundId).isEqualTo("out-a")
+        assertThat(commands).isEmpty()
+    }
+
+    @Test
     fun aTunnelFailureRightAfterANetworkChangeBlamesNothing() {
         val penalties = ConfigPenalties(random = Random(1))
         val context = ctx(FailoverSettings(true, "g1"), sampleGroup(), penalties, sinceNetworkChange = 1_000L)

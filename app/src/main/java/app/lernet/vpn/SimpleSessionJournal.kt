@@ -35,8 +35,10 @@ internal data class StoredSimpleSession(
     val dnsPolicy: DnsPolicy,
     val xmuxChannels: Int = app.lernet.engine.compile.XhttpMode.DEFAULT_CHANNELS,
 ) {
-    fun config() = SimpleSessionConfig(profileId, outboundId, compiledJson, mode, logLevel,
-        EngineDefaults(tunMtu = tunMtu, xmuxChannels = xmuxChannels, directDnsServer = directDnsServer), proxyTag, dnsPolicy)
+    fun config() = SimpleSessionConfig(
+        profileId, outboundId, compiledJson, mode, logLevel,
+        EngineDefaults(tunMtu = tunMtu, xmuxChannels = xmuxChannels, directDnsServer = directDnsServer), proxyTag, dnsPolicy
+    )
 }
 
 /** A single atomic journal in noBackupFilesDir. Never exported or logged. */
@@ -49,7 +51,8 @@ internal class SimpleSessionJournal(private val path: Path) {
         val record = config?.takeIf { it.mode == RunMode.FULL_VPN }?.let {
             StoredSimpleSession(UUID.randomUUID().toString(), it.profileId, it.outboundId, it.compiledJson,
                 it.mode, it.logLevel, it.defaults.tunMtu, directDnsServer = it.defaults.directDnsServer,
-                proxyTag = it.proxyTag, dnsPolicy = it.dnsPolicy, xmuxChannels = it.defaults.xmuxChannels)
+                proxyTag = it.proxyTag, dnsPolicy = it.dnsPolicy, xmuxChannels = it.defaults.xmuxChannels
+            )
         }
         Files.createDirectories(path.parent)
         val temp = path.resolveSibling("${path.fileName}.tmp")

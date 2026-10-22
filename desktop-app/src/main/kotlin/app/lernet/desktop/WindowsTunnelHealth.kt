@@ -163,6 +163,7 @@ internal object WindowsRouteInspector {
  */
 internal object WindowsTunnelHealth {
     private const val KEEP_ALIVE_MIN = 10L
+
     /** Whole-request limit = step limit + 5 s: 15 s steps give the same 20 s as Android ([TunnelProbeSchedule.CALL_TIMEOUT_MS]). */
     private const val CALL_EXTRA_MS = TunnelProbeSchedule.CALL_TIMEOUT_MS - TunnelProbeSchedule.CHECK_TIMEOUT_MS
     private var cachedKey: Any? = null
@@ -197,9 +198,13 @@ internal object WindowsTunnelHealth {
         cachedKey = null
     }
 
-    fun check(url: String, mode: RunMode, timeoutMs: Int = TunnelProbeSchedule.CHECK_TIMEOUT_MS.toInt(),
-              routeCheck: (String) -> String? = WindowsRouteInspector::check,
-              proxyAccess: LocalProxyAccess? = null): TunnelHealthResult {
+    fun check(
+        url: String,
+        mode: RunMode,
+        timeoutMs: Int = TunnelProbeSchedule.CHECK_TIMEOUT_MS.toInt(),
+        routeCheck: (String) -> String? = WindowsRouteInspector::check,
+        proxyAccess: LocalProxyAccess? = null
+    ): TunnelHealthResult {
         if (mode == RunMode.FULL_VPN) {
             routeCheck(url)?.let { return TunnelHealthResult(error = it, routeConflict = true) }
         }

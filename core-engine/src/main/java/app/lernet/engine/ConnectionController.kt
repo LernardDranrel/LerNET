@@ -104,10 +104,13 @@ class ConnectionController(
     private var engineReady = false
     private var machineState = MachineState.idle()
     private var context = machineContext(ReconnectSettings(), app.lernet.engine.policy.FailoverSettings(), null)
+
     /** Server+SNI of every config this session knows, for the handshake budget. */
     private val outboundKeys = java.util.concurrent.ConcurrentHashMap<String, HandshakeKey>()
+
     /** Folder configs carried in the running core only to be checked: outbound id → tag. */
     @Volatile private var standbyTags: Map<String, String> = emptyMap()
+
     /** The core refused the config with standby outbounds once: run without them for this session. */
     @Volatile private var standbyRefused = false
     private var retryJob: Job? = null
@@ -221,6 +224,12 @@ class ConnectionController(
 
     /** Takes one new connection to the active server from the budget; false = not now. */
     fun takeActiveBudget(): Boolean = activeKey()?.let { handshakeBudget.tryTake(it, clock()) } ?: true
+
+    /** How long [key]'s budget still forbids one more new connection (a check of another server). */
+    fun budgetWaitMs(key: HandshakeKey): Long = handshakeBudget.waitMs(key, clock())
+
+    /** Takes one new connection to [key]'s server from the budget; false = not now. */
+    fun takeBudget(key: HandshakeKey): Boolean = handshakeBudget.tryTake(key, clock())
 
     private fun activeKey(): HandshakeKey? = _snapshot.value.activeOutboundId?.let(outboundKeys::get)
 
@@ -429,8 +438,9 @@ class ConnectionController(
         return group.outboundIds.filter { it != activeOutboundId }.take(ConfigAssembler.MAX_STANDBY).mapNotNull { id ->
             val outbound = try {
                 resolve(id)?.first?.selectedOutbound()
-            } catch (error: Exception) {
-                if (error is CancellationException) throw error
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
                 null
             } ?: return@mapNotNull null
             HandshakeKey.fromOutboundJson(outbound.singBoxJson)?.let { outboundKeys[id] = it }
@@ -599,6 +609,8 @@ class ConnectionController(
         networkChangedAtMs = clock()
         // A new network may let resting configs through: they may be tried once more (the level stays).
         if (penalties.onNetworkChanged(clock())) LerNetLog.i(TAG, "network changed: resting configs may be tried again")
+        // Rounds without an answer counted on the old network say nothing about this one.
+        mutex.withLock { dispatchLocked(PolicyEvent.NetworkChanged) }
         // Bytes that stalled while the network was gone say nothing about filters.
         blockingDetector.reset()
         // Results from the previous network say nothing about this one.
@@ -678,7 +690,8 @@ class ConnectionController(
         when (command) {
             is PolicyCommand.StartEngine -> {
                 engineReady = false
-                if (pendingOutboundId != null && command.outboundId != pendingOutboundId) {
+                val previous = pendingOutboundId
+                if (previous != null && command.outboundId != previous) {
                     failoverSwitchJob?.cancel()
                     failoverSwitchJob = scope.launch {
                         val target = try {
@@ -689,7 +702,8 @@ class ConnectionController(
                             null
                         }
                         if (target == null) {
-                            dispatch(PolicyEvent.EngineFailed(ConnectionCause.FailoverExhausted(context.group?.name ?: "?")))
+                            // The VPN stays: back to the running config, look again after a pause.
+                            dispatch(PolicyEvent.SwitchFailed(previous))
                         } else {
                             if (machineState.snapshot.state != ConnectionState.CONNECTING ||
                                 machineState.snapshot.activeOutboundId != command.outboundId
@@ -796,9 +810,11 @@ class ConnectionController(
                     // The config that just failed goes first, with the reason the machine recorded.
                     _snapshot.value.let { failed ->
                         val name = failed.activeProfileId?.let(profileNames::get)
-                        if (name != null) attempts += app.lernet.engine.policy.FailoverAttempt(
-                            name, failedReason(failed.cause ?: ConnectionCause.TunnelHealthFailed("")), clock(),
-                        )
+                        if (name != null) {
+                            attempts += app.lernet.engine.policy.FailoverAttempt(
+                                name, failedReason(failed.cause ?: ConnectionCause.TunnelHealthFailed("")), clock(),
+                            )
+                        }
                     }
                     if (resolve != null) {
                         // Backups verified by the background checks go first: the switch takes seconds.
@@ -826,11 +842,13 @@ class ConnectionController(
                         }
                     }
                     dispatch(PolicyEvent.ProbeCompleted(winner?.let(::setOf) ?: emptySet(), checked))
-                    if (winner == null && attempts.size > 0) mutex.withLock {
-                        val wait = _snapshot.value.nextCheckAtMs?.let { (it - clock()).coerceAtLeast(0L) }?.let(RecheckJitter::label)
-                        _snapshot.value = _snapshot.value.copy(
-                            tried = app.lernet.engine.policy.FailoverReport.merge(_snapshot.value.tried, null, attempts, wait),
-                        )
+                    if (winner == null && attempts.size > 0) {
+                        mutex.withLock {
+                            val wait = _snapshot.value.nextCheckAtMs?.let { (it - clock()).coerceAtLeast(0L) }?.let(RecheckJitter::label)
+                            _snapshot.value = _snapshot.value.copy(
+                                tried = app.lernet.engine.policy.FailoverReport.merge(_snapshot.value.tried, null, attempts, wait),
+                            )
+                        }
                     }
                 }
             }
@@ -875,8 +893,9 @@ class ConnectionController(
         if (tag != null) {
             val l7 = try {
                 engine.probeOutbound(tag, L7_PROBE_URL, CANDIDATE_CHECK_TIMEOUT_MS)
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Exception) {
-                if (error is CancellationException) throw error
                 Result.failure(error)
             }
             LerNetLog.i(TAG, "candidate $outboundId check via $tag ok=${l7.isSuccess}")
@@ -1091,14 +1110,7 @@ class ConnectionController(
                 ) {
                     return@launch
                 }
-                val reason = synchronized(schedule) { schedule.takeDue(healthClockMs) } ?: continue
-                // A check opens a connection through the active server: it must fit the handshake budget.
-                if (!takeActiveBudget()) {
-                    val wait = activeBudgetWaitMs().coerceAtLeast(HEALTH_TICK_MS)
-                    LerNetLog.i(TAG, "tunnel check reason=$reason deferred ${wait}ms: handshake budget")
-                    synchronized(schedule) { schedule.defer(reason, healthClockMs + wait) }
-                    continue
-                }
+                val reason = dueWithinBudget(schedule) ?: continue
                 val result = try {
                     probe()
                 } catch (error: CancellationException) {
@@ -1132,6 +1144,19 @@ class ConnectionController(
                 }
             }
         }
+    }
+
+    /**
+     * The reason of a tunnel check that is due now and fits the handshake budget (a check opens a
+     * connection through the active server); a due check over budget is deferred until it fits.
+     */
+    private fun dueWithinBudget(schedule: TunnelProbeSchedule): TunnelProbeSchedule.Reason? {
+        val reason = synchronized(schedule) { schedule.takeDue(healthClockMs) } ?: return null
+        if (takeActiveBudget()) return reason
+        val wait = activeBudgetWaitMs().coerceAtLeast(HEALTH_TICK_MS)
+        LerNetLog.i(TAG, "tunnel check reason=$reason deferred ${wait}ms: handshake budget")
+        synchronized(schedule) { schedule.defer(reason, healthClockMs + wait) }
+        return null
     }
 
     private suspend fun noteBlocking(sign: app.lernet.engine.policy.BlockingSign?) {
@@ -1175,13 +1200,14 @@ class ConnectionController(
                     return@launch
                 }
                 val phase = dnsHealth.phase
-                if (dnsHealth.onDeadline() == DnsHealthAction.Hold) continue
+                val held = dnsHealth.onDeadline() == DnsHealthAction.Hold
                 // Never a restart. Only real DNS failures after a working start ask for a tunnel check;
                 // no DNS at all (idle phone, screen off) proves nothing.
-                if (phase != app.lernet.engine.policy.DnsHealthPhase.RecoveringFromFail) continue
-                CrashTrail.mark("dns health hint phase=$phase")
-                LerNetLog.w(TAG, "dns health: dns failed and no dns query ok for ${dnsHealth.deadlineMs}ms: asking for a tunnel check")
-                dispatch(PolicyEvent.DnsHealthTimeout)
+                if (!held && phase == app.lernet.engine.policy.DnsHealthPhase.RecoveringFromFail) {
+                    CrashTrail.mark("dns health hint phase=$phase")
+                    LerNetLog.w(TAG, "dns health: dns failed and no dns query ok for ${dnsHealth.deadlineMs}ms: asking for a tunnel check")
+                    dispatch(PolicyEvent.DnsHealthTimeout)
+                }
             }
         }
     }
@@ -1432,6 +1458,7 @@ class ConnectionController(
         private const val ACTIVE_PROBE_TIMEOUT_MS = 8_000
         private const val UNDERLAY_RETURN_RETRY_MS = 1_000L
         const val L7_PROBE_URL = "https://cp.cloudflare.com/generate_204"
+
         /** One real check of a folder config: a jammed handshake takes 5–20 s ([TunnelProbeSchedule.CHECK_TIMEOUT_MS]). */
         const val CANDIDATE_CHECK_TIMEOUT_MS = 15_000
         private const val CANDIDATE_BUDGET_WAIT_MS = app.lernet.engine.policy.LinkJudge.CANDIDATE_BUDGET_WAIT_MS

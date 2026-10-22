@@ -179,7 +179,10 @@ private fun HomeBody(
             connection = snapshot.state,
             status = when {
                 snapshot.waitingForNetwork -> stringResource(R.string.state_waiting_network)
-                snapshot.hold == LinkHold.ALL_SILENT -> stringResource(R.string.state_hold_all_silent)
+                snapshot.hold == LinkHold.ALL_SILENT -> snapshot.nextCheckAtMs?.let { at ->
+                    val left = app.lernet.engine.policy.RecheckJitter.label((at - System.currentTimeMillis()).coerceAtLeast(0L))
+                    stringResource(R.string.state_hold_all_silent_next, left)
+                } ?: stringResource(R.string.state_hold_all_silent)
                 snapshot.hold == LinkHold.JAMMED -> stringResource(R.string.state_hold_jammed)
                 snapshot.tried != null -> stringResource(R.string.state_holding_no_config)
                 else -> phaseLabel(snapshot.state)

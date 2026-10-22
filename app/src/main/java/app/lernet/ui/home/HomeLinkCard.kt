@@ -116,6 +116,15 @@ internal fun LinkCard(state: HomeUiState, onIntent: (HomeIntent) -> Unit, hopSna
                 modifier = Modifier.heightIn(min = 48.dp),
             ) { Text(stringResource(if (running) R.string.home_latency_checking else R.string.home_link_check)) }
         }
+        // Resilience: when the check budget is spent, say when the next check is allowed.
+        probe?.budgetWaitMs?.let { wait ->
+            Text(
+                stringResource(R.string.probe_budget_wait, app.lernet.engine.policy.BudgetNotice.seconds(wait)),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("home_budget_wait"),
+            )
+        }
         LinkRow(
             stringResource(R.string.home_link_internet),
             when {

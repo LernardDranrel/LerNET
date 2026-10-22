@@ -115,8 +115,11 @@ class SettingsViewModel @Inject constructor(
                 )
                 is SettingsIntent.SetXmuxSingleChannel -> settingsStore.setEngineDefaults(
                     current.engineDefaults.copy(
-                        xmuxChannels = if (intent.enabled) app.lernet.engine.compile.XhttpMode.SINGLE_CHANNEL
-                        else app.lernet.engine.compile.XhttpMode.DEFAULT_CHANNELS,
+                        xmuxChannels = if (intent.enabled) {
+                            app.lernet.engine.compile.XhttpMode.SINGLE_CHANNEL
+                        } else {
+                            app.lernet.engine.compile.XhttpMode.DEFAULT_CHANNELS
+                        },
                     ),
                 )
                 is SettingsIntent.SetTlsRecordFragment ->

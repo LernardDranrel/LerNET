@@ -50,6 +50,7 @@ import app.lernet.engine.compile.ConfigNotes
 import app.lernet.engine.compile.DnsDraft
 import app.lernet.engine.compile.DnsServerDraft
 import app.lernet.engine.compile.FieldView
+import app.lernet.engine.compile.TlsHandshake
 import app.lernet.engine.compile.TruthFieldId
 import app.lernet.ui.components.PanelCard
 import app.lernet.ui.icons.LerNetSymbols
@@ -268,6 +269,18 @@ private fun DisguiseCard(
         if (reality != null) {
             ConfigOverrideRow(reality, stringResource(R.string.cfg_reality))
         }
+        if (state.hasTls) {
+            // Shown as written in the profile: «chrome» from an old import stays until changed here.
+            val defaultLabel = stringResource(R.string.cfg_fingerprint_default, TlsHandshake.DEFAULT_FINGERPRINT)
+            ChoiceField(
+                label = stringResource(R.string.cfg_fingerprint),
+                value = state.fingerprint,
+                options = (TlsHandshake.CHOICES + state.fingerprint).distinct(),
+                onSelect = { onIntent(ConfigEditorIntent.Fingerprint(it)) },
+                hint = stringResource(R.string.cfg_fingerprint_help),
+                blankLabel = defaultLabel,
+            )
+        }
         if (state.hasTransport) {
             OutlinedTextField(
                 value = state.path,
@@ -443,19 +456,27 @@ private fun EngineCard(state: ConfigEditorUiState, onIntent: (ConfigEditorIntent
 }
 
 @Composable
-private fun ChoiceField(label: String, value: String, options: List<String>, onSelect: (String) -> Unit, hint: String) {
+private fun ChoiceField(
+    label: String,
+    value: String,
+    options: List<String>,
+    onSelect: (String) -> Unit,
+    hint: String,
+    blankLabel: String? = null,
+) {
+    val blank = blankLabel ?: stringResource(R.string.cfg_system_defined)
     var expanded by remember { mutableStateOf(false) }
     Column {
         Text(label, style = MaterialTheme.typography.labelLarge)
         Box {
             OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
-                Text(value.ifBlank { stringResource(R.string.cfg_system_defined) }, modifier = Modifier.weight(1f))
+                Text(value.ifBlank { blank }, modifier = Modifier.weight(1f))
                 Icon(LerNetSymbols.expandMore(), contentDescription = null)
             }
             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                 options.forEach { option ->
                     DropdownMenuItem(
-                        text = { Text(option.ifBlank { stringResource(R.string.cfg_system_defined) }) },
+                        text = { Text(option.ifBlank { blank }) },
                         onClick = {
                             onSelect(option)
                             expanded = false

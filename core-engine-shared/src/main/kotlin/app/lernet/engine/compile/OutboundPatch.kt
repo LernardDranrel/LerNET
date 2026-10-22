@@ -18,6 +18,10 @@ data class OwnedOutbound(
     val hasTransport: Boolean = false,
     val transportType: String = "",
     val xmuxConcurrency: String = "",
+    /** TLS outbound (uTLS fingerprint applies). */
+    val hasTls: Boolean = false,
+    /** uTLS fingerprint written in the profile; "" = LerNET's default ([TlsHandshake.DEFAULT_FINGERPRINT]). */
+    val fingerprint: String = "",
 ) {
     companion object {
         const val REALITY_PRESENT = "present"
@@ -48,15 +52,27 @@ object OutboundPatch {
             hasTransport = transport != null,
             transportType = transport?.let { text(it, "type") }.orEmpty(),
             xmuxConcurrency = xmux?.let { text(it, "max_concurrency") }.orEmpty(),
+            hasTls = tls != null && tls["enabled"]?.jsonPrimitive?.contentOrNull != "false",
+            fingerprint = (tls?.get("utls") as? JsonObject)?.let { text(it, "fingerprint") }.orEmpty(),
         )
     }
 
-    fun write(singBoxJson: String, server: String, port: Int, sni: String, path: String, mode: String): String {
+    /** [fingerprint]: null keeps what the profile has, "" falls back to the default, else that uTLS fingerprint. */
+    fun write(
+        singBoxJson: String,
+        server: String,
+        port: Int,
+        sni: String,
+        path: String,
+        mode: String,
+        fingerprint: String? = null,
+    ): String {
         val root = parse(singBoxJson) ?: return singBoxJson
         val next = root.toMutableMap()
         next["server"] = JsonPrimitive(server.trim())
         next["server_port"] = JsonPrimitive(port)
         writeTls(root, next, sni)
+        if (fingerprint != null) writeFingerprint(next, fingerprint.trim().lowercase())
         writeTransport(root, next, path, mode)
         return JsonObject(next).toString()
     }
@@ -67,6 +83,20 @@ object OutboundPatch {
         val tlsNext = (tls?.toMutableMap() ?: mutableMapOf()).apply {
             put("server_name", JsonPrimitive(sni.trim()))
         }
+        next["tls"] = JsonObject(tlsNext)
+    }
+
+    private fun writeFingerprint(next: MutableMap<String, JsonElement>, fingerprint: String) {
+        val tls = next["tls"] as? JsonObject ?: return
+        val utls = (tls["utls"] as? JsonObject)?.toMutableMap() ?: mutableMapOf()
+        if (fingerprint.isBlank()) {
+            utls.remove("fingerprint")
+        } else {
+            utls["enabled"] = JsonPrimitive(true)
+            utls["fingerprint"] = JsonPrimitive(fingerprint)
+        }
+        val tlsNext = tls.toMutableMap()
+        if (utls.isEmpty()) tlsNext.remove("utls") else tlsNext["utls"] = JsonObject(utls)
         next["tls"] = JsonObject(tlsNext)
     }
 

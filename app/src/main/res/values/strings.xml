@@ -15,8 +15,9 @@
     <string name="state_reconnecting">Переподключаемся…</string>
     <string name="state_waiting_network">Нет сети · VPN держим, ждём, когда сеть вернётся</string>
     <!-- Same text as LinkJudge.holdMessage (Windows). Nothing restarts while these are shown. -->
-    <string name="state_hold_jammed">Связь глушат · держим соединение, ничего не перезапускаем</string>
-    <string name="state_hold_all_silent">Сеть есть, но ни один сервер не отвечает · возможно, оператор оставил только разрешённые сайты · проверяем изредка</string>
+    <string name="state_hold_jammed">Связь глушат · держим подключение</string>
+    <string name="state_hold_all_silent">Сеть есть, но серверы не отвечают · похоже, открыты только разрешённые сайты · проверяем изредка</string>
+    <string name="state_hold_all_silent_next">Сеть есть, но серверы не отвечают · похоже, открыты только разрешённые сайты · проверим снова через %1$s</string>
     <string name="state_failed">Не удалось подключиться</string>
     <string name="active_profile">Конфиг: %1$s</string>
     <string name="no_profile">Конфиг не выбран</string>
@@ -75,6 +76,9 @@
     <string name="drawer_drag_target_hint">Наведите на папку или конфиг</string>
     <string name="drawer_move_selected">Перемещение: выберите место</string>
     <string name="drawer_probe_running">Проверяем…</string>
+    <!-- Same words as BudgetNotice (Windows): the check waits for the handshake budget. -->
+    <string name="probe_budget_wait_short">Проверю через %1$d с, чтобы не привлекать внимание блокировщика</string>
+    <string name="probe_budget_wait">Проверю через %1$d с, чтобы не привлекать внимание блокировщика · можете не ждать, результат появится здесь</string>
     <string name="drawer_folder_probe">Отвечают: %1$d из %2$d</string>
     <string name="drawer_folder_checking">Проверка: %1$d из %2$d</string>
     <string name="drawer_move_up">Выше</string>
@@ -320,6 +324,9 @@
     <string name="cfg_server">Сервер</string>
     <string name="cfg_port">Порт</string>
     <string name="cfg_sni">SNI</string>
+    <string name="cfg_fingerprint">Отпечаток TLS</string>
+    <string name="cfg_fingerprint_default">По умолчанию LerNET · %1$s</string>
+    <string name="cfg_fingerprint_help">Каким браузером представляется подключение. Если сервер не отвечает, попробуйте другой; «По умолчанию» подойдёт почти всегда.</string>
     <string name="cfg_path">Путь</string>
     <string name="cfg_reality">Reality</string>
     <string name="cfg_reality_set">Ключ задан</string>

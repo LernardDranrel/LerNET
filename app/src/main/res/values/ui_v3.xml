@@ -35,8 +35,9 @@
     <string name="status_reconnecting">Переподключаемся…</string>
     <string name="status_off">Отключено</string>
     <string name="status_failed">Не удалось подключиться</string>
-    <string name="status_hold">Нет связи · VPN держим</string>
-    <string name="status_jammed">Связь глушат · держим соединение</string>
+    <string name="status_no_link_held">Нет связи · VPN держим</string>
+    <string name="status_hold">Серверы не отвечают · VPN держим</string>
+    <string name="status_jammed">Связь глушат · держим подключение</string>
     <string name="status_no_reply">Подключено · нет ответа</string>
     <string name="status_expert_running">Своя схема работает · %1$s</string>
     <string name="status_expert_starting">Своя схема включается…</string>

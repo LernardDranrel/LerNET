@@ -100,6 +100,13 @@ import java.awt.datatransfer.StringSelection
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.coroutines.delay
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.TooltipArea
+import androidx.compose.foundation.layout.RowScope
 
 private val background = Color(0xFF0B1019)
 private val panel = Color(0xFF151D2B)
@@ -466,6 +473,11 @@ internal fun workspaceStatus(expertUi: ExpertUiState?, tunnel: TunnelSnapshot, u
     val holding = ui.tried != null && tunnel.status != TunnelStatus.STOPPED
     return when {
         holding -> WorkspaceStatus("Нет связи · VPN держим", StatusTone.HOLD)
+        // The same short hold words as the Android strip; the full sentence stays on the main screen.
+        tunnel.status == TunnelStatus.RUNNING && ui.hold == app.lernet.engine.policy.LinkHold.JAMMED ->
+            WorkspaceStatus("Связь глушат · держим подключение", StatusTone.HOLD)
+        tunnel.status == TunnelStatus.RUNNING && ui.hold == app.lernet.engine.policy.LinkHold.ALL_SILENT ->
+            WorkspaceStatus("Серверы не отвечают · VPN держим", StatusTone.HOLD)
         tunnel.status == TunnelStatus.RUNNING && ui.healthFailures >= 2 -> WorkspaceStatus("Подключено · нет ответа", StatusTone.PROBLEM)
         tunnel.status == TunnelStatus.RUNNING -> WorkspaceStatus(listOfNotNull("Подключено", profile).joinToString(" · "), StatusTone.OK)
         ui.busy || tunnel.status == TunnelStatus.STARTING -> WorkspaceStatus("Подключаемся…", StatusTone.PROGRESS)
@@ -514,7 +526,6 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
     var newGroupOpen by remember { mutableStateOf(false) }
     var createMenu by remember { mutableStateOf(false) }
     var routeOwnerId by rememberSaveable { mutableStateOf<String?>(null) }
-    var traceDetailsRequest by remember { mutableIntStateOf(0) }
     var exportRequest by remember { mutableStateOf<ExportSelection?>(null) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
     // Windows up to about 1100 px get a narrower config column with one-line rows.
@@ -523,9 +534,6 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
         // Mockup 03: the sidebar is not a menu any more; rules, journal and settings open from the top-right buttons.
         // Mockup 03: folders and configs live in a permanent left column (the desktop twin of the phone drawer).
         DesktopWorkspaceSidebar(onOpenNetwork, width = if (compact) 248.dp else 316.dp) {
-            if (tab != Tab.PROFILES) {
-                WorkspaceNavigationItem("← Главная", false, { tab = Tab.PROFILES }) { NavSymbol(Tab.PROFILES, false) }
-            }
             ConfigList(ui.saved, tunnel, ui.busy, ui.probes, controller, compact = compact,
                 onImport = { groupId -> importGroupId = groupId; importOpen = true },
                 onGroupRoutes = { groupId -> routeOwnerId = "grp_$groupId"; tab = Tab.ROUTES },
@@ -572,10 +580,11 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
                         })
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    listOf(Tab.ROUTES, Tab.DIAGNOSTICS, Tab.SETTINGS).forEach { item ->
+                    // Audit N10/G5: ordinary navigation; the open page is not a toggle and «Правила» keeps the chosen owner.
+                    Tab.entries.forEach { item ->
                         val chosen = tab == item
                         OutlinedButton(
-                            onClick = { if (item == Tab.ROUTES) routeOwnerId = null; tab = if (chosen) Tab.PROFILES else item },
+                            onClick = { if (!chosen) tab = item },
                             colors = if (chosen) ButtonDefaults.outlinedButtonColors(containerColor = desktopColors.secondaryContainer)
                                 else ButtonDefaults.outlinedButtonColors(),
                             modifier = Modifier.testTag("top_${item.name.lowercase()}"),
@@ -592,48 +601,46 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
                 Text(ui.message, color = if (ui.connectionError != null) desktopColors.error else muted, maxLines = 2)
                 if (ui.networkWarning.isNotBlank()) Text(ui.networkWarning, color = Color(0xFFF1CC80), fontSize = 12.sp, maxLines = 3)
             ui.guardProblem?.let { Text(it, color = desktopColors.error, fontSize = 12.sp, maxLines = 3) }
+            // Audit N15: a failure is an InfoBar on the page, not a window over it.
+            ui.connectionError?.let { error ->
+                Spacer(Modifier.height(10.dp))
+                InfoBar("Не удалось подключиться", app.lernet.engine.text.UserText.clean(error.message, error.message), desktopColors.error,
+                    Modifier.testTag("connection_error_bar")) {
+                    TextButton(onClick = {
+                        controller.dismissConnectionError()
+                        if (error.routeOwnerId != null) { routeOwnerId = error.routeOwnerId; tab = Tab.ROUTES } else tab = Tab.DIAGNOSTICS
+                    }) { Text(if (error.routeOwnerId != null) "Открыть правила" else "Журнал запросов") }
+                    TextButton(onClick = { copyToClipboard(error.message) }) { Text("Скопировать") }
+                    TextButton(onClick = controller::dismissConnectionError) { Text("Закрыть") }
+                }
+            }
+            // Audit N14: deleting a config can be undone, as on the phone.
+            val deleted by controller.deleted.collectAsState()
+            deleted?.let { item ->
+                LaunchedEffect(item) { delay(10_000); controller.dismissDeleted() }
+                Spacer(Modifier.height(10.dp))
+                InfoBar("Конфиг «${item.profile.name}» удалён", null, muted, Modifier.testTag("deleted_bar")) {
+                    TextButton(onClick = controller::undoDelete, modifier = Modifier.testTag("undo_delete")) { Text("Отменить") }
+                    TextButton(onClick = controller::dismissDeleted) { Text("Закрыть") }
+                }
+            }
             Spacer(Modifier.height(18.dp))
             when (tab) {
                 Tab.PROFILES -> ProfileHome(ui.saved, tunnel, ui.busy, ui.probes, ui.tunnelLatencyMs, trace, controller,
                     detail = homeDetail(ui, tunnel, holding),
-                    onImport = { groupId -> importGroupId = groupId; importOpen = true }, onDiagnostics = { traceDetailsRequest++; tab = Tab.DIAGNOSTICS },
+                    onImport = { groupId -> importGroupId = groupId; importOpen = true },
                     localProxy = ui.localProxy.takeIf { tunnel.status == TunnelStatus.RUNNING },
-                    tried = ui.tried.takeIf { holding }, history = connectionHistory,
+                    tried = ui.tried.takeIf { holding }, diagnostics = diagnostics,
                     onOpenRules = { owner -> routeOwnerId = owner; tab = Tab.ROUTES },
                     onOpenJournal = { tab = Tab.DIAGNOSTICS })
                 Tab.ROUTES -> DesktopRoutes(ui.saved, controller, routeOwnerId)
-                Tab.DIAGNOSTICS -> Diagnostics(ui.saved, tunnel, diagnostics, connectionHistory, trace, traceDetailsRequest, controller)
+                Tab.DIAGNOSTICS -> Diagnostics(tunnel, diagnostics, connectionHistory, controller)
                 Tab.SETTINGS -> Settings(ui.saved, controller, onRequestElevation, onOpenNetwork = onOpenNetwork,
                     localProxy = ui.localProxy.takeIf { tunnel.status == TunnelStatus.RUNNING },
                     locked = ui.busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RECONNECTING))
             }
         }
     }
-    }
-    ui.connectionError?.let { error ->
-        AlertDialog(
-            onDismissRequest = controller::dismissConnectionError,
-            title = { Text("Не удалось подключиться") },
-            text = {
-                SelectionContainer {
-                    Text(error.message, modifier = Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()))
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    controller.dismissConnectionError()
-                    if (error.routeOwnerId != null) {
-                        routeOwnerId = error.routeOwnerId
-                        tab = Tab.ROUTES
-                    } else {
-                        tab = Tab.DIAGNOSTICS
-                    }
-                }) { Text(if (error.routeOwnerId != null) "Открыть правила" else "Журнал запросов") }
-            },
-            dismissButton = {
-                TextButton(onClick = controller::dismissConnectionError) { Text("Закрыть") }
-            },
-        )
     }
     if (importOpen) ImportDialog(
         groupName = ui.saved.groups.firstOrNull { it.id == importGroupId }?.name,
@@ -929,17 +936,12 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
 
 @Composable
 internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, probes: Map<String, ProbeResult>, tunnelLatencyMs: Long?, trace: TraceSnapshot,
-    controller: DesktopController, onImport: (String?) -> Unit, onDiagnostics: () -> Unit,
-    localProxy: LocalProxyAccess?, tried: FailoverReport?, history: List<LiveConnection>,
+    controller: DesktopController, onImport: (String?) -> Unit,
+    localProxy: LocalProxyAccess?, tried: FailoverReport?, diagnostics: CoreDiagnostics,
     onOpenRules: (String) -> Unit, onOpenJournal: () -> Unit, detail: String? = null) {
     val selected = saved.profiles.firstOrNull { it.id == saved.selectedProfileId }
     LaunchedEffect(selected?.id) { selected?.let { controller.probe(listOf(it.id)) } }
     var editProfile by remember { mutableStateOf<StoredProfile?>(null) }
-    var delete by remember { mutableStateOf<StoredProfile?>(null) }
-    var moveMenu by remember { mutableStateOf(false) }
-    var showJson by remember(selected?.id) { mutableStateOf(false) }
-    var showDetails by remember(selected?.id) { mutableStateOf(false) }
-    var showCheckDetails by remember(selected?.id) { mutableStateOf(false) }
     if (selected == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(Modifier.widthIn(max = 490.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -970,207 +972,216 @@ internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boole
         tunnel.status == TunnelStatus.FAILED -> "Не удалось подключиться" to desktopColors.error
         else -> "Отключено" to muted
     }
-    val sideCards: @Composable ColumnScope.(Boolean) -> Unit = { underMain ->
-        tried?.let { report ->
-            Column {
-                // Under the main card the buttons come first, so they stay on screen in a small window.
-                if (underMain) {
-                    HoldActions(saved, selected, controller)
-                    Spacer(Modifier.height(10.dp))
+    // Audit H7: one attention zone, the most important note first and «Ещё N» for the rest.
+    val attention = buildList<@Composable () -> Unit> {
+        tried?.let { report -> add { Column { HoldActions(saved, selected, controller); Spacer(Modifier.height(10.dp)); FailoverReportCard(report) } } }
+        if (hasSkippedConditions(saved, selected)) add { HomeSkippedConditions(saved, selected) }
+    }
+    var attentionOpen by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.widthIn(max = 680.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            // Audit H1/H2 (mockup 1): the button and the state without a frame or a title.
+            Column(Modifier.fillMaxWidth().testTag("home_center"), horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                ConnectionPower(active = active, busy = busy, holding = holding, connected = tunnel.status == TunnelStatus.RUNNING && !busy,
+                    failed = tunnel.status == TunnelStatus.FAILED, onClick = {
+                        if (active) controller.disconnect() else controller.connect()
+                    })
+                Text(statusTitle, style = MaterialTheme.typography.titleLarge, color = statusTone, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.testTag("home_state"))
+                // Holding: «Выключить VPN» with its explanation is in the attention zone, so no second action here.
+                if (!holding) Text(if (active) "Нажмите, чтобы отключить" else "Нажмите, чтобы подключить", color = muted, fontSize = 13.sp)
+                detail?.takeIf { it.isNotBlank() && it != statusTitle }?.let {
+                    Text(it, color = muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 }
-                FailoverReportCard(report)
-                if (!underMain) HoldActions(saved, selected, controller)
+            }
+            HomeProfileLine(saved, selected, group, proxyMode, controller,
+                onRules = { onOpenRules(routeOwner(selected)) }, onEdit = { editProfile = selected })
+            if (attention.isNotEmpty()) {
+                Column(Modifier.fillMaxWidth().testTag("home_attention"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    attention.first()()
+                    if (attention.size > 1) {
+                        if (attentionOpen) attention.drop(1).forEach { it() }
+                        TextButton(onClick = { attentionOpen = !attentionOpen }, modifier = Modifier.testTag("home_attention_more")) {
+                            Text(if (attentionOpen) "Свернуть" else "Ещё ${attention.size - 1}")
+                        }
+                    }
+                }
+            }
+            // While LerNET holds the tunnel the report says what was tried; the checks would only repeat it.
+            if (!holding) HomeLinkPanel(selected, endpoint, tunnel, active, probes[selected.id], tunnelLatencyMs, diagnostics, trace, controller)
+            // Audit H4: the journal is one row under «Связь», as on the phone.
+            Surface(color = panel, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()
+                .clickable(role = Role.Button, onClick = onOpenJournal).testTag("home_journal_row")) {
+                Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Журнал запросов", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    Text("что и куда ушло  ›", color = muted, fontSize = 13.sp)
+                }
             }
         }
-        HomeRulesCard(saved, selected, onOpenRules)
-        HomeRecentRequests(history, active, onOpenJournal)
-        HomeSkippedConditions(saved, selected)
-    }
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-    // Narrow windows: the right cards go under the main card instead of squeezing it.
-    val stacked = maxWidth < 760.dp
-    val sideWidth = if (maxWidth < 980.dp) 300.dp else 340.dp
-    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-        Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())) {
-                Panel {
-                    Column(Modifier.fillMaxWidth().testTag("home_center"), horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        // Same order as the phone: button, the state once, then what a press will do.
-                        ConnectionPower(active = active, busy = busy, holding = holding, connected = tunnel.status == TunnelStatus.RUNNING && !busy,
-                            failed = tunnel.status == TunnelStatus.FAILED, onClick = {
-                            if (active) controller.disconnect() else controller.connect()
-                        })
-                        Text(statusTitle, style = MaterialTheme.typography.titleLarge, color = statusTone, fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.testTag("home_state"))
-                        // Holding: «Выключить VPN» with its explanation is right next to it, so no second «Отключить» here.
-                        // A failure keeps «Подключить»: on Windows there is no separate retry button.
-                        if (!holding) Text(if (active) "Отключить" else "Подключить", color = muted, fontSize = 13.sp)
-                        detail?.takeIf { it.isNotBlank() && it != statusTitle }?.let {
-                            Text(it, color = muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        Text(selected.name, style = MaterialTheme.typography.headlineSmall, maxLines = 1,
-                            overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
-                        val meta = listOfNotNull(group?.let { "Папка «${it.name}»" + if (it.autoSwap) " · автосмена" else "" },
-                            if (proxyMode) "режим прокси (меняется в Настройках)" else null).joinToString(" · ")
-                        if (meta.isNotBlank()) Text(meta, color = muted, fontSize = 13.sp, maxLines = 2,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    }
-                    // Proxy address, login and password are in Settings; the home only names the mode.
-                    // While LerNET holds the tunnel the report card says what was tried; the checks would only repeat it.
-                    if (!holding) {
-                    Spacer(Modifier.height(2.dp))
-                    // Off or failed: the tiles show the config's own last check, not the live connection.
-                    if (tunnel.status != TunnelStatus.RUNNING && probes[selected.id]?.let { !it.checking } == true) {
-                        Text("Последняя проверка конфига", color = muted, fontSize = 11.sp)
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        val probe = probes[selected.id]
-                        ConnectionLatency("До сервера",
-                            status = when {
-                                probe?.latencyMs != null -> "Отвечает"
-                                probe?.checking == true -> "Проверяем…"
-                                probe != null -> "Нет ответа"
-                                else -> "Не проверено"
-                            },
-                            value = probe?.latencyMs?.let { "$it мс" } ?: "—",
-                            healthy = probe?.latencyMs != null,
-                            modifier = Modifier.weight(1f))
-                        val channelLatency = if (active && tunnelLatencyMs != null) tunnelLatencyMs else probe?.tunnelLatencyMs
-                        ConnectionLatency("Интернет через VPN", status = when {
-                            channelLatency != null -> "Работает"
-                            probe?.checking == true -> "Проверяем…"
-                            !probe?.tunnelMessage.isNullOrBlank() -> "Не работает"
-                            else -> "Не проверено"
-                        }, value = channelLatency?.let { "$it мс" } ?: "—",
-                            healthy = channelLatency != null, modifier = Modifier.weight(1f))
-                    }
-                    probes[selected.id]?.let { probe ->
-                        if (!probe.checking && probe.tunnelLatencyMs == null && probe.tunnelMessage.isNotBlank()) {
-                            Text(app.lernet.engine.text.UserText.clean(probe.tunnelMessage, "Через этот конфиг интернет не открывается."),
-                                color = desktopColors.error, fontSize = 12.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-                    // Technical words live here, folded away, like «Подробнее» on the phone.
-                    TextButton(onClick = { showCheckDetails = !showCheckDetails }, contentPadding = PaddingValues(horizontal = 0.dp)) {
-                        Text(if (showCheckDetails) "Скрыть подробности  ▴" else "Подробнее  ▾", fontSize = 12.sp)
-                    }
-                    if (showCheckDetails) {
-                        val probe = probes[selected.id]
-                        val address = endpoint?.let { if (it.port.isBlank()) it.server else "${it.server}:${it.port}" }.orEmpty()
-                        Text(listOfNotNull(
-                            "Протокол: ${selected.selectedOutbound?.type?.uppercase() ?: "—"}" + (address.takeIf { it.isNotBlank() }?.let { " · сервер $it" } ?: ""),
-                            "«До сервера» — ${probe?.serverProtocol ?: EndpointProbe.protocol(selected)}-соединение с сервером, без VPN.",
-                            "«Интернет через VPN» — HTTP-запрос через временный локальный прокси этого конфига.",
-                            "Сетевой адаптер VPN (TUN) создаётся и проверяется только при подключении.",
-                            probe?.tunnelMessage?.takeIf { probe.tunnelLatencyMs == null }?.let { app.lernet.engine.text.UserText.clean(it, "") }?.takeIf { it.isNotBlank() }?.let { "Ответ проверки: $it" },
-                        ).joinToString("\n"), color = muted, fontSize = 11.sp, lineHeight = 16.sp)
-                    }
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { controller.probe(listOf(selected.id)) }, enabled = probes[selected.id]?.checking != true) {
-                            Text(if (probes[selected.id]?.checking == true) "Проверяем…" else "Проверить связь")
-                        }
-                        Spacer(Modifier.weight(1f))
-                        OutlinedButton(onClick = { editProfile = selected }) { Text("Изменить") }
-                        TextButton(onClick = { delete = selected }) { Text("Удалить") }
-                    }
-                    }
-                }
-                if (stacked) {
-                    Spacer(Modifier.height(14.dp))
-                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) { sideCards(true) }
-                }
-                Spacer(Modifier.height(14.dp))
-                HopJourney(
-                    trace = if (trace.target.equals(endpoint?.server, ignoreCase = true)) trace else TraceSnapshot(),
-                    server = endpoint?.server.orEmpty(),
-                    runningTunnel = tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RUNNING, TunnelStatus.RECONNECTING),
-                    onTrace = controller::traceSelected,
-                    onDetails = onDiagnostics,
-                )
-                Spacer(Modifier.height(14.dp))
-                OutlinedButton(onClick = { showDetails = !showDetails }) {
-                    Text(if (showDetails) "Скрыть настройки конфига  ▴" else "Настройки конфига  ▾")
-                }
-                if (showDetails) {
-                Spacer(Modifier.height(14.dp))
-                Panel {
-                    Text("Подключение", fontWeight = FontWeight.SemiBold)
-                    ProfileDetail("Сервер", endpoint?.let {
-                        if (it.port.isBlank()) it.server else "${it.server}:${it.port}"
-                    }.orEmpty().ifBlank { "Не указан" })
-                    ProfileDetail("Транспорт", endpoint?.transportType?.uppercase()?.ifBlank { "По умолчанию" } ?: "По умолчанию")
-                    ProfileDetail("SNI", endpoint?.sni?.ifBlank { "Не указан" } ?: "Не указан")
-                    ProfileDetail("Режим", if (controller.effectiveMode(selected) == RunMode.PROXY) "Локальный прокси" else "Полный VPN")
-                    ProfileDetail("DNS", when (selected.dnsPolicy) {
-                        "SYSTEM" -> "Глобальная настройка"
-                        "PROFILE" -> "Из конфига"
-                        "TUNNEL" -> "Через VPN"
-                        else -> "DNS сети (мимо VPN)"
-                    })
-                }
-                Spacer(Modifier.height(14.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Папка: " + (saved.groups.firstOrNull { it.id == selected.groupId }?.name ?: "Без папки"), color = muted, modifier = Modifier.weight(1f), maxLines = 1)
-                    Box {
-                        OutlinedButton(onClick = { moveMenu = true }) { Text("Переместить") }
-                        DropdownMenu(expanded = moveMenu, onDismissRequest = { moveMenu = false }) {
-                            DropdownMenuItem(text = { Text("Без папки") }, onClick = { controller.setGroup(selected.id, null); moveMenu = false })
-                            saved.groups.forEach { group -> DropdownMenuItem(text = { Text(group.name) }, onClick = {
-                                controller.setGroup(selected.id, group.id)
-                                moveMenu = false
-                            }) }
-                        }
-                    }
-                }
-                Spacer(Modifier.height(14.dp))
-                val preview = remember(selected, saved.rules, saved.mode, saved.defaultDnsPolicy, saved.tunMtu, saved.xmuxChannels, saved.directDnsServer, saved.strictRoute) {
-                    runCatching { controller.preview(selected.id) }.getOrNull()
-                }
-                Panel {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Итоговая конфигурация", fontWeight = FontWeight.SemiBold)
-                            Text("JSON для ядра sing-box · содержит ключи доступа", color = muted, fontSize = 12.sp)
-                        }
-                        TextButton(
-                            onClick = { preview?.json?.let(::copyToClipboard) },
-                            enabled = preview?.isValid == true,
-                        ) { Text("Копировать") }
-                    }
-                    if (preview == null || !preview.isValid) {
-                        Text(preview?.errors?.joinToString("; ") ?: "Не удалось собрать конфигурацию", color = Color(0xFFFF9F9F))
-                    } else {
-                        TextButton(onClick = { showJson = !showJson }) {
-                            Text(if (showJson) "Скрыть JSON" else "Показать JSON")
-                        }
-                        if (showJson) {
-                            SelectionContainer {
-                                Text(
-                                    preview.json, fontSize = 11.sp, color = muted,
-                                    modifier = Modifier.heightIn(max = 280.dp).verticalScroll(rememberScrollState()),
-                                )
-                            }
-                        }
-                    }
-                }
-                }
-        }
-        if (!stacked) Column(Modifier.width(sideWidth).fillMaxHeight().verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(14.dp)) { sideCards(false) }
-    }
     }
     editProfile?.let { profile -> DesktopProfileEditor(profile, saved, controller) { editProfile = null } }
-    delete?.let { profile ->
+}
+
+/** Audit H3/N12/N13: one line for the config — name, folder, mode; «Правила» and the rest in ⋮ (delete is there, with «Отменить»). */
+@Composable
+private fun HomeProfileLine(saved: StoredState, selected: StoredProfile, group: StoredGroup?, proxyMode: Boolean,
+    controller: DesktopController, onRules: () -> Unit, onEdit: () -> Unit) {
+    var menu by remember { mutableStateOf(false) }
+    var moveMenu by remember { mutableStateOf(false) }
+    Surface(color = panel, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().testTag("home_profile_line")) {
+        Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(selected.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val meta = listOfNotNull(group?.let { "папка «${it.name}»" + if (it.autoSwap) " · автосмена" else "" } ?: "без папки",
+                    if (proxyMode) "режим прокси" else null).joinToString(" · ")
+                Text(meta, color = muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            TextButton(onClick = onRules, modifier = Modifier.testTag("home_profile_rules")) { Text("Правила") }
+            Box {
+                TextButton(onClick = { menu = true }, modifier = Modifier.testTag("home_profile_more")) { Text("⋮", fontSize = 18.sp) }
+                DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(text = { Text("Изменить конфиг") }, onClick = { menu = false; onEdit() })
+                    DropdownMenuItem(text = { Text("Переместить в папку") }, onClick = { menu = false; moveMenu = true })
+                    DropdownMenuItem(text = { Text("Проверить связь") }, onClick = { menu = false; controller.probe(listOf(selected.id)) })
+                    HorizontalDivider()
+                    DropdownMenuItem(text = { Text("Удалить", color = desktopColors.error) }, onClick = { menu = false; controller.delete(selected.id) })
+                }
+                DropdownMenu(moveMenu, onDismissRequest = { moveMenu = false }) {
+                    DropdownMenuItem(text = { Text("Без папки") }, onClick = { controller.setGroup(selected.id, null); moveMenu = false })
+                    saved.groups.forEach { g ->
+                        DropdownMenuItem(text = { Text(g.name) }, onClick = { controller.setGroup(selected.id, g.id); moveMenu = false })
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Audit H1/H6 (mockup 1): one «Связь» card — internet through the VPN, server, speed, total, and the path as a row. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun HomeLinkPanel(selected: StoredProfile, endpoint: app.lernet.engine.compile.OwnedOutbound?, tunnel: TunnelSnapshot, active: Boolean,
+    probe: ProbeResult?, tunnelLatencyMs: Long?, diagnostics: CoreDiagnostics, trace: TraceSnapshot, controller: DesktopController) {
+    var pathOpen by remember { mutableStateOf(false) }
+    val running = tunnel.status == TunnelStatus.RUNNING
+    val checking = probe?.checking == true
+    Panel(Modifier.fillMaxWidth().testTag("home_link_card")) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Связь", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            // Audit H5: the technical words are a tooltip, not a fold-out block.
+            TooltipArea(tooltip = {
+                Surface(color = Color(0xFF1B2A3E), shape = RoundedCornerShape(8.dp), shadowElevation = 4.dp) {
+                    Text(listOf(
+                        "«Сервер» — ${probe?.serverProtocol ?: EndpointProbe.protocol(selected)}-соединение с сервером, без VPN.",
+                        "«Интернет через VPN» — HTTP-запрос через этот конфиг.",
+                        "Сетевой адаптер VPN создаётся только при подключении.",
+                    ).joinToString("\n"), color = desktopColors.onSurface, fontSize = 12.sp, lineHeight = 17.sp,
+                        modifier = Modifier.padding(10.dp).widthIn(max = 360.dp))
+                }
+            }) { Text("Как проверяем ⓘ", color = muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 8.dp)) }
+            TextButton(onClick = { controller.probe(listOf(selected.id)) }, enabled = !checking, modifier = Modifier.testTag("home_link_check")) {
+                Text(if (checking) "Проверяем…" else "Проверить связь")
+            }
+        }
+        probe?.budgetWaitMs?.let { wait ->
+            Text(app.lernet.engine.policy.BudgetNotice.full(wait, expert = false), color = muted, fontSize = 12.sp)
+        }
+        val channel = if (active && tunnelLatencyMs != null) tunnelLatencyMs else probe?.tunnelLatencyMs
+        HomeLinkRow("Интернет через VPN", when {
+            !active && channel == null && probe?.tunnelMessage.isNullOrBlank() -> "после подключения"
+            checking -> "проверяем…"
+            channel != null -> "работает · $channel мс"
+            !probe?.tunnelMessage.isNullOrBlank() -> "не открывается"
+            else -> "не проверено"
+        }, good = channel != null && !checking, bad = !checking && channel == null && !probe?.tunnelMessage.isNullOrBlank())
+        probe?.takeIf { !it.checking && it.tunnelLatencyMs == null && it.tunnelMessage.isNotBlank() }?.let {
+            Text(app.lernet.engine.text.UserText.clean(it.tunnelMessage, "Через этот конфиг интернет не открывается."),
+                color = desktopColors.error, fontSize = 12.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        }
+        HorizontalDivider(color = desktopColors.outlineVariant)
+        HomeLinkRow("Сервер", when {
+            checking -> "проверяем…"
+            probe?.latencyMs != null -> "отвечает · ${probe.latencyMs} мс"
+            probe != null -> "нет ответа"
+            else -> "не проверено"
+        }, good = probe?.latencyMs != null && !checking, bad = probe != null && !checking && probe.latencyMs == null)
+        if (running) {
+            val rate = rememberTrafficRate(diagnostics.uploadTotal, diagnostics.downloadTotal)
+            HorizontalDivider(color = desktopColors.outlineVariant)
+            HomeLinkRow("Скорость", "↑ ${bytesText(rate.first)}/с · ↓ ${bytesText(rate.second)}/с")
+            HorizontalDivider(color = desktopColors.outlineVariant)
+            HomeLinkRow("Передано", "↑ ${bytesText(diagnostics.uploadTotal)} · ↓ ${bytesText(diagnostics.downloadTotal)}")
+        }
+        HorizontalDivider(color = desktopColors.outlineVariant)
+        val sameTarget = trace.target.equals(endpoint?.server, ignoreCase = true)
+        val hops = if (sameTarget) trace.hops.size else 0
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) { pathOpen = true }
+            .padding(vertical = 10.dp).testTag("home_link_path"), verticalAlignment = Alignment.CenterVertically) {
+            Text("Путь до сервера", color = muted, fontSize = 14.sp, modifier = Modifier.width(170.dp))
+            Text(if (hops > 0) "${hopsCount(hops)}  ›" else "проверить по кнопке  ›", fontSize = 14.sp, modifier = Modifier.weight(1f))
+        }
+    }
+    if (pathOpen) {
         AlertDialog(
-            onDismissRequest = { delete = null },
-            title = { Text("Удалить «" + profile.name + "»?") },
-            text = { Text("Конфиг и его правила будут удалены.") },
-            confirmButton = { TextButton(onClick = { controller.delete(profile.id); delete = null }) { Text("Удалить") } },
-            dismissButton = { TextButton(onClick = { delete = null }) { Text("Отмена") } },
+            onDismissRequest = { pathOpen = false },
+            title = { Text("Путь до сервера") },
+            text = {
+                var detailsRequest by remember { mutableIntStateOf(0) }
+                Column(Modifier.widthIn(min = 520.dp, max = 720.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    HopJourney(
+                        trace = if (trace.target.equals(endpoint?.server, ignoreCase = true)) trace else TraceSnapshot(),
+                        server = endpoint?.server.orEmpty(),
+                        runningTunnel = tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RUNNING, TunnelStatus.RECONNECTING),
+                        onTrace = controller::traceSelected,
+                        onDetails = { detailsRequest++ },
+                    )
+                    if (detailsRequest > 0) TraceView(trace, detailsRequest, onRefresh = controller::traceSelected)
+                }
+            },
+            confirmButton = { TextButton(onClick = { pathOpen = false }) { Text("Закрыть") } },
         )
     }
+}
+
+@Composable
+private fun HomeLinkRow(label: String, value: String, good: Boolean = false, bad: Boolean = false) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = muted, fontSize = 14.sp, modifier = Modifier.width(170.dp))
+        Text(value, fontSize = 14.sp, color = when {
+            good -> green
+            bad -> desktopColors.error
+            else -> desktopColors.onSurface
+        }, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+internal fun hopsCount(n: Int): String {
+    val word = when {
+        n % 100 in 11..14 -> "узлов"
+        n % 10 == 1 -> "узел"
+        n % 10 in 2..4 -> "узла"
+        else -> "узлов"
+    }
+    return "$n $word"
+}
+
+/** Bytes per second from the core's running totals, sampled when they change. */
+@Composable
+private fun rememberTrafficRate(up: Long, down: Long): Pair<Long, Long> {
+    var last by remember { mutableStateOf(Triple(up, down, System.currentTimeMillis())) }
+    var rate by remember { mutableStateOf(0L to 0L) }
+    LaunchedEffect(up, down) {
+        val now = System.currentTimeMillis()
+        val dt = (now - last.third).coerceAtLeast(1)
+        if (dt >= 500) {
+            rate = ((up - last.first).coerceAtLeast(0) * 1000 / dt) to ((down - last.second).coerceAtLeast(0) * 1000 / dt)
+            last = Triple(up, down, now)
+        }
+    }
+    return rate
 }
 
 /** Words that only name the state; the home already shows the state under the button. */
@@ -1246,56 +1257,10 @@ private fun HomeCardHeader(title: String, action: String?, onClick: () -> Unit) 
     }
 }
 
-/** Top-level rules of the folder (or config) that is selected; the editor itself stays on the «Правила» page. */
-@Composable
-private fun HomeRulesCard(saved: StoredState, selected: StoredProfile, onOpenRules: (String) -> Unit) {
+private fun hasSkippedConditions(saved: StoredState, selected: StoredProfile): Boolean {
     val owner = routeOwner(selected)
-    val top = saved.rules.filter { it.profileId == owner && it.parentId == null }.sortedWith(compareBy<StoredRule> { it.sortIndex }.thenBy { it.id })
-    val skipped = remember(saved.rules, owner) { DesktopRouteTree.platformInactiveIds(saved.rules.filter { it.profileId == owner }) }
-    Panel(Modifier.testTag("home_rules")) {
-        HomeCardHeader("Правила", "Открыть →") { onOpenRules(owner) }
-        if (top.isEmpty()) Text("Своих правил нет: весь трафик идёт через выбранный конфиг.", color = muted, fontSize = 12.sp)
-        top.take(6).forEach { rule ->
-            val children = saved.rules.count { it.parentId == rule.id }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(rule.title.ifBlank { "Без названия" }, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    fontSize = 13.sp, color = if (rule.enabled) desktopColors.onSurface else muted)
-                Spacer(Modifier.width(6.dp))
-                when {
-                    !rule.enabled -> HomeChip("выключено", muted)
-                    rule.id in skipped -> HomeChip("пропущено", hold)
-                    children > 0 -> HomeChip("ветка · $children", blue)
-                    rule.action == "DIRECT" -> HomeChip("напрямую", green)
-                    rule.action == "BLOCK" -> HomeChip("запрет · только в Эксперте", desktopColors.error)
-                    else -> HomeChip("через VPN", blue)
-                }
-            }
-        }
-        if (top.size > 6) Text("и ещё ${top.size - 6}", color = muted, fontSize = 12.sp)
-    }
-}
-
-/** Real requests from the core's connection list; nothing is shown before the first connection. */
-@Composable
-private fun HomeRecentRequests(history: List<LiveConnection>, active: Boolean, onOpenJournal: () -> Unit) {
-    val recent = history.sortedByDescending { it.lastSeenAt }.take(6)
-    Panel(Modifier.testTag("home_recent")) {
-        HomeCardHeader("Последние запросы", "Журнал →", onOpenJournal)
-        if (recent.isEmpty()) Text(if (active) "Пока запросов не было." else "Появятся после подключения.", color = muted, fontSize = 12.sp)
-        recent.forEach { item ->
-            val route = item.chains.firstOrNull().orEmpty().lowercase()
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(listOf(item.process.substringAfterLast('\\').ifBlank { "—" }, item.host.ifBlank { item.destination }).joinToString(" · "),
-                    Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
-                Spacer(Modifier.width(6.dp))
-                when {
-                    "block" in route || "reject" in route -> HomeChip("запрет", desktopColors.error)
-                    "direct" in route -> HomeChip("напрямую", green)
-                    else -> HomeChip("через VPN", blue)
-                }
-            }
-        }
-    }
+    val rules = saved.rules.filter { it.profileId == owner }
+    return DesktopRouteTree.platformInactiveIds(rules).isNotEmpty()
 }
 
 /** Mockup 10: a branch that depends on Android apps cannot match here; say so instead of silently skipping it. */
@@ -1385,30 +1350,6 @@ private fun ConnectionPower(active: Boolean, busy: Boolean, holding: Boolean = f
             }
         }
         Spacer(Modifier.height(10.dp))
-    }
-}
-
-@Composable
-private fun ConnectionLatency(label: String, status: String, value: String, healthy: Boolean,
-    modifier: Modifier = Modifier) {
-    Surface(modifier, color = Color(0xFF101A29), shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, if (healthy) green.copy(alpha = .16f) else desktopColors.outlineVariant)) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 13.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(label, color = muted, fontSize = 10.sp, fontWeight = FontWeight.Medium)
-            Text(status, color = if (healthy) green else if (status == "Нет ответа" || status == "Не работает")
-                desktopColors.error else muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(value, color = if (healthy) Color(0xFF80DEBE) else desktopColors.onSurface,
-                fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-    }
-}
-
-@Composable
-private fun ProfileDetail(label: String, value: String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(label, color = muted, fontSize = 12.sp, modifier = Modifier.width(90.dp))
-        Text(value, color = desktopColors.onSurface, fontSize = 12.sp,
-            maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
     }
 }
 
@@ -1545,6 +1486,7 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
                     if (compact) {
                         // One short line under the name instead of two metric columns: the name keeps the full width.
                         val (word, tone) = when {
+                            probe?.budgetWaitMs != null -> app.lernet.engine.policy.BudgetNotice.short(probe.budgetWaitMs) to muted
                             probe?.checking == true -> "Проверяем…" to muted
                             probe?.tunnelLatencyMs != null -> "Работает · ${probe.tunnelLatencyMs} мс" to green
                             probe?.latencyMs != null && probe.tunnelMessage.isBlank() -> "Сервер отвечает · ${probe.latencyMs} мс" to muted
@@ -1552,7 +1494,15 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
                             probe != null -> "Сервер не отвечает" to desktopColors.error
                             else -> "" to muted
                         }
-                        if (word.isNotEmpty()) Text(word, color = tone, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (word.isNotEmpty()) {
+                            Text(
+                                word,
+                                color = tone,
+                                fontSize = 11.sp,
+                                maxLines = if (probe?.budgetWaitMs != null) 2 else 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
                 Box {
@@ -1596,6 +1546,10 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
                     modifier = Modifier.size(28.dp).semantics { contentDescription = "Проверить связь" },
                     contentPadding = PaddingValues(0.dp)) { PingGlyph(blue) }
             }
+            val wait = probe?.budgetWaitMs
+            if (!compact && wait != null) {
+                Text(app.lernet.engine.policy.BudgetNotice.short(wait), color = muted, fontSize = 11.sp)
+            }
         }
     }
 }
@@ -1611,42 +1565,55 @@ private fun ProbeMiniMetric(label: String, status: String, value: String, health
             fontWeight = FontWeight.Medium, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
+/** Audit J7: the same filters as on the phone. */
+internal enum class JournalKind(val label: String) { ALL("Все"), VPN("Через VPN"), DIRECT("Напрямую"), SILENT("Без ответа") }
+
+internal enum class JournalRoute { VPN, DIRECT, BLOCK }
+
+internal fun journalRoute(row: LiveConnection): JournalRoute {
+    val chain = row.chains.joinToString(" ").lowercase()
+    return when {
+        "block" in chain || "reject" in chain -> JournalRoute.BLOCK
+        "direct" in chain -> JournalRoute.DIRECT
+        else -> JournalRoute.VPN
+    }
+}
+
+/** «Без ответа»: something was sent, nothing came back, and the connection is over. */
+internal fun journalSilent(row: LiveConnection): Boolean = !row.active && row.upload > 0 && row.download == 0L
+
+internal fun journalMatches(row: LiveConnection, appLabel: String, query: String, kind: JournalKind): Boolean {
+    val route = journalRoute(row)
+    val byKind = when (kind) {
+        JournalKind.ALL -> true
+        JournalKind.VPN -> route == JournalRoute.VPN
+        JournalKind.DIRECT -> route == JournalRoute.DIRECT
+        JournalKind.SILENT -> journalSilent(row)
+    }
+    val q = query.trim()
+    return byKind && (q.isEmpty() || listOf(appLabel, row.host, row.destination, row.rule, row.process).any { it.contains(q, ignoreCase = true) })
+}
+
+/**
+ * Audit J5–J8, J6, G4 (mockup 5): «Журнал запросов» on Windows — one list with search and the phone's filters,
+ * details in a side panel. Status, speed and the path are on the main screen and in the strip, not repeated here.
+ */
 @Composable
-private fun Diagnostics(saved: StoredState, tunnel: TunnelSnapshot, diagnostics: CoreDiagnostics,
-    history: List<LiveConnection>, trace: TraceSnapshot, traceDetailsRequest: Int, controller: DesktopController) {
-    var display by remember { mutableStateOf("live") }
-    var selected by remember { mutableStateOf<LiveConnection?>(null) }
-    val activeProfile = saved.profiles.firstOrNull { it.id == saved.selectedProfileId }
+private fun Diagnostics(tunnel: TunnelSnapshot, diagnostics: CoreDiagnostics, history: List<LiveConnection>, controller: DesktopController) {
+    var display by rememberSaveable { mutableStateOf("requests") }
+    var query by rememberSaveable { mutableStateOf("") }
+    var kind by rememberSaveable { mutableStateOf(JournalKind.ALL) }
+    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    val rows = remember(history, diagnostics.connections) {
+        (diagnostics.connections + history).distinctBy { it.id }.sortedByDescending { it.lastSeenAt.takeIf { t -> t > 0 } ?: Long.MAX_VALUE }
+    }
     Column {
-        Panel {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("ТЕКУЩИЙ КОНФИГ", color = blue, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                    Text(activeProfile?.name ?: "Конфиг не выбран", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                    val groupName = saved.groups.firstOrNull { it.id == activeProfile?.groupId }?.name
-                    Text(listOfNotNull(groupName, activeProfile?.selectedOutbound?.type?.uppercase()).joinToString(" · ").ifBlank { "Выберите конфиг на главном экране" }, color = muted, fontSize = 12.sp)
-                }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.width(320.dp)) {
+                SegmentedChoice(listOf("requests" to "Запросы", "log" to "Технический журнал"), display) { display = it }
             }
-        }
-        Spacer(Modifier.height(11.dp))
-        TraceView(trace, traceDetailsRequest, onRefresh = controller::traceSelected)
-        Spacer(Modifier.height(11.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            PanelMetric("Состояние", tunnel.message.ifBlank { tunnelStatusText(tunnel.status) }, statusColor(tunnel.status), Modifier.weight(1f))
-            PanelMetric("Отправлено", bytesText(diagnostics.uploadTotal), desktopColors.onSurface, Modifier.weight(1f))
-            PanelMetric("Получено", bytesText(diagnostics.downloadTotal), desktopColors.onSurface, Modifier.weight(1f))
-            PanelMetric("Активные соединения", diagnostics.connections.size.toString(), desktopColors.onSurface, Modifier.weight(1f))
-        }
-        Spacer(Modifier.height(13.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Соединения", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            FilterChip(display == "live", onClick = { display = "live" }, label = { Text("Сейчас") })
-            Spacer(Modifier.width(7.dp))
-            FilterChip(display == "history", onClick = { display = "history" }, label = { Text("История · ${history.size}") })
-            Spacer(Modifier.width(7.dp))
-            FilterChip(display == "log", onClick = { display = "log" }, label = { Text("Технический журнал") })
-        }
-        if (display == "log") Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Spacer(Modifier.weight(1f))
+            if (display == "log") {
                 // Secrets (keys, passwords, links) are removed from the journal before it is written.
                 TextButton(onClick = {
                     java.awt.Toolkit.getDefaultToolkit().systemClipboard
@@ -1660,11 +1627,12 @@ private fun Diagnostics(saved: StoredState, tunnel: TunnelSnapshot, diagnostics:
                     dialog.file?.let { controller.saveJournal(Path.of(dialog.directory, it)) }
                     dialog.dispose()
                 }) { Text("Сохранить журнал") }
+            }
         }
+        Spacer(Modifier.height(10.dp))
         if (diagnostics.error.isNotBlank() && tunnel.status == TunnelStatus.RUNNING) {
             Text(diagnostics.error, color = desktopColors.error, fontSize = 12.sp)
         }
-        Spacer(Modifier.height(8.dp))
         if (display == "log") {
             Card(colors = CardDefaults.cardColors(containerColor = panel)) {
                 SelectionContainer {
@@ -1673,51 +1641,105 @@ private fun Diagnostics(saved: StoredState, tunnel: TunnelSnapshot, diagnostics:
                     }
                 }
             }
-        } else {
-            val rows = if (display == "history") history else diagnostics.connections.sortedByDescending { it.started }
-            LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (rows.isEmpty()) {
-                    item { Panel { Text(if (display == "history") "За этот запуск соединений пока нет" else if (tunnel.status == TunnelStatus.RUNNING) "Активных соединений сейчас нет" else "Подключите конфиг, чтобы видеть соединения", color = muted) } }
+            return@Column
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text("Приложение или сайт") },
+                modifier = Modifier.width(300.dp).testTag("journal_search"))
+            JournalKind.entries.forEach { option ->
+                FilterChip(kind == option, onClick = { kind = option }, label = { Text(option.label) },
+                    modifier = Modifier.testTag("journal_filter_${option.name.lowercase()}"))
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        val labels = remember(rows) { rows.associate { it.id to WindowsProcessIdentity.resolve(it.process) } }
+        val visible = rows.filter { journalMatches(it, labels[it.id]?.label.orEmpty(), query, kind) }
+        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            LazyColumn(Modifier.weight(1f).fillMaxHeight().testTag("journal_list"), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                if (visible.isEmpty()) item {
+                    Text(when {
+                        rows.isEmpty() && tunnel.status != TunnelStatus.RUNNING -> "Подключите конфиг, чтобы видеть запросы."
+                        rows.isEmpty() -> "Запросов пока не было."
+                        else -> "Ничего не найдено. Измените поиск или фильтр."
+                    }, color = muted, modifier = Modifier.padding(12.dp))
                 }
-                items(rows, key = { it.id }) { row ->
-                    val process = remember(row.process) { WindowsProcessIdentity.resolve(row.process) }
-                    Card(modifier = Modifier.fillMaxWidth().clickable { selected = row }, colors = CardDefaults.cardColors(containerColor = panel)) {
-                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                items(visible, key = { it.id }) { row ->
+                    val process = labels[row.id] ?: WindowsProcessIdentity.resolve(row.process)
+                    val chosen = row.id == selectedId
+                    Surface(color = if (chosen) desktopColors.secondaryContainer else panel, shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().clickable { selectedId = if (chosen) null else row.id }) {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                             process.icon?.let { icon ->
                                 Image(bitmap = icon, contentDescription = null, modifier = Modifier.size(28.dp))
                                 Spacer(Modifier.width(10.dp))
                             }
                             Column(Modifier.weight(1f)) {
-                                Text(row.host.ifBlank { row.destination }, color = desktopColors.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(listOf(if (row.active) "●" else "○", process.label, row.network, row.rule).filter(String::isNotBlank).joinToString(" · "), color = muted, fontSize = 12.sp, maxLines = 1)
+                                Text(process.label.ifBlank { "Системный процесс" }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(listOfNotNull(row.host.ifBlank { row.destination },
+                                    if (journalSilent(row)) "нет ответа" else row.rule.takeIf { it.isNotBlank() }?.let { "правило «$it»" })
+                                    .joinToString(" · "), color = muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
-                            Text("↑ ${bytesText(row.upload)}  ↓ ${bytesText(row.download)}", color = muted, fontSize = 12.sp)
+                            JournalBadge(journalRoute(row))
                         }
                     }
                 }
             }
+            val selected = rows.firstOrNull { it.id == selectedId }
+            if (selected != null) JournalDetails(selected) { selectedId = null }
         }
     }
-    selected?.let { row ->
-        AlertDialog(
-            onDismissRequest = { selected = null },
-            title = { Text(row.host.ifBlank { row.destination }) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Адрес: ${row.destination}")
-                    val process = remember(row.process) { WindowsProcessIdentity.resolve(row.process) }
-                    Text("Приложение: ${process.label}")
-                    process.parent?.let { Text("Родительский процесс: $it") }
-                    if (row.process.isNotBlank()) Text("Путь: ${row.process}")
-                    Text("Протокол: ${row.network.ifBlank { "не передан ядром" }}")
-                    Text("Правило: ${row.rule.ifBlank { "не передано ядром" }}")
-                    Text("Цепочка: ${row.chains.joinToString(" → ").ifBlank { "нет данных" }}")
-                    Text("Трафик: ↑ ${bytesText(row.upload)} · ↓ ${bytesText(row.download)}")
-                    Text("HTTP-заголовки и тело зашифрованных соединений ядро не раскрывает.", color = muted, fontSize = 12.sp)
-                }
-            },
-            confirmButton = { TextButton(onClick = { selected = null }) { Text("Закрыть") } },
-        )
+}
+
+@Composable
+private fun JournalBadge(route: JournalRoute) {
+    val (label, tone) = when (route) {
+        JournalRoute.VPN -> "VPN" to blue
+        JournalRoute.DIRECT -> "напрямую" to green
+        JournalRoute.BLOCK -> "запрет" to desktopColors.error
+    }
+    Text(label, color = tone, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(tone.copy(alpha = .14f)).padding(horizontal = 8.dp, vertical = 3.dp))
+}
+
+/** Audit J8: details in a side panel, the same words as the phone's bottom sheet. */
+@Composable
+private fun JournalDetails(row: LiveConnection, onClose: () -> Unit) {
+    val process = remember(row.process) { WindowsProcessIdentity.resolve(row.process) }
+    Panel(Modifier.width(360.dp).fillMaxHeight().testTag("journal_details")) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(process.label.ifBlank { "Системный процесс" }, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+            TextButton(onClick = onClose) { Text("Закрыть") }
+        }
+        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            JournalDetail("Куда", row.destination)
+            if (row.host.isNotBlank()) JournalDetail("Сайт", row.host)
+            JournalDetail("Как", when (journalRoute(row)) {
+                JournalRoute.VPN -> "через VPN"
+                JournalRoute.DIRECT -> "напрямую, без VPN"
+                JournalRoute.BLOCK -> "запрет"
+            })
+            JournalDetail("Правило", row.rule.ifBlank { "ядро не сообщило" })
+            JournalDetail("Состояние", when {
+                row.active -> "открыто"
+                journalSilent(row) -> "нет ответа"
+                else -> "завершено"
+            })
+            JournalDetail("Передано", "↑ ${bytesText(row.upload)} · ↓ ${bytesText(row.download)}")
+            if (row.network.isNotBlank()) JournalDetail("Вид связи", row.network.uppercase())
+            if (row.chains.isNotEmpty()) JournalDetail("Цепочка", row.chains.joinToString(" → "))
+            process.parent?.let { JournalDetail("Запущено из", it) }
+            if (row.process.isNotBlank()) JournalDetail("Путь", row.process)
+            Text("Содержимое зашифрованных соединений не видно — ни LerNET, ни кому-либо по пути.", color = muted, fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
+private fun JournalDetail(label: String, value: String) {
+    Column {
+        Text(label, color = muted, fontSize = 12.sp)
+        SelectionContainer { Text(value, fontSize = 14.sp) }
     }
 }
 
@@ -1887,17 +1909,6 @@ private fun CountryFlagIcon(code: String) {
     if (path != null) {
         Image(painter = painterResource(path), contentDescription = "Флаг ${code.uppercase()}",
             modifier = Modifier.size(width = 23.dp, height = 17.dp).clip(RoundedCornerShape(2.dp)), contentScale = ContentScale.Crop)
-    }
-}
-
-@Composable
-private fun PanelMetric(label: String, value: String, tone: Color, modifier: Modifier = Modifier) {
-    Card(modifier, colors = CardDefaults.cardColors(containerColor = panel)) {
-        Column(Modifier.padding(13.dp)) {
-            Text(label, color = muted, fontSize = 11.sp)
-            Spacer(Modifier.height(3.dp))
-            Text(value, color = tone, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
-        }
     }
 }
 
@@ -2126,7 +2137,7 @@ private fun SettingsForExperts(saved: StoredState, controller: DesktopController
             SettingHeading("", "Соединения с сервером (XHTTP)",
                 "По умолчанию два соединения, все запросы идут по ним. Действует, только если конфиг не задаёт своё.")
             SecurityToggle("Один канал",
-                "Весь трафик пойдёт одним соединением. Включите, если в вашей сети глушат новые соединения. Минус: одна медленная загрузка может притормозить остальное.",
+                "Весь трафик пойдёт одним соединением. Включите, если в вашей сети глушат новые соединения. Минус: одна медленная загрузка может притормозить остальное. Вступит в силу при следующем подключении.",
                 saved.xmuxChannels == app.lernet.engine.compile.XhttpMode.SINGLE_CHANNEL, controller::setXmuxSingleChannel)
         }
         Panel {
@@ -2395,6 +2406,23 @@ internal fun FailoverReportCard(report: FailoverReport) {
                 (report.nextRetry?.let { "Следующая попытка через $it. " } ?: "Пробуем снова автоматически. ") + "Маршруты VPN остаются на месте — трафик не уходит в обход.",
                 color = muted, fontSize = 12.sp,
             )
+        }
+    }
+}
+
+/** Fluent-style InfoBar: a coloured edge, a title, an optional message and actions on the right. */
+@Composable
+private fun InfoBar(title: String, message: String?, tone: Color, modifier: Modifier = Modifier, actions: @Composable RowScope.() -> Unit) {
+    Surface(color = tone.copy(alpha = .10f), shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, tone.copy(alpha = .35f)),
+        modifier = modifier.fillMaxWidth()) {
+        Row(Modifier.padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.SemiBold, color = if (tone == muted) desktopColors.onSurface else tone)
+                message?.takeIf { it.isNotBlank() }?.let {
+                    SelectionContainer { Text(it, fontSize = 13.sp, maxLines = 4, overflow = TextOverflow.Ellipsis) }
+                }
+            }
+            actions()
         }
     }
 }
