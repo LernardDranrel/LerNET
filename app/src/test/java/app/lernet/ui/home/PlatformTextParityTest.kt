@@ -279,6 +279,25 @@ class PlatformTextParityTest {
     }
 
     @Test
+    fun pathCheckWordsMatchWindows() {
+        val w = app.lernet.engine.text.PathCheckWords
+        listOf(
+            "expert_simulation_hint" to w.HINT, "expert_simulation_choose_history" to w.CHOOSE,
+            "expert_simulation_create_example" to w.CREATE, "expert_simulation_edit_parameters" to w.EDIT,
+            "expert_simulation_hide_editor" to w.HIDE_EDITOR, "expert_simulation_history" to w.TAG_HISTORY,
+            "expert_simulation_modified" to w.TAG_MODIFIED, "expert_simulation_new" to w.TAG_NEW,
+            "expert_simulation_history_first" to w.HISTORY_FIRST, "expert_simulation_recorded_path" to w.RECORDED,
+            "expert_simulation_current_path" to w.CURRENT, "expert_simulation_with_edits" to w.WITH_EDITS,
+            "expert_simulation_run" to w.RUN, "expert_simulation_domain" to w.DOMAIN,
+            "expert_simulation_process" to w.PROCESS, "expert_simulation_port" to w.PORT,
+            "expert_simulation_source_port" to w.SOURCE_PORT, "expert_simulation_protocol" to w.PROTOCOL,
+            "expert_simulation_unknown" to w.UNKNOWN, "expert_simulation_invalid_example" to w.INVALID_EXAMPLE,
+            "expert_simulation_incomplete" to w.INCOMPLETE, "expert_simulation_no_match" to w.NO_MATCH,
+            "expert_simulation_invalid" to w.INVALID,
+        ).forEach { (key, value) -> same(key, value) }
+    }
+
+    @Test
     fun schemaWordsMatchWindows() {
         val words = app.lernet.engine.text.SchemaWords
         same("route_schema", words.VIEW_SCHEMA)

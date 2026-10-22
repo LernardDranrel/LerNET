@@ -116,10 +116,11 @@ internal fun ExpertRoutePreview(
         }
     }
     ExpertScrollableColumn(modifier) {
-        ExpertPanel("Симулятор пути") {
-            Text("Выбери соединение из истории, чтобы увидеть его путь или проверить его по текущей схеме. Проверка не отправляет трафик.",
+        // No panel title: the left column already says «Проверка пути» (as on the phone).
+        ExpertPanel("") {
+            Text(app.lernet.engine.text.PathCheckWords.HINT,
                 color = ExpertColors.muted, fontSize = 13.sp)
-            ExpertSelect<String?>("Соединение из истории", listOf(null to "Выбери запись") + state.connections.map {
+            ExpertSelect<String?>("Соединение из истории", listOf(null to app.lernet.engine.text.PathCheckWords.CHOOSE) + state.connections.map {
                 it.id to "${it.application} · ${it.destination} · ${it.protocol}"
             }, history?.id) { id -> state.connections.firstOrNull { it.id == id }?.let(::load) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -133,13 +134,13 @@ internal fun ExpertRoutePreview(
                     version = if (state.applied != null) PreviewVersion.APPLIED else PreviewVersion.SAVED
                     showRecorded = false
                     calculated = false
-                }) { Text("Создать пример") }
+                }) { Text(app.lernet.engine.text.PathCheckWords.CREATE) }
                 TextButton(onClick = {
                     editable = true; editorOpen = !editorOpen; showRecorded = false
                     version = if (state.applied != null) PreviewVersion.APPLIED else PreviewVersion.SAVED
                     calculated = false
-                }, enabled = history != null || editable) { Text(if (editorOpen) "Скрыть параметры" else "Изменить параметры") }
-                ExpertTag(if (history == null) "Новый пример" else if (editable) "Изменённая копия" else "Запись истории")
+                }, enabled = history != null || editable) { Text(if (editorOpen) app.lernet.engine.text.PathCheckWords.HIDE_EDITOR else app.lernet.engine.text.PathCheckWords.EDIT) }
+                ExpertTag(if (history == null) app.lernet.engine.text.PathCheckWords.TAG_NEW else if (editable) app.lernet.engine.text.PathCheckWords.TAG_MODIFIED else app.lernet.engine.text.PathCheckWords.TAG_HISTORY)
             }
             history?.let { flow ->
                 Text("${flow.application} → ${flow.destination} · ${flow.protocol}", color = ExpertColors.text)
@@ -149,19 +150,19 @@ internal fun ExpertRoutePreview(
                     version = PreviewVersion.RECORDED
                     editorOpen = false
                     calculated = false
-                }) { Text(if (version == PreviewVersion.RECORDED && showRecorded) "Скрыть путь" else "Как прошло тогда · показать путь") }
+                }) { Text(if (version == PreviewVersion.RECORDED && showRecorded) "Скрыть путь" else app.lernet.engine.text.PathCheckWords.RECORDED + " · показать путь") }
             }
             if (history == null && !editable) Text(
-                if (state.connections.isEmpty()) "История пока пуста. После включения туннеля здесь появятся соединения. Можно также создать свой пример."
+                if (state.connections.isEmpty()) app.lernet.engine.text.PathCheckWords.HISTORY_FIRST
                 else "Выбери соединение выше. Его исходные данные останутся неизменными.", color = ExpertColors.muted)
             if (history != null || editable) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(version == PreviewVersion.APPLIED || version == PreviewVersion.SAVED, {
                     version = if (state.applied != null) PreviewVersion.APPLIED else PreviewVersion.SAVED
                     showRecorded = false; calculated = true
-                }, label = { Text("Как пройдёт по текущей схеме") })
+                }, label = { Text(app.lernet.engine.text.PathCheckWords.CURRENT) })
                 if (state.hasDraftChanges) FilterChip(version == PreviewVersion.DRAFT, {
                     version = PreviewVersion.DRAFT; showRecorded = false; calculated = true
-                }, label = { Text("С учётом несохранённых правок") })
+                }, label = { Text(app.lernet.engine.text.PathCheckWords.WITH_EDITS) })
             }
             if (showRecorded && policy != null && unresolvedRecordedNodes.isNotEmpty()) ExpertMessage("Узлы записанного пути недоступны",
                 "Узлов записи нет в доступной схеме. Подсветка не подтверждена; можно выполнить новый расчёт.", warning = true)
@@ -169,44 +170,44 @@ internal fun ExpertRoutePreview(
                 "Снимок схемы этого соединения не сохранён. Его прежний путь нельзя подсветить, но можно выполнить расчёт по текущей схеме.", warning = true)
             if (editorOpen) {
                 OutlinedTextField(example.domain.orEmpty(), { example = example.copy(domain = it.known()) }, Modifier.fillMaxWidth(),
-                    label = { Text("Домен, если известен") }, singleLine = true, enabled = editable)
+                    label = { Text(app.lernet.engine.text.PathCheckWords.DOMAIN) }, singleLine = true, enabled = editable)
                 OutlinedTextField(example.destinationIp.orEmpty(), { example = example.copy(destinationIp = it.known()) }, Modifier.fillMaxWidth(),
                     label = { Text("IP назначения, если известен") }, singleLine = true, enabled = editable,
                     isError = !validPreviewIp(example.destinationIp))
                 OutlinedTextField(example.processName.orEmpty(), { example = example.copy(processName = it.known()) }, Modifier.fillMaxWidth(),
-                    label = { Text("Имя процесса Windows, если известно") }, singleLine = true, enabled = editable)
+                    label = { Text(app.lernet.engine.text.PathCheckWords.PROCESS) }, singleLine = true, enabled = editable)
                 if (editable) ExpertSelect("Транспорт", listOf(null to "Неизвестен", "tcp" to "TCP", "udp" to "UDP", "icmp" to "ICMP"),
                     example.network) { example = example.copy(network = it) }
                 else Text("Транспорт: ${example.network ?: "неизвестен"}", color = ExpertColors.muted)
                 TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Скрыть дополнительные данные" else "Дополнительные данные") }
                 if (advanced) {
-                    OutlinedTextField(port, { port = it }, Modifier.fillMaxWidth(), label = { Text("Порт назначения") },
+                    OutlinedTextField(port, { port = it }, Modifier.fillMaxWidth(), label = { Text(app.lernet.engine.text.PathCheckWords.PORT) },
                         singleLine = true, isError = invalidPort, enabled = editable)
                     if (editable) {
                         val protocols = listOf(null to "Неизвестен", "tls" to "TLS", "http" to "HTTP", "quic" to "QUIC", "dns" to "DNS")
-                        ExpertSelect("Распознанный протокол", protocols + listOfNotNull(example.protocol?.takeIf { value ->
+                        ExpertSelect(app.lernet.engine.text.PathCheckWords.PROTOCOL, protocols + listOfNotNull(example.protocol?.takeIf { value ->
                             protocols.none { it.first == value }
                         }?.let { it to it }), example.protocol) { example = example.copy(protocol = it) }
                         ExpertSelect<String?>("Страна IP", listOf(null to "Неизвестна") + CountryNames.all.map {
                             it.code.uppercase() to "${it.code.uppercase()} · ${it.nameRu}"
                         }, example.geoCountry?.uppercase()) { example = example.copy(geoCountry = it) }
                     } else {
-                        Text("Распознанный протокол: ${example.protocol ?: "неизвестен"}", color = ExpertColors.muted)
+                        Text("${app.lernet.engine.text.PathCheckWords.PROTOCOL}: ${example.protocol ?: app.lernet.engine.text.PathCheckWords.UNKNOWN.lowercase()}", color = ExpertColors.muted)
                         Text("Страна IP: ${example.geoCountry ?: "неизвестна"}", color = ExpertColors.muted)
                     }
                     OutlinedTextField(example.sourceIp.orEmpty(), { example = example.copy(sourceIp = it.known()) }, Modifier.fillMaxWidth(),
                         label = { Text("IP источника, если известен") }, singleLine = true, enabled = editable,
                         isError = !validPreviewIp(example.sourceIp))
-                    OutlinedTextField(sourcePort, { sourcePort = it }, Modifier.fillMaxWidth(), label = { Text("Порт источника") },
+                    OutlinedTextField(sourcePort, { sourcePort = it }, Modifier.fillMaxWidth(), label = { Text(app.lernet.engine.text.PathCheckWords.SOURCE_PORT) },
                         singleLine = true, isError = invalidSourcePort, enabled = editable)
                 }
             }
             if (invalidPort || invalidSourcePort || invalidAddress) ExpertMessage("Проверь параметры примера",
-                "Открой параметры: порты должны быть от 0 до 65535, адреса — числовыми IPv4 или IPv6.", error = true)
+                app.lernet.engine.text.PathCheckWords.INVALID_EXAMPLE + " Порты — от 0 до 65535, адреса — числовые IPv4 или IPv6.", error = true)
             if (history != null || editable) Button(onClick = {
                 if (version == PreviewVersion.RECORDED) version = if (state.applied != null) PreviewVersion.APPLIED else PreviewVersion.SAVED
                 showRecorded = false; calculated = true
-            }, enabled = !invalidPort && !invalidSourcePort && !invalidAddress) { Text("Проверить по текущей схеме") }
+            }, enabled = !invalidPort && !invalidSourcePort && !invalidAddress) { Text(app.lernet.engine.text.PathCheckWords.RUN) }
         }
         preview?.takeIf { !showRecorded }?.let { result ->
             ExpertPanel("Результат локального расчёта") {
@@ -220,7 +221,7 @@ internal fun ExpertRoutePreview(
                         if (result.nodeIds.isEmpty()) Text("Применён путь по умолчанию.", color = ExpertColors.muted)
                     }
                     PolicyPreviewConfidence.INCOMPLETE -> {
-                        ExpertMessage("Недостаточно данных", "Неизвестная ранняя ветка может изменить результат. Подтверждённый путь не выбран.", warning = true)
+                        ExpertMessage(app.lernet.engine.text.PathCheckWords.INCOMPLETE, "Неизвестная ранняя ветка может изменить результат. Подтверждённый путь не выбран.", warning = true)
                         result.missingFacts.forEach { Text("Нужно уточнить: $it", color = ExpertColors.muted) }
                         ExpertSelect<Int?>("Возможные ветки", listOf(null to "Выбери ветку для просмотра") + result.candidates.map {
                             it.ruleIndex to "Шаг ${it.ruleIndex + 1} · ${ExpertPolicyEditing.targetName(it.rule.target.target, state)}"
@@ -232,15 +233,15 @@ internal fun ExpertRoutePreview(
                             candidate.match.missingFacts.forEach { Text("Для этой ветки нужно: $it", color = ExpertColors.muted) }
                         }
                     }
-                    PolicyPreviewConfidence.NO_MATCH -> ExpertMessage("Подходящих правил нет", "Подтверждённый путь не найден.", warning = true)
-                    PolicyPreviewConfidence.INVALID -> result.errors.forEach { ExpertMessage("Ошибка схемы", it, error = true) }
+                    PolicyPreviewConfidence.NO_MATCH -> ExpertMessage(app.lernet.engine.text.PathCheckWords.NO_MATCH, "Подтверждённый путь не найден.", warning = true)
+                    PolicyPreviewConfidence.INVALID -> result.errors.forEach { ExpertMessage(app.lernet.engine.text.PathCheckWords.INVALID, it, error = true) }
                 }
             }
         }
         policy?.takeIf { recordedPathAvailable || !showRecorded && preview != null }?.let { selectedPolicy ->
-            ExpertPanel(if (showRecorded) "Как прошло тогда"
+            ExpertPanel(if (showRecorded) app.lernet.engine.text.PathCheckWords.RECORDED
                 else if (selectedCandidate != null) "Возможная ветка · не подтверждена"
-                else "Как пройдёт по схеме") {
+                else app.lernet.engine.text.PathCheckWords.CURRENT) {
                 if (showRecorded && pathIds.isEmpty()) Text("Узлы пути не переданы ядром. Подсветка недоступна.", color = ExpertColors.muted)
                 val scopes = (listOf(PolicyScope.Device) + selectedPolicy.trees.map { it.scope }).distinct()
                 ExpertSelect("Участок пути", scopes.map { it to ExpertPolicyEditing.scopeName(it, state) }, shownScope) {
