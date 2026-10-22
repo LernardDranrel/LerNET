@@ -73,6 +73,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -260,13 +261,22 @@ fun ConfigDrawer(
             header()
             Column(Modifier.padding(horizontal = LerNetDimens.screenPadding, vertical = LerNetDimens.contentPadding)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.drawer_title), style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    Text(stringResource(R.string.drawer_title) + " · " + profiles.size, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                 }
                 Text(
                     stringResource(if (actions.managementOnly) R.string.expert_profiles_hint else R.string.drawer_subtitle),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                 )
+                // «Проверено 3 из 4 · отвечают: 2», as under «Проверить все» in the Windows column.
+                val known = profiles.mapNotNull { probes[it.id] }
+                if (known.isNotEmpty()) {
+                    val done = known.filter { !it.running }
+                    Text(
+                        app.lernet.engine.text.ConfigListWords.summary(done.size, profiles.size, done.count { it.reachable }, known.any { it.running }),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
             if (movingId != null) {
                 Row(
@@ -609,28 +619,27 @@ private fun FolderHeader(
                 Text(group.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false))
                 if (group.autoFailover) {
-                    Surface(shape = RoundedCornerShape(5.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .12f)) {
-                        Icon(LerNetSymbols.autoSwap(), contentDescription = "Автопереключение включено",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(2.dp).size(15.dp))
+                    // The same «АВТО» tag as the Windows column (an icon alone said nothing).
+                    Surface(shape = RoundedCornerShape(5.dp), color = app.lernet.ui.theme.LerNetOk.copy(alpha = .12f),
+                        modifier = Modifier.semantics { contentDescription = app.lernet.engine.text.ConfigListWords.AUTO_DESCRIPTION }) {
+                        Text(app.lernet.engine.text.ConfigListWords.AUTO, color = app.lernet.ui.theme.LerNetOk, style = MaterialTheme.typography.labelSmall,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
                     }
                 }
             }
         },
         supportingContent = {
+            // As in the Windows column: «2 конфига», then «Отвечают: 1 из 2» (or the check in progress).
             val results = group.profileIds.mapNotNull(probe::get)
-            Text(
+            Column {
+                Text(app.lernet.engine.text.ConfigListWords.configCount(group.profileIds.size))
                 if (results.any { it.running }) {
-                    stringResource(R.string.drawer_folder_checking, results.count { it.running }, group.profileIds.size)
-                } else if (results.isEmpty()) {
-                    stringResource(R.string.drawer_folder_count, group.profileIds.size)
-                } else {
-                    stringResource(
-                        R.string.drawer_folder_probe,
-                        results.count { it.reachable }, group.profileIds.size
-                    )
+                    Text(app.lernet.engine.text.ConfigListWords.folderChecking(results.count { it.running }, group.profileIds.size))
+                } else if (results.isNotEmpty()) {
+                    Text(app.lernet.engine.text.ConfigListWords.folderAnswer(results.count { it.reachable }, group.profileIds.size), color = MaterialTheme.colorScheme.primary)
                 }
-            )
+            }
         },
         colors = ListItemDefaults.colors(containerColor = containerColor),
         trailingContent = {

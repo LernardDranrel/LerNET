@@ -209,6 +209,7 @@ class PlatformTextParityTest {
         same("cfg_server_error", EditorWords.SERVER_ERROR)
         same("cfg_port_error", EditorWords.PORT_ERROR)
         same("cfg_disguise", EditorWords.DISGUISE)
+        same("cfg_disguise_why", EditorWords.DISGUISE_WHY)
         same("cfg_sni", EditorWords.SNI)
         same("cfg_fingerprint", EditorWords.FINGERPRINT)
         same("cfg_fingerprint_help", EditorWords.FINGERPRINT_HELP)
@@ -233,6 +234,7 @@ class PlatformTextParityTest {
 
     @Test
     fun importWordsMatchWindows() {
+        same("import_hint", ImportWords.HINT)
         same("import_title", ImportWords.TITLE)
         same("import_input_example", ImportWords.INPUT_EXAMPLE)
         same("paste_clipboard", ImportWords.PASTE)
@@ -313,6 +315,18 @@ class PlatformTextParityTest {
         ).forEach { raw ->
             assertEquals(raw, app.lernet.engine.EngineErrorMapper.map(raw).titleRu(), app.lernet.engine.text.CoreFailureWords.title(raw))
         }
+    }
+
+    @Test
+    fun configListWordsMatchWindows() {
+        val w = app.lernet.engine.text.ConfigListWords
+        same("drawer_title", w.TITLE)
+        assertEquals(strings.getValue("drawer_folder_probe").replace("%1\$d", "1").replace("%2\$d", "2"), w.folderAnswer(1, 2))
+        assertEquals(strings.getValue("drawer_folder_checking").replace("%1\$d", "1").replace("%2\$d", "2"), w.folderChecking(1, 2))
+        assertEquals("1 конфиг", w.configCount(1))
+        assertEquals("2 конфига", w.configCount(2))
+        assertEquals("11 конфигов", w.configCount(11))
+        assertEquals("Проверено 3 из 4 · отвечают: 2", w.summary(3, 4, 2, checking = false))
     }
 
     @Test

@@ -225,9 +225,11 @@ class HomeStatesScreenshotTest {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
                     Box {
                         ConfigDrawer(
-                            profiles = listOf(nl, de, fi), groups = listOf(group), activeProfileId = "nl",
+                            // The same configs, folders and checks as the Windows column (DesktopStatesRenderTest.goodProbes).
+                            profiles = listOf(nl, de, fi, solo), groups = listOf(group, home), activeProfileId = "nl",
                             probes = mapOf("nl" to ProfileProbe(tcpMs = 38, reachable = true, tunnelMs = 142, tunnelChecked = true),
-                                "de" to ProfileProbe(tcpMs = null, reachable = false)),
+                                "de" to ProfileProbe(tcpMs = 51, reachable = true),
+                                "fi" to ProfileProbe(tcpMs = null, reachable = false)),
                             actions = DrawerActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {},
                                 { _, _, _ -> }, { _, _ -> }, {}, { _, _ -> }, { _, _ -> }, { _, _ -> }),
                         )

@@ -791,7 +791,7 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
     }
     Column(Modifier.fillMaxSize()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Конфиги · " + saved.profiles.size, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                Text(app.lernet.engine.text.ConfigListWords.TITLE + " · " + saved.profiles.size, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                 addAction()
             }
             TextButton(onClick = { controller.probe(saved.profiles.map { it.id }) }, enabled = saved.profiles.isNotEmpty() && probes.values.none { it.checking },
@@ -799,8 +799,7 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
             val known = saved.profiles.mapNotNull { probes[it.id] }
             if (known.isNotEmpty()) {
                 val done = known.filter { !it.checking }
-                val summary = "проверено ${done.size} из ${saved.profiles.size} · отвечают: ${done.count { it.latencyMs != null }}"
-                Text(if (known.any { it.checking }) "Проверяем… · $summary" else summary.replaceFirstChar { it.uppercase() },
+                Text(app.lernet.engine.text.ConfigListWords.summary(done.size, saved.profiles.size, done.count { it.latencyMs != null }, known.any { it.checking }),
                     color = muted, fontSize = 12.sp)
             }
             if (selectionLocked) Text("Дождитесь завершения переключения", color = muted, fontSize = 12.sp)
@@ -841,12 +840,12 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                                             fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f, fill = false))
                                         if (group.autoSwap) {
                                             Spacer(Modifier.width(6.dp))
-                                            Text("АВТО", color = green, fontSize = 12.sp,
+                                            Text(app.lernet.engine.text.ConfigListWords.AUTO, color = green, fontSize = 12.sp,
                                                 fontWeight = FontWeight.SemiBold,
                                                 modifier = Modifier.clip(RoundedCornerShape(4.dp))
                                                     .background(green.copy(alpha = .12f))
                                                     .padding(horizontal = 4.dp, vertical = 1.dp)
-                                                    .semantics { contentDescription = "Автосмена включена" })
+                                                    .semantics { contentDescription = app.lernet.engine.text.ConfigListWords.AUTO_DESCRIPTION })
                                         }
                                         Spacer(Modifier.width(4.dp))
                                         FolderChevron(group.id in expanded)
@@ -854,8 +853,11 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                                     Text(configCount(saved.profiles.count { it.groupId == group.id }),
                                         color = muted, fontSize = 12.sp, maxLines = 1)
                                     val groupResults = saved.profiles.filter { it.groupId == group.id }.mapNotNull { probes[it.id] }
-                                    if (groupResults.isNotEmpty()) {
-                                        Text("Отвечают: ${groupResults.count { it.latencyMs != null }} из ${saved.profiles.count { it.groupId == group.id }}",
+                                    val groupTotal = saved.profiles.count { it.groupId == group.id }
+                                    if (groupResults.any { it.checking }) {
+                                        Text(app.lernet.engine.text.ConfigListWords.folderChecking(groupResults.count { it.checking }, groupTotal), color = muted, fontSize = 12.sp, maxLines = 1)
+                                    } else if (groupResults.isNotEmpty()) {
+                                        Text(app.lernet.engine.text.ConfigListWords.folderAnswer(groupResults.count { it.latencyMs != null }, groupTotal),
                                             color = blue, fontSize = 12.sp, maxLines = 1)
                                     }
                                 }
@@ -1283,15 +1285,7 @@ internal fun tunnelStatusText(status: TunnelStatus): String = when (status) {
     TunnelStatus.FAILED -> "Не удалось подключиться"
 }
 
-internal fun configCount(n: Int): String {
-    val word = when {
-        n % 100 in 11..14 -> "конфигов"
-        n % 10 == 1 -> "конфиг"
-        n % 10 in 2..4 -> "конфига"
-        else -> "конфигов"
-    }
-    return "$n $word"
-}
+internal fun configCount(n: Int): String = app.lernet.engine.text.ConfigListWords.configCount(n)
 
 private fun routeOwner(profile: StoredProfile): String = profile.groupId?.let { "grp_$it" } ?: profile.id
 
@@ -2423,7 +2417,7 @@ private fun ImportDialog(groupName: String?, onDismiss: () -> Unit, onImport: (S
         title = { Text(if (groupName == null) ImportWords.TITLE else ImportWords.intoFolder(groupName)) },
         text = {
             Column {
-                Text("Ссылка на сервер (vless://…), JSON-конфиг, архив LerNET или адрес подписки", color = muted)
+                Text(ImportWords.HINT, color = muted)
                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     TextButton(onClick = {
                         value = runCatching { Toolkit.getDefaultToolkit().systemClipboard.getData(DataFlavor.stringFlavor) as String }

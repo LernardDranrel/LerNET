@@ -94,7 +94,7 @@
     <string name="mode_switch_confirm">Сменить</string>
     <string name="cancel">Отмена</string>
     <string name="import_title">Импорт</string>
-    <string name="import_hint">Проверка до сохранения. Ошибки показываются у поля.</string>
+    <string name="import_hint">Ссылка на сервер, JSON-конфиг, архив LerNET или адрес подписки. Проверим до сохранения; ошибки — у поля.</string>
     <string name="import_vless">VLESS</string>
     <string name="import_json_url">URL</string>
     <string name="import_json_paste">JSON</string>

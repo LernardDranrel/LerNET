@@ -167,7 +167,7 @@ internal fun DesktopProfileEditor(
                                 )
                             }
                             EditorPage.REMOTE -> {
-                                Text(EditorWords.REMOTE_HELP, color = editorWarning, fontSize = 12.sp)
+                                Text(EditorWords.REMOTE_HELP, color = editorMuted, fontSize = 12.sp) // muted, as on the phone (it is not a warning)
                                 Text(EditorWords.NODE, fontWeight = FontWeight.SemiBold)
                                 Text(EditorWords.NODE_WHY, color = editorMuted, fontSize = 12.sp)
                                 OutlinedTextField(server, { server = it }, modifier = Modifier.fillMaxWidth(), label = { Text(EditorWords.SERVER) }, isError = server.isBlank(), singleLine = true,
@@ -175,6 +175,7 @@ internal fun DesktopProfileEditor(
                                 OutlinedTextField(port, { port = it }, modifier = Modifier.width(210.dp), label = { Text(EditorWords.PORT) }, isError = parsedPort == null, singleLine = true,
                                     supportingText = { if (parsedPort == null) Text(EditorWords.PORT_ERROR) })
                                 Text(EditorWords.DISGUISE, fontWeight = FontWeight.SemiBold)
+                                Text(EditorWords.DISGUISE_WHY, color = editorMuted, fontSize = 12.sp)
                                 OutlinedTextField(sni, { sni = it }, modifier = Modifier.fillMaxWidth(), label = { Text(EditorWords.SNI) }, singleLine = true)
                                 if (original.hasTls) FingerprintChoice(fingerprint) { fingerprint = it }
                                 if (original.hasTransport) {

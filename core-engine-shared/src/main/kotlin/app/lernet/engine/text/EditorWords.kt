@@ -14,6 +14,7 @@ object EditorWords {
     const val SERVER_ERROR = "Укажите сервер"
     const val PORT_ERROR = "Порт от 1 до 65535"
     const val DISGUISE = "Маскировка"
+    const val DISGUISE_WHY = "Как подключение выглядит для сети: имя сайта для маскировки (SNI) и маскировка Reality. Ключ целиком не показывается."
     const val SNI = "Имя сайта для маскировки (SNI)"
     const val FINGERPRINT = "Отпечаток TLS"
     fun fingerprintDefault(name: String) = "По умолчанию LerNET · $name"
