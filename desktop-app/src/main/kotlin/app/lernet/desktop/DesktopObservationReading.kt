@@ -93,7 +93,7 @@ internal fun SourceReadingGuide(source: ObservationSource, reducedMotion: Boolea
         if (source.detail.isNotBlank()) {
             Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(10.dp)) {
                 SelectionContainer { Column(Modifier.padding(12.dp)) {
-                    Text("Причина, указанная источником", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                    Text("Причина, указанная источником", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                     Text(source.detail, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp))
                 } }
             }
@@ -126,7 +126,7 @@ internal fun ExplainedFields(fields: Map<String, String>) {
                     SelectionContainer { Text(ObservationGuide.fieldValue(key, value), fontSize = 14.sp) }
                     Text(guide.meaning, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, lineHeight = 18.sp)
                     SelectionContainer { Text("Поле ОС: $key${if (ObservationGuide.fieldValue(key, value) != value) " · исходное: $value" else ""}",
-                        fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
             }
         }

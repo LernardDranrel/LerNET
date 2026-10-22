@@ -105,7 +105,7 @@ internal fun DesktopNetworkObservation(
                             Text(item.mark, color = if (page == item) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 18.sp, modifier = Modifier.width(27.dp))
                             Text(item.title, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                            if (count > 0 && item != ObservationPage.OVERVIEW) Text(count.toString(), fontSize = 11.sp,
+                            if (count > 0 && item != ObservationPage.OVERVIEW) Text(count.toString(), fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
@@ -118,7 +118,7 @@ internal fun DesktopNetworkObservation(
                     Text("Меньше движения", fontSize = 12.sp, modifier = Modifier.weight(1f))
                     Switch(reducedMotion, { reducedMotion = it }, Modifier.padding(start = 4.dp).semantics { contentDescription = "Меньше движения" })
                 }
-                Text("Наблюдение не меняет настройки сети.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                Text("Наблюдение не меняет настройки сети.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
             Column(Modifier.weight(1f).fillMaxHeight().padding(if (compact) 16.dp else 28.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -148,7 +148,7 @@ internal fun DesktopNetworkObservation(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         TextButton(onExport, enabled = snapshot != null && !busy) { Text("Сохранить полный разбор") }
                         Spacer(Modifier.weight(1f))
-                        Text("Меньше движения", fontSize = 11.sp)
+                        Text("Меньше движения", fontSize = 12.sp)
                         Switch(reducedMotion, { reducedMotion = it }, Modifier.semantics { contentDescription = "Меньше движения" })
                     }
                 }
@@ -287,7 +287,7 @@ private fun RoutePlayground(snapshot: NetworkSnapshot) {
                             "Метрика ${route.metric} + ${route.interfaceMetric} = ${route.metric.toLong() + route.interfaceMetric.toLong()}",
                             fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp)) }
                     }
-                    Text("Это расчёт настроек, а не подтверждение доступности адреса.", fontSize = 11.sp,
+                    Text("Это расчёт настроек, а не подтверждение доступности адреса.", fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
                 }
             }
@@ -310,7 +310,7 @@ private fun FindingDetail(finding: NetworkFinding, reducedMotion: Boolean, sourc
                 .testTag("network-finding-${finding.code}").semantics { stateDescription = if (expanded) "Доказательства раскрыты" else "Показать доказательства" }.heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(7.dp).background(tint, CircleShape))
                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                    Text(label, color = tint, fontSize = 11.sp)
+                    Text(label, color = tint, fontSize = 12.sp)
                     Text(finding.title, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 3.dp))
                 }
                 Text(if (expanded) "−" else "+", color = tint, fontSize = 22.sp)
@@ -319,10 +319,10 @@ private fun FindingDetail(finding: NetworkFinding, reducedMotion: Boolean, sourc
             if (finding.relatedItems.isNotEmpty()) Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 finding.relatedItems.take(3).forEach { item ->
                     Surface(color = tint.copy(alpha = .08f), shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, tint.copy(alpha = .2f))) {
-                        Text(item.title, color = tint, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                        Text(item.title, color = tint, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
                     }
                 }
-                if (finding.relatedItems.size > 3) Text("+${finding.relatedItems.size - 3}", color = tint, modifier = Modifier.padding(6.dp), fontSize = 11.sp)
+                if (finding.relatedItems.size > 3) Text("+${finding.relatedItems.size - 3}", color = tint, modifier = Modifier.padding(6.dp), fontSize = 12.sp)
             }
             ReadingDisclosure(expanded, reducedMotion) { FindingEvidence(finding, sourceTitles, onSource) }
         }
@@ -345,7 +345,7 @@ private fun FindingEvidence(finding: NetworkFinding, sourceTitles: Map<String, S
                         Text(item.title, fontWeight = FontWeight.SemiBold)
                         SelectionContainer { Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                             item.fields.forEach { (key, value) ->
-                                Text(key, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                                Text(key, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                                 Text(value, fontSize = 12.sp)
                             }
                         } }
@@ -359,7 +359,7 @@ private fun FindingEvidence(finding: NetworkFinding, sourceTitles: Map<String, S
             if (count < finding.evidence.size) TextButton({ count += 8 }) { Text("Показать ещё основания") }
         }
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            finding.sourceIds.forEach { source -> TextButton({ onSource(source) }) { Text("Открыть: ${sourceTitles[source] ?: source}", fontSize = 11.sp) } }
+            finding.sourceIds.forEach { source -> TextButton({ onSource(source) }) { Text("Открыть: ${sourceTitles[source] ?: source}", fontSize = 12.sp) } }
         }
     }
 }
@@ -391,7 +391,7 @@ private fun SourceDetail(source: ObservationSource, query: String, reducedMotion
                 .semantics { stateDescription = if (expanded) "Источник раскрыт" else "Показать записи источника" }.heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(source.title, fontWeight = FontWeight.SemiBold)
-                    Text("${sourceStateLabel(source.state)}${if (!source.complete) " · неполная выборка" else ""} · ${source.rows.size} записей · ${observationTime(source.capturedAt)}", color = stateColor, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                    Text("${sourceStateLabel(source.state)}${if (!source.complete) " · неполная выборка" else ""} · ${source.rows.size} записей · ${observationTime(source.capturedAt)}", color = stateColor, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                 }
                 Text(if (expanded) "−" else "+", fontSize = 22.sp, color = MaterialTheme.colorScheme.primary)
             }
@@ -424,7 +424,7 @@ private fun EvidenceDetail(row: EvidenceRow, sourceId: String, snapshot: Network
                 Spacer(Modifier.width(10.dp))
             }
             Text(reading.summary, fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = if (expanded) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis)
-            Text(if (expanded) "Свернуть ↑" else "Разобраться ↓", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 12.dp))
+            Text(if (expanded) "Свернуть ↑" else "Разобраться ↓", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 12.dp))
         }
         ReadingDisclosure(expanded, reducedMotion) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -457,9 +457,9 @@ private fun ChangeDetail(change: SnapshotChange) {
             Text(ObservationGuide.source(change.sourceId).meaning, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             ReadingBlock("Как понимать изменение", "Мы сравнили два снимка одного источника. Это изменение настройки или доступности данных; оно не показывает, кто его сделал и стало ли соединение работать.")
             SelectionContainer { Column(Modifier.padding(top = 12.dp)) {
-                Text("Было", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Было", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(change.before, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp))
-                Text("Стало", fontSize = 11.sp, color = observationMint)
+                Text("Стало", fontSize = 12.sp, color = observationMint)
                 Text(change.after, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
             } }
         }
@@ -563,7 +563,7 @@ private fun DesktopNetworkSection(section: NetworkParamSection) {
             Text(section.title, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp))
             Row(Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) {
                 listOf("Параметр" to 0.34f, "Значение" to 0.40f, "Обычно" to 0.26f).forEach { (title, weight) ->
-                    Text(title, Modifier.weight(weight), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(title, Modifier.weight(weight), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             section.rows.forEach { row ->
@@ -573,7 +573,7 @@ private fun DesktopNetworkSection(section: NetworkParamSection) {
                     Text("${row.collected.mark} ${row.name}", Modifier.weight(0.34f), fontSize = 12.sp)
                     Column(Modifier.weight(0.40f)) {
                         SelectionContainer { Text(row.value, fontSize = 12.sp) }
-                        if (row.unusual) Text("необычно", fontSize = 11.sp, color = observationAmber, fontWeight = FontWeight.SemiBold)
+                        if (row.unusual) Text("необычно", fontSize = 12.sp, color = observationAmber, fontWeight = FontWeight.SemiBold)
                     }
                     Text(row.usual, Modifier.weight(0.26f), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

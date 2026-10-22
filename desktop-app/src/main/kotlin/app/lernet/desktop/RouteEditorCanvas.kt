@@ -98,7 +98,7 @@ internal fun RouteEditorInspector(
         border = BorderStroke(1.dp, Color(0xFF3B4961))
     ) {
         Column(Modifier.padding(17.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(title, color = Color(0xFFA1AEC4), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text(title, color = Color(0xFFA1AEC4), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             content()
         }
     }
@@ -350,10 +350,10 @@ internal fun RouteEditorNodeFace(
                     title, color = if (muted) Color(0xFFA1AEC4) else Color(0xFFF5F7FB), fontWeight = FontWeight.SemiBold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp
                 )
-                Text(description, color = Color(0xFFA1AEC4), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp)
-                Text(target, color = tone, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp)
+                Text(description, color = Color(0xFFA1AEC4), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
+                Text(target, color = tone, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
             }
-            ordinal?.let { Text(it, color = tone, fontSize = 11.sp, modifier = Modifier.padding(start = 6.dp)) }
+            ordinal?.let { Text(it, color = tone, fontSize = 12.sp, modifier = Modifier.padding(start = 6.dp)) }
         }
     }
 }

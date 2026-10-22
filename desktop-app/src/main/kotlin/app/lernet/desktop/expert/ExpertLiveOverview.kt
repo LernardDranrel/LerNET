@@ -368,7 +368,7 @@ private fun TrafficColumn(
             }
             Text(
                 if (live) "Новые соединения сверху · слежение включено" else "Слежение приостановлено · «К новым» вернёт к свежим",
-                color = ExpertColors.muted, fontSize = 11.sp
+                color = ExpertColors.muted, fontSize = 12.sp
             )
         }
     }
@@ -393,7 +393,7 @@ private fun TrafficRow(flow: ExpertConnection, state: ExpertUiState, rate: FlowR
                     false -> "завершено"
                     null -> "неизвестно"
                 },
-                color = if (flow.active == true) ExpertColors.green else ExpertColors.muted, fontSize = 11.sp
+                color = if (flow.active == true) ExpertColors.green else ExpertColors.muted, fontSize = 12.sp
             )
         }
         Text(flow.destination, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)

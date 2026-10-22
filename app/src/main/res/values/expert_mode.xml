@@ -186,7 +186,7 @@
     <string name="expert_graph_zoom_in">Увеличить схему</string>
     <string name="expert_graph_zoom_out">Уменьшить схему</string>
     <string name="expert_live_exit_details">Связь и запросы через выход</string>
-    <string name="expert_exit_latency">Последний замер: %1$s</string>
+    <string name="expert_exit_latency">Отклик через выход: %1$s</string>
     <string name="expert_latency_ms">%1$d мс</string>
     <string name="expert_exit_last_check">Проверено: %1$s</string>
     <string name="expert_value_unknown">Нет данных</string>

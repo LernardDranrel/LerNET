@@ -727,7 +727,7 @@ private fun ExpertApplicationPicker(
                         }
                         Column(Modifier.weight(1f)) {
                             Text(app.name, color = ExpertColors.text)
-                            Text(app.executable, color = ExpertColors.muted, fontSize = 11.sp)
+                            Text(app.executable, color = ExpertColors.muted, fontSize = 12.sp)
                         }
                         if (app.running) ExpertTag("Запущена", ExpertColors.green)
                     }

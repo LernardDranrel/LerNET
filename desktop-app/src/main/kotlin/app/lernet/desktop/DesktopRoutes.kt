@@ -201,7 +201,7 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
     }) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Column(Modifier.weight(1f)) {
-                Text("ЧЬИ МАРШРУТЫ РЕДАКТИРУЕМ", color = routeMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Text("ЧЬИ МАРШРУТЫ РЕДАКТИРУЕМ", color = routeMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 Box {
                     OutlinedButton(onClick = { ownerMenu = true }) {
                         Text((owners.firstOrNull { it.first == activeOwner }?.second ?: activeOwner) + "  ▾", maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -214,7 +214,7 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
                                 DropdownMenuItem(text = {
                                     Column(Modifier.padding(start = 22.dp)) {
                                         Text("└  ${child.name}")
-                                        Text("Действуют правила папки", color = routeMuted, fontSize = 11.sp)
+                                        Text("Действуют правила папки", color = routeMuted, fontSize = 12.sp)
                                     }
                                 }, onClick = { chooseOwner(child.id) })
                             }
@@ -519,7 +519,7 @@ private fun RouteScheme(
                             val count = pipeSources[name].orEmpty().size
                             if (count > 1) ChannelPortalMark(count)
                         }
-                        Text("Источников: ${pipeSources[name].orEmpty().size}", color = routeMuted, fontSize = 10.sp)
+                        Text("Источников: ${pipeSources[name].orEmpty().size}", color = routeMuted, fontSize = 12.sp)
                     }
                 }
             }
@@ -647,7 +647,7 @@ private fun RouteList(profileId: String, rules: List<StoredRule>, selectedId: St
         }
         if (channels.isNotEmpty()) {
             item(key = "channels-heading") {
-                Text("КАНАЛЫ", color = routeMuted, fontSize = 11.sp,
+                Text("КАНАЛЫ", color = routeMuted, fontSize = 12.sp,
                     modifier = Modifier.padding(start = 8.dp, top = 14.dp, bottom = 3.dp))
             }
             items(channels.entries.toList(), key = { "channel:${it.key}" }) { (name, sources) ->
@@ -667,7 +667,7 @@ private fun RouteList(profileId: String, rules: List<StoredRule>, selectedId: St
                         Spacer(Modifier.width(9.dp))
                         Column {
                             Text(name, color = routeText, fontWeight = FontWeight.Medium)
-                            Text("Источников: ${sources.size}", color = routeMuted, fontSize = 11.sp)
+                            Text("Источников: ${sources.size}", color = routeMuted, fontSize = 12.sp)
                         }
                     }
                 }
@@ -687,8 +687,8 @@ private fun RouteListRowContent(rule: StoredRule, rules: List<StoredRule>, selec
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             val childCount = rules.count { it.parentId == rule.id }
             Text("${ruleSummary(rule)}  ·  ${if (childCount > 0) "Развилка · $childCount ветвей" else actionLabelDesktop(rule)}",
-                color = routeMuted, fontSize = 11.sp, maxLines = 1)
-            if (unavailable) Text("Только Android · неактивно в Windows", color = routeMuted, fontSize = 11.sp)
+                color = routeMuted, fontSize = 12.sp, maxLines = 1)
+            if (unavailable) Text("Только Android · неактивно в Windows", color = routeMuted, fontSize = 12.sp)
         }
         if (selected) RouteListAddButton(onClick = { onAddChild(rule) }, enabled = addEnabled)
     }
@@ -731,7 +731,7 @@ private fun RouteInspector(
                     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text("${index + 1}. ${displayTitle(source)}", color = routeText,
                             fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        Text(ruleBreadcrumb(source.parentId, rules), color = routeMuted, fontSize = 11.sp)
+                        Text(ruleBreadcrumb(source.parentId, rules), color = routeMuted, fontSize = 12.sp)
                     }
                 }
             } else if (rootSelected) {
@@ -747,7 +747,7 @@ private fun RouteInspector(
                 if (platformNote != null) Text(platformNote, color = routeMuted, fontSize = 12.sp)
                 Text("Приоритет ${selected.sortIndex + 1} · ${if (platformNote != null) "Неактивно в Windows" else if (selected.enabled) "Включено" else "Выключено"}", color = routeMuted, fontSize = 12.sp)
                 HorizontalDivider(color = routeBorder)
-                Text(ruleBreadcrumb(selected.parentId, rules), color = routeMuted, fontSize = 11.sp)
+                Text(ruleBreadcrumb(selected.parentId, rules), color = routeMuted, fontSize = 12.sp)
                 Text(ruleSummary(selected), color = routeText, fontSize = 13.sp)
                 val childCount = rules.count { it.parentId == selected.id }
                 Text(if (childCount > 0) "Развилка · исход выбирают дочерние правила" else actionLabelDesktop(selected),
@@ -785,6 +785,7 @@ private fun RouteRuleEditor(draft: StoredRule, rules: List<StoredRule>, onClose:
     ) }
     var action by rememberSaveable(draft.id) { mutableStateOf(draft.action.uppercase()) }
     var namedPipe by rememberSaveable(draft.id) { mutableStateOf(draft.pipeName.isNotBlank()) }
+    val hadPipe = remember(draft.id) { draft.pipeName.isNotBlank() }
     var pipeName by rememberSaveable(draft.id) { mutableStateOf(draft.pipeName) }
     var parentMenu by remember { mutableStateOf(false) }
     var addBlockMenu by remember { mutableStateOf(false) }
@@ -822,7 +823,7 @@ private fun RouteRuleEditor(draft: StoredRule, rules: List<StoredRule>, onClose:
                 candidates.forEach { candidate -> DropdownMenuItem(text = { Text(displayTitle(candidate)) }, onClick = { parentId = candidate.id; priority = rules.count { it.profileId == draft.profileId && it.parentId == candidate.id && it.id != draft.id && !DesktopRouteTree.isElse(it) }; parentMenu = false }) }
             }
         }
-        Text(ruleBreadcrumb(parentId, rules), color = routeMuted, fontSize = 11.sp)
+        Text(ruleBreadcrumb(parentId, rules), color = routeMuted, fontSize = 12.sp)
         if (!wasElse) {
             Text("Приоритет ${priority.coerceIn(0, maxPriority) + 1} · перетащите блок на схеме или в списке, чтобы изменить порядок",
                 color = routeMuted, fontSize = 12.sp)
@@ -830,7 +831,7 @@ private fun RouteRuleEditor(draft: StoredRule, rules: List<StoredRule>, onClose:
         if (!wasElse) {
             Surface(color = routeCard, shape = RoundedCornerShape(12.dp), border = androidx.compose.foundation.BorderStroke(1.dp, routeBorder)) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("УСЛОВИЯ", color = routeMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    Text("УСЛОВИЯ", color = routeMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     Text("Внутри блока значения работают как ИЛИ. Между блоками выберите логику ниже.", color = routeMuted, fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(conditions.join == MatchJoin.OR, onClick = { conditions = conditions.copy(join = MatchJoin.OR) }, label = { Text("ИЛИ") })
@@ -861,16 +862,17 @@ private fun RouteRuleEditor(draft: StoredRule, rules: List<StoredRule>, onClose:
             if (!valid) Text(conditionErrors.joinToString("\n").ifBlank { "Добавьте хотя бы одно значение в каждый блок условия." }, color = routeRed, fontSize = 12.sp)
         } else Text("Правило срабатывает, когда ни одно предыдущее правило этого уровня не подошло.", color = routeMuted)
         if (hasChildren) {
-            Text("РАЗВИЛКА", color = routeBlue, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text("ВЛОЖЕННЫЕ ПРАВИЛА", color = routeBlue, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             Text("Этот блок проверяет условие. Действие задают его дочерние правила, включая обязательное «Иначе».", color = routeMuted, fontSize = 12.sp)
         } else {
-            Text("ДЕЙСТВИЕ", color = routeMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text("ДЕЙСТВИЕ", color = routeMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 basicDesktopActions(draft.action.equals("BLOCK", ignoreCase = true)).forEach { value ->
                     FilterChip(action == value && (value != "PROXY" || !namedPipe),
                         onClick = { action = value; namedPipe = false }, label = { Text(actionLabelDesktop(value)) })
                 }
-                FilterChip(action == "PROXY" && namedPipe,
+                // Audit R2: a separate connection is an Expert tool; a rule that already has one keeps the choice.
+                if (hadPipe) FilterChip(action == "PROXY" && namedPipe,
                     onClick = { action = "PROXY"; namedPipe = true }, label = { Text("Отдельное соединение") })
             }
             if (action == "BLOCK") {
@@ -938,7 +940,7 @@ internal fun RouteConditionBlockEditor(
                         }
                     }
                 }
-                Text("Нажмите значение, чтобы переключить его на отрицательное условие. × удаляет значение.", color = routeMuted, fontSize = 11.sp)
+                Text("Нажмите значение, чтобы переключить его на отрицательное условие. × удаляет значение.", color = routeMuted, fontSize = 12.sp)
             }
             when (block.kind) {
                 ConditionKind.PRIVATE -> if (block.values.isEmpty()) TextButton(onClick = { onChange(block.copy(values = listOf("private"))) }) { Text("Добавить частные сети") }
@@ -1072,7 +1074,7 @@ private fun ProcessPickerDialog(initial: Set<String>, onClose: () -> Unit, onCon
                     }
                 }) { Text("+ Указать файл .exe") }
                 Text("Маршрут сопоставляет имя процесса. Выбранный файл помогает определить его и показать значок.",
-                    color = routeMuted, fontSize = 11.sp)
+                    color = routeMuted, fontSize = 12.sp)
                 Spacer(Modifier.height(8.dp))
                 LazyColumn(Modifier.height(330.dp)) {
                     if (loading) item { Text("Ищем программы…", color = routeMuted) }
@@ -1092,7 +1094,7 @@ private fun ProcessPickerDialog(initial: Set<String>, onClose: () -> Unit, onCon
                             Column {
                                 Text(entry.label, color = routeText, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text("${entry.processName} · ${if (entry.running) "запущена" else "установлена"}",
-                                    color = routeMuted, fontSize = 11.sp, maxLines = 1)
+                                    color = routeMuted, fontSize = 12.sp, maxLines = 1)
                             }
                         }
                     }

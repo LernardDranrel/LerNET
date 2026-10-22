@@ -160,7 +160,7 @@ fun DesktopProfileEditor(profile: StoredProfile, saved: StoredState, controller:
                                     }, enabled = preview?.isValid == true) { Text("Копировать") }
                                 }
                                 if (preview?.isValid == true) {
-                                    SelectionContainer { Text(preview.json, fontFamily = FontFamily.Monospace, color = editorMuted, fontSize = 11.sp) }
+                                    SelectionContainer { Text(preview.json, fontFamily = FontFamily.Monospace, color = editorMuted, fontSize = 12.sp) }
                                 } else Text(preview?.errors?.joinToString("; ") ?: "Заполните адрес и порт сервера", color = desktopColors.error)
                             }
                         }

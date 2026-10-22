@@ -11,6 +11,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -66,6 +67,8 @@ internal fun ExpertExits(
     var externalFingerprint by rememberSaveable { mutableStateOf<String?>(null) }
     var externalDetails by remember { mutableStateOf<TransferProfile?>(null) }
     var liveDetails by remember { mutableStateOf<ExpertExitState?>(null) }
+    // Audit X6: the same exit filter as on Windows.
+    var sleepingOnly by rememberSaveable { mutableStateOf(false) }
     val unsupportedProfiles = remember(bundle.profiles) {
         bundle.profiles.filter {
             runCatching { ExternalExitProfiles.platformRequirement(it) == RoutePlatform.WINDOWS }
@@ -163,7 +166,15 @@ internal fun ExpertExits(
             }
         }
         if (bundle.profiles.isNotEmpty()) ExpertHint(R.string.expert_lifecycle_priority)
-        bundle.profiles.forEach { profile ->
+        if (runtime.exits.isNotEmpty()) {
+            FilterChip(sleepingOnly, { sleepingOnly = !sleepingOnly }, label = { Text(stringResource(R.string.expert_sleeping_only)) },
+                modifier = Modifier.testTag("expert_sleeping_only"))
+        }
+        val shownProfiles = bundle.profiles.filter { profile ->
+            !sleepingOnly || runtime.exits.any { it.key.profileId == profile.id && it.phase == ExitPhase.SLEEPING }
+        }
+        if (sleepingOnly && shownProfiles.isEmpty()) ExpertHint(R.string.expert_sleeping_none)
+        shownProfiles.forEach { profile ->
             val settings = policy.profilePolicies.firstOrNull { it.profileId == profile.id } ?: ProfileExitPolicy(profile.id)
             val external = remember(profile) { ExternalExitProfiles.describe(profile) }
             val windowsOnly = profile.id in unsupportedProfiles

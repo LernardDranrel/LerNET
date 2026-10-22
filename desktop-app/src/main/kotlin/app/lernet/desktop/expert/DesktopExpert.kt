@@ -49,6 +49,8 @@ import androidx.compose.ui.unit.sp
 import app.lernet.desktop.DesktopWorkspaceSidebar
 import app.lernet.desktop.WorkspaceNavigationHeader
 import app.lernet.desktop.WorkspaceNavigationItem
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 
 internal enum class ExpertPage(val title: String) {
     OVERVIEW("Пульт"),
@@ -249,8 +251,6 @@ fun DesktopExpert(
 @Composable
 private fun ExpertWorkspaceMenu(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit) {
     var menu by remember { mutableStateOf(false) }
-    var health by remember { mutableStateOf(false) }
-    var dns by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { menu = true }, modifier = Modifier.semantics { contentDescription = "Настройки экспертного режима" }) {
             Text("⋮", fontSize = 24.sp)
@@ -263,14 +263,6 @@ private fun ExpertWorkspaceMenu(state: ExpertUiState, onIntent: (ExpertIntent) -
                     onIntent(ExpertIntent.ClearConnectionHistory)
                 }, enabled = !state.busy
             )
-            DropdownMenuItem(text = { Text("DNS Эксперта") }, onClick = {
-                menu = false
-                dns = true
-            }, enabled = !state.busy)
-            DropdownMenuItem(text = { Text("Проверки связи") }, onClick = {
-                menu = false
-                health = true
-            }, enabled = !state.busy)
             DropdownMenuItem(
                 text = { Text("Импортировать схему") },
                 onClick = {
@@ -287,8 +279,6 @@ private fun ExpertWorkspaceMenu(state: ExpertUiState, onIntent: (ExpertIntent) -
             )
         }
     }
-    if (dns) ExpertDnsSettings(state, onIntent) { dns = false }
-    if (health) ExpertHealthSettings(state, onIntent) { health = false }
 }
 
 @Composable
@@ -359,7 +349,14 @@ private fun ExpertProtectionPage(
     confirm: (ExpertIntent) -> Unit,
 ) {
     var details by remember { mutableStateOf(false) }
+    var dns by remember { mutableStateOf(false) }
+    var health by remember { mutableStateOf(false) }
     ExpertScrollableColumn(modifier) {
+        // Audit X7: one page «Защита и DNS» — DNS and the connection checks are rows here, not items in ⋮.
+        ExpertPanel("DNS и проверки") {
+            ExpertLinkRow("DNS Эксперта", "Какие серверы отвечают за адреса сайтов в твоей схеме", !state.busy) { dns = true }
+            ExpertLinkRow("Проверки связи", "Как часто и куда Эксперт проверяет выходы", !state.busy) { health = true }
+        }
         ExpertPanel("Защита при отказе") {
             ProtectionRow(
                 "Недоступен отдельный выход", state.protection.exitFailureEnforced,
@@ -393,6 +390,8 @@ private fun ExpertProtectionPage(
             }
         }
     }
+    if (dns) ExpertDnsSettings(state, onIntent) { dns = false }
+    if (health) ExpertHealthSettings(state, onIntent) { health = false }
     if (details) {
         ExpertModal("Границы системной защиты", { details = false }, { details = false }, true, "Понятно", showCancel = false) {
             ExpertMessage(
@@ -440,4 +439,18 @@ private fun navBadge(page: ExpertPage, state: ExpertUiState): String? = when (pa
     }
     ExpertPage.EVENTS -> state.connections.count { it.active == true }.takeIf { it > 0 }?.toString()
     else -> null
+}
+
+@Composable
+private fun ExpertLinkRow(title: String, subtitle: String, enabled: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(enabled = enabled, onClick = onClick).padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = ExpertColors.text, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = ExpertColors.muted, fontSize = 13.sp)
+        }
+        Text("›", color = ExpertColors.muted, fontSize = 20.sp)
+    }
 }

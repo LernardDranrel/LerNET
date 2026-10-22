@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package app.lernet.desktop
 
 import app.lernet.config.net.LocalProxyAccess
@@ -137,6 +139,9 @@ internal val desktopTypography = Typography(
     bodyMedium = TextStyle(fontSize = 13.sp, lineHeight = 20.sp),
     bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 18.sp),
     labelLarge = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold),
+    // Audit A2: nothing on Windows is smaller than 12 sp.
+    labelMedium = TextStyle(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium),
+    labelSmall = TextStyle(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium),
 )
 
 fun main(args: Array<String>) {
@@ -225,11 +230,15 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
         menu = {
             Item("Открыть", onClick = { visible = true })
             Item("Анализ сети", onClick = { networkWindowOpen = true })
-            Item("Отключить", onClick = {
-                if (expertUi?.phase in setOf(ExpertPhase.RUNNING, ExpertPhase.STARTING, ExpertPhase.APPLYING, ExpertPhase.FAILED)) {
-                    expert?.dispatch(ExpertIntent.Stop)
+            // Audit G7: «Подключить» or «Отключить» by the state, like the phone's notification.
+            val expertOn = expertUi?.phase in setOf(ExpertPhase.RUNNING, ExpertPhase.STARTING, ExpertPhase.APPLYING, ExpertPhase.FAILED)
+            val vpnOn = ui.busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RUNNING, TunnelStatus.RECONNECTING)
+            Item(if (expertOn || vpnOn) "Отключить" else "Подключить", onClick = {
+                when {
+                    expertOn -> expert?.dispatch(ExpertIntent.Stop)
+                    vpnOn -> controller.disconnect()
+                    else -> controller.connect()
                 }
-                else controller.disconnect()
             })
             Separator()
             Item("Выход", onClick = { expert?.close(); controller.close(); exitApplication() })
@@ -771,7 +780,7 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                 val done = known.filter { !it.checking }
                 val summary = "проверено ${done.size} из ${saved.profiles.size} · отвечают: ${done.count { it.latencyMs != null }}"
                 Text(if (known.any { it.checking }) "Проверяем… · $summary" else summary.replaceFirstChar { it.uppercase() },
-                    color = muted, fontSize = 11.sp)
+                    color = muted, fontSize = 12.sp)
             }
             if (selectionLocked) Text("Дождитесь завершения переключения", color = muted, fontSize = 12.sp)
             Spacer(Modifier.height(10.dp))
@@ -811,7 +820,7 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                                             fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f, fill = false))
                                         if (group.autoSwap) {
                                             Spacer(Modifier.width(6.dp))
-                                            Text("АВТО", color = green, fontSize = 9.sp,
+                                            Text("АВТО", color = green, fontSize = 12.sp,
                                                 fontWeight = FontWeight.SemiBold,
                                                 modifier = Modifier.clip(RoundedCornerShape(4.dp))
                                                     .background(green.copy(alpha = .12f))
@@ -822,11 +831,11 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                                         FolderChevron(group.id in expanded)
                                     }
                                     Text(configCount(saved.profiles.count { it.groupId == group.id }),
-                                        color = muted, fontSize = 11.sp, maxLines = 1)
+                                        color = muted, fontSize = 12.sp, maxLines = 1)
                                     val groupResults = saved.profiles.filter { it.groupId == group.id }.mapNotNull { probes[it.id] }
                                     if (groupResults.isNotEmpty()) {
                                         Text("Отвечают: ${groupResults.count { it.latencyMs != null }} из ${saved.profiles.count { it.groupId == group.id }}",
-                                            color = blue, fontSize = 10.sp, maxLines = 1)
+                                            color = blue, fontSize = 12.sp, maxLines = 1)
                                     }
                                 }
                                 GroupActionButton("Проверить серверы папки",
@@ -1240,12 +1249,12 @@ private fun HoldActions(saved: StoredState, selected: StoredProfile, controller:
         }
     }
     Text("Выключить VPN можно только вручную. Тогда трафик пойдёт напрямую, и LerNET покажет это.",
-        color = muted, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 6.dp))
+        color = muted, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 6.dp))
 }
 
 @Composable
 private fun HomeChip(text: String, tone: Color) {
-    Text(text, color = tone, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+    Text(text, color = tone, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
         modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(tone.copy(alpha = .13f)).padding(horizontal = 6.dp, vertical = 2.dp))
 }
 
@@ -1279,7 +1288,7 @@ private fun HomeSkippedConditions(saved: StoredState, selected: StoredProfile) {
         }
         if (top.size > 5) Text("и ещё ${top.size - 5}", color = muted, fontSize = 12.sp)
         Text("Такие ветки пропускаются на этом компьютере вместе с вложенными правилами; на Android они работают.",
-            color = muted, fontSize = 11.sp, lineHeight = 15.sp)
+            color = muted, fontSize = 12.sp, lineHeight = 16.sp)
     }
 }
 
@@ -1381,6 +1390,8 @@ private fun GroupActionButton(label: String, onClick: () -> Unit,
         },
         label = "folder-action-fill",
     )
+    // Audit A3: every small icon action names itself on hover.
+    TooltipArea(tooltip = { HoverHint(label) }) {
     Box(Modifier.size(30.dp).clip(RoundedCornerShape(7.dp)).background(fill)
         .hoverable(interaction)
         .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
@@ -1389,23 +1400,28 @@ private fun GroupActionButton(label: String, onClick: () -> Unit,
         }, contentAlignment = Alignment.Center) {
         icon(if (hovered) blue else muted)
     }
+    }
+}
+
+@Composable
+internal fun HoverHint(text: String) {
+    Surface(color = Color(0xFF1B2A3E), shape = RoundedCornerShape(6.dp), shadowElevation = 4.dp) {
+        Text(text, color = desktopColors.onSurface, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp))
+    }
 }
 
 @Composable
 private fun PingGlyph(color: Color) {
+    // Audit A3: a pulse line means «check», unlike ⇅ which reads as «sort».
     Canvas(Modifier.size(18.dp)) {
         val stroke = 1.7.dp.toPx()
-        val left = size.width * .33f
-        val right = size.width * .67f
-        val top = size.height * .19f
-        val bottom = size.height * .81f
-        val wing = size.width * .14f
-        drawLine(color, Offset(left, bottom), Offset(left, top), stroke, cap = StrokeCap.Round)
-        drawLine(color, Offset(left, top), Offset(left - wing, top + wing), stroke, cap = StrokeCap.Round)
-        drawLine(color, Offset(left, top), Offset(left + wing, top + wing), stroke, cap = StrokeCap.Round)
-        drawLine(color, Offset(right, top), Offset(right, bottom), stroke, cap = StrokeCap.Round)
-        drawLine(color, Offset(right, bottom), Offset(right - wing, bottom - wing), stroke, cap = StrokeCap.Round)
-        drawLine(color, Offset(right, bottom), Offset(right + wing, bottom - wing), stroke, cap = StrokeCap.Round)
+        val y = size.height * .55f
+        val points = listOf(
+            Offset(size.width * .06f, y), Offset(size.width * .30f, y), Offset(size.width * .40f, size.height * .25f),
+            Offset(size.width * .52f, size.height * .85f), Offset(size.width * .62f, size.height * .40f),
+            Offset(size.width * .70f, y), Offset(size.width * .94f, y),
+        )
+        points.zipWithNext().forEach { (a, b) -> drawLine(color, a, b, stroke, cap = StrokeCap.Round) }
     }
 }
 
@@ -1498,7 +1514,7 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
                             Text(
                                 word,
                                 color = tone,
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 maxLines = if (probe?.budgetWaitMs != null) 2 else 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -1542,13 +1558,15 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
                     else -> "Не проверено"
                 }, probe?.tunnelLatencyMs?.let { "$it мс" } ?: "—",
                     probe?.tunnelLatencyMs != null, Modifier.weight(1f))
-                TextButton(onClick = onProbe, enabled = probe?.checking != true,
-                    modifier = Modifier.size(28.dp).semantics { contentDescription = "Проверить связь" },
-                    contentPadding = PaddingValues(0.dp)) { PingGlyph(blue) }
+                TooltipArea(tooltip = { HoverHint("Проверить связь") }) {
+                    TextButton(onClick = onProbe, enabled = probe?.checking != true,
+                        modifier = Modifier.size(28.dp).semantics { contentDescription = "Проверить связь" },
+                        contentPadding = PaddingValues(0.dp)) { PingGlyph(blue) }
+                }
             }
             val wait = probe?.budgetWaitMs
             if (!compact && wait != null) {
-                Text(app.lernet.engine.policy.BudgetNotice.short(wait), color = muted, fontSize = 11.sp)
+                Text(app.lernet.engine.policy.BudgetNotice.short(wait), color = muted, fontSize = 12.sp)
             }
         }
     }
@@ -1558,11 +1576,11 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
 private fun ProbeMiniMetric(label: String, status: String, value: String, healthy: Boolean,
     modifier: Modifier = Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(label, color = muted, fontSize = 10.sp, maxLines = 1)
+        Text(label, color = muted, fontSize = 12.sp, maxLines = 1)
         Text(status, color = if (healthy) green else if (status == "Нет ответа" || status == "Не работает")
-            desktopColors.error else muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            desktopColors.error else muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(value, color = if (healthy) green else muted,
-            fontWeight = FontWeight.Medium, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            fontWeight = FontWeight.Medium, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 /** Audit J7: the same filters as on the phone. */
@@ -1781,13 +1799,13 @@ private fun HopJourney(trace: TraceSnapshot, server: String, runningTunnel: Bool
                                         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                                             if (hop.country != null) {
                                                 CountryFlagIcon(hop.country)
-                                                Text(hop.country.uppercase(), color = desktopColors.onSurface, fontSize = 10.sp, lineHeight = 15.sp)
+                                                Text(hop.country.uppercase(), color = desktopColors.onSurface, fontSize = 12.sp, lineHeight = 16.sp)
                                             } else Text(if (hop.ip == null) "···" else "${hop.number}",
                                                 color = if (hop.ip == null) muted else blue, fontSize = 17.sp, fontWeight = FontWeight.Medium)
                                         }
                                     }
                                     Text("${hop.number} · ${hop.rttMs?.let { "$it мс" } ?: "—"}", color = muted,
-                                        fontSize = 10.sp, maxLines = 1)
+                                        fontSize = 12.sp, maxLines = 1)
                                 }
                                 JourneyConnector(Modifier.weight(1f), if (hop.ip == null) desktopColors.outline else blue)
                             }
@@ -1798,7 +1816,7 @@ private fun HopJourney(trace: TraceSnapshot, server: String, runningTunnel: Bool
                 if (overflow) {
                     HorizontalScrollbar(adapter = rememberScrollbarAdapter(scroll), modifier = Modifier.fillMaxWidth().height(7.dp))
                     Spacer(Modifier.height(7.dp))
-                    Text("${trace.hops.size} узлов · прокрутите маршрут по горизонтали", color = muted, fontSize = 11.sp)
+                    Text("${trace.hops.size} узлов · прокрутите маршрут по горизонтали", color = muted, fontSize = 12.sp)
                 }
             }
         }
@@ -1810,7 +1828,7 @@ private fun HopJourney(trace: TraceSnapshot, server: String, runningTunnel: Bool
         }
         if (trace.hops.isNotEmpty()) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("···  Узел не отвечает на трассировку", color = muted, fontSize = 10.sp, modifier = Modifier.weight(1f))
+                Text("···  Узел не отвечает на трассировку", color = muted, fontSize = 12.sp, modifier = Modifier.weight(1f))
                 TextButton(onClick = onDetails) { Text("Все узлы  ↗") }
             }
         }
@@ -1827,7 +1845,7 @@ private fun JourneyEndpoint(label: String, server: Boolean, tone: Color) {
                 if (server) Text("VPN", color = tone, fontSize = 13.sp, fontWeight = FontWeight.Bold) else ProfileGlyph()
             }
         }
-        Text(label, color = muted, fontSize = 11.sp)
+        Text(label, color = muted, fontSize = 12.sp)
     }
 }
 
@@ -1866,7 +1884,7 @@ private fun TraceView(trace: TraceSnapshot, detailsRequest: Int, onRefresh: () -
                             Row(Modifier.padding(horizontal = 7.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 if (hop.country != null) CountryFlagIcon(hop.country)
-                                Text(if (hop.ip == null) "*" else hop.country?.uppercase() ?: "?", color = desktopColors.onSurface, fontSize = 11.sp)
+                                Text(if (hop.ip == null) "*" else hop.country?.uppercase() ?: "?", color = desktopColors.onSurface, fontSize = 12.sp)
                             }
                         }
                     }
@@ -2224,7 +2242,7 @@ internal fun SettingsRunMode(saved: StoredState, controller: DesktopController, 
         else Text("Адрес, логин и пароль прокси появятся здесь после подключения. Логин и пароль можно задать ниже.",
             color = muted, fontSize = 12.sp)
     }
-    Text("Режим применяется при следующем подключении.", color = muted, fontSize = 11.sp)
+    Text("Режим применяется при следующем подключении.", color = muted, fontSize = 12.sp)
 }
 
 @Composable

@@ -160,7 +160,7 @@ internal fun ExpertExits(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit,
                 }
             }
             ReadingRow("Проверка", exit.lastCheck ?: "Подтверждённой проверки ещё нет")
-            ReadingRow("Задержка через выход", exit.latencyMs?.let { "$it мс" } ?: "Нет замера")
+            ReadingRow("Отклик через выход", exit.latencyMs?.let { "$it мс" } ?: "Нет замера")
             ReadingRow("Используется", "${exit.activeFlows} активных · ${exit.pendingFlows} в очереди")
             ReadingRow(
                 "Сон",
@@ -284,10 +284,10 @@ private fun ExpertExitTableHeader() {
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        listOf("Конфиг", "Состояние", "Задержка", "Соединений", "").forEachIndexed { index, title ->
+        listOf("Конфиг", "Состояние", "Отклик", "Соединений", "").forEachIndexed { index, title ->
             Text(
                 title.uppercase(), Modifier.weight(exitColumns[index]),
-                color = ExpertColors.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                color = ExpertColors.muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
             )
         }
     }

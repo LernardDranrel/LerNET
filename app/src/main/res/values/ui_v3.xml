@@ -167,4 +167,7 @@
     <string name="routes_owner_label">Правила для</string>
     <string name="routes_owner_pick">выбрать, чьи правила</string>
     <string name="routes_owner_folder">Папка «%1$s»</string>
+    <!-- Expert exits filter (X6) -->
+    <string name="expert_sleeping_only">Только спящие</string>
+    <string name="expert_sleeping_none">Спящих конфигов нет. Сними фильтр, чтобы увидеть весь список.</string>
 </resources>
