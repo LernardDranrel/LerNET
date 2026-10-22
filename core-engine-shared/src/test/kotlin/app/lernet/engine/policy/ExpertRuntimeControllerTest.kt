@@ -648,24 +648,24 @@ class ExpertRuntimeControllerTest {
         assertEquals(ExitPhase.SLEEPING, controller.state.value.exits.single().phase)
     }
 
-    @Test fun `folder chooses actual healthy HTTPS exit and keeps it despite slightly faster neighbor`() = runTest {
+    @Test fun `folder keeps healthy HTTPS exit despite faster neighbor`() = runTest {
         val backend = FakeBackend().apply {
             probeResults[ExpertExitKey("a")] = ExpertProbeResult(100)
             probeResults[ExpertExitKey("b")] = ExpertProbeResult(50)
         }
+        // Legacy LOWEST_LATENCY migrates to STABLE: never leave a healthy exit for speed.
         val policy = NetworkPolicy(folderPolicies = listOf(FolderPolicy("folder", FolderSelection.LOWEST_LATENCY, autoSwap = true)))
         val controller = controller(backend, initial = policy)
         controller.handle(ExpertIntent.Start)
         val target = PolicyExit(PolicyTarget.Folder("folder", routeScope = null))
         val first = controller.requestExit(target, "flow") as ExpertExitResolution.Ready
-        assertEquals("b", first.key.profileId)
-        // 45 vs 50 ms: below 40 ms / 25 %, no switch.
         controller.onBackendEvent(ExpertBackendEvent.Health(ExpertExitKey("a", folderId = "folder"), ExpertProbeResult(45)))
+        controller.onBackendEvent(ExpertBackendEvent.Health(ExpertExitKey("b", folderId = "folder"), ExpertProbeResult(20)))
         val next = controller.requestExit(target, "next") as ExpertExitResolution.Ready
-        assertEquals("b", next.key.profileId)
+        assertEquals(first.key.profileId, next.key.profileId)
     }
 
-    @Test fun `fastest folder switches for a clear gain at most once per ten minutes`() = runTest {
+    @Test fun `legacy fastest never switches healthy exit for a clear latency gain`() = runTest {
         val backend = FakeBackend().apply {
             probeResults[ExpertExitKey("a")] = ExpertProbeResult(100)
             probeResults[ExpertExitKey("b")] = ExpertProbeResult(200)
@@ -674,13 +674,9 @@ class ExpertRuntimeControllerTest {
         val controller = controller(backend, initial = policy)
         controller.handle(ExpertIntent.Start)
         val target = PolicyExit(PolicyTarget.Folder("folder", routeScope = null))
-        assertEquals("a", (controller.requestExit(target, "one") as ExpertExitResolution.Ready).key.profileId)
+        val first = (controller.requestExit(target, "one") as ExpertExitResolution.Ready).key.profileId
         controller.onBackendEvent(ExpertBackendEvent.Health(ExpertExitKey("b", folderId = "folder"), ExpertProbeResult(20)))
-        assertEquals("b", (controller.requestExit(target, "two") as ExpertExitResolution.Ready).key.profileId)
-        // a is now much faster again, but the last fast switch was moments ago.
-        controller.onBackendEvent(ExpertBackendEvent.Health(ExpertExitKey("a", folderId = "folder"), ExpertProbeResult(5)))
-        controller.onBackendEvent(ExpertBackendEvent.Health(ExpertExitKey("b", folderId = "folder"), ExpertProbeResult(300)))
-        assertEquals("b", (controller.requestExit(target, "three") as ExpertExitResolution.Ready).key.profileId)
+        assertEquals(first, (controller.requestExit(target, "two") as ExpertExitResolution.Ready).key.profileId)
     }
 
     @Test fun `dead active folder exit swaps after two failed checks without replacing TUN`() = runTest {

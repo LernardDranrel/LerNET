@@ -172,11 +172,27 @@ data class DestinationRedirect(val address: String? = null, val port: Int? = nul
 enum class FolderSelection {
     /** The chosen profile while it works; neighbours only on failure. */
     PREFERRED,
-    /** «Самый быстрый»: a faster neighbour only with a clear gain (≥40 ms and ≥25 %), at most once per 10 min. */
+    /**
+     * Kept only so old saved policies still load. «Самый быстрый» is removed (ТСПУ / «только мёртвый»):
+     * [normalized] maps it to [STABLE].
+     */
+    @Deprecated("Removed: use STABLE. Old files migrate via FolderSelection.normalized.")
     LOWEST_LATENCY,
     /** «Самый стабильный»: keep a working exit; after a failure take the one with the cleanest record. */
     STABLE,
 }
+
+/** «Самый быстрый» → «Самый стабильный»; other values unchanged. */
+fun FolderSelection.normalized(): FolderSelection = when (this) {
+    FolderSelection.LOWEST_LATENCY -> FolderSelection.STABLE
+    else -> this
+}
+
+fun FolderPolicy.normalized(): FolderPolicy =
+    if (selection == FolderSelection.LOWEST_LATENCY) copy(selection = FolderSelection.STABLE) else this
+
+fun NetworkPolicy.normalizedFolderSelections(): NetworkPolicy =
+    copy(folderPolicies = folderPolicies.map { it.normalized() })
 
 @Serializable
 data class FolderPolicy(

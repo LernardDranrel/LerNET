@@ -19,6 +19,7 @@ import app.lernet.routing.RoutePlatform
 import app.lernet.routing.policy.ExitLifecyclePolicy
 import app.lernet.routing.policy.FolderPolicy
 import app.lernet.routing.policy.FolderSelection
+import app.lernet.routing.policy.normalized
 import app.lernet.routing.policy.PolicyDestinationAddress
 import app.lernet.routing.policy.PolicyDnsMode
 import app.lernet.routing.policy.PolicyExit
@@ -989,17 +990,12 @@ object PolicyConfigAssembler {
                             put("candidate_tags", JsonArray(folder.candidateTags.map(::JsonPrimitive)))
                             folder.preferredTag?.let { put("preferred_tag", it) }
                             put("auto_swap", folder.policy.autoSwap)
-                            put("selection", if (folder.policy.selection == FolderSelection.LOWEST_LATENCY) "fastest" else "preferred")
-                            // Extra keys: an older core ignores them and keeps the plain selection above.
-                            when (folder.policy.selection) {
-                                FolderSelection.LOWEST_LATENCY -> {
-                                    put("strategy", "fast")
-                                    put("min_gain_ms", FastSwitchRule.MIN_GAIN_MS)
-                                    put("min_gain_percent", FastSwitchRule.MIN_GAIN_PERCENT)
-                                    put("switch_min_interval_ms", FastSwitchRule.MIN_INTERVAL_MS)
-                                }
+                            // «Самый быстрый» removed: emit preferred/stable only (old "fastest" files migrate on load).
+                            val selection = folder.policy.selection.normalized()
+                            put("selection", "preferred")
+                            when (selection) {
                                 FolderSelection.STABLE -> put("strategy", "stable")
-                                FolderSelection.PREFERRED -> Unit
+                                FolderSelection.PREFERRED, FolderSelection.LOWEST_LATENCY -> Unit
                             }
                             // Backups are checked always (also on mobile data), one at a time, never waking a cold exit.
                             put("backup_checks", folder.candidateTags.size > 1)

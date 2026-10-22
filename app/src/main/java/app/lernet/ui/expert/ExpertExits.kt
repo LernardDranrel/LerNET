@@ -42,6 +42,7 @@ import app.lernet.routing.RoutePlatform
 import app.lernet.routing.policy.ExitLifecyclePolicy
 import app.lernet.routing.policy.FolderPolicy
 import app.lernet.routing.policy.FolderSelection
+import app.lernet.routing.policy.normalized
 import app.lernet.routing.policy.PolicyChannel
 import app.lernet.routing.policy.PolicyScope
 import app.lernet.routing.policy.PolicyTarget
@@ -113,26 +114,26 @@ internal fun ExpertExits(
             }
             PanelCard {
                 Text(folder.name, style = MaterialTheme.typography.titleMedium)
-                FolderSelection.entries.forEach { mode ->
+                // «Самый быстрый» removed; old LOWEST_LATENCY shows as «Самый стабильный».
+                val current = settings.selection.normalized()
+                listOf(FolderSelection.PREFERRED, FolderSelection.STABLE).forEach { mode ->
                     OutlinedButton(onClick = { update(settings.copy(selection = mode)) }, modifier = Modifier.fillMaxWidth()) {
                         Text(
                             stringResource(
                                 when (mode) {
                                     FolderSelection.PREFERRED -> R.string.expert_folder_preferred
-                                    FolderSelection.STABLE -> R.string.expert_folder_stable
-                                    FolderSelection.LOWEST_LATENCY -> R.string.expert_folder_fastest
+                                    FolderSelection.STABLE, FolderSelection.LOWEST_LATENCY -> R.string.expert_folder_stable
                                 },
                             )
                         )
-                        if (settings.selection == mode) Text(" ✓")
+                        if (current == mode) Text(" ✓")
                     }
                 }
                 Text(
                     stringResource(
-                        when (settings.selection) {
+                        when (current) {
                             FolderSelection.PREFERRED -> R.string.expert_folder_preferred_hint
-                            FolderSelection.STABLE -> R.string.expert_folder_stable_hint
-                            FolderSelection.LOWEST_LATENCY -> R.string.expert_folder_fastest_hint
+                            FolderSelection.STABLE, FolderSelection.LOWEST_LATENCY -> R.string.expert_folder_stable_hint
                         },
                     ),
                     style = MaterialTheme.typography.bodySmall,

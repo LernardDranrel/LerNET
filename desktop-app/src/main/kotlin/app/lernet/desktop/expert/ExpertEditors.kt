@@ -50,6 +50,7 @@ import app.lernet.routing.policy.DestinationRedirect
 import app.lernet.routing.policy.ExitLifecyclePolicy
 import app.lernet.routing.policy.FolderPolicy
 import app.lernet.routing.policy.FolderSelection
+import app.lernet.routing.policy.normalized
 import app.lernet.routing.policy.PolicyChannel
 import app.lernet.routing.policy.PolicyDestinationAddress
 import app.lernet.routing.policy.PolicyNode
@@ -551,7 +552,6 @@ internal fun ExpertFolderEditor(
             listOf(
                 FolderSelection.PREFERRED to "Предпочтительный",
                 FolderSelection.STABLE to "Самый стабильный",
-                FolderSelection.LOWEST_LATENCY to "Самый быстрый"
             ),
             policy.selection
         ) { policy = policy.copy(selection = it) }
@@ -765,15 +765,13 @@ private fun withFallback(target: PolicyTarget, fallback: UnavailableFallback): P
     PolicyTarget.Direct, PolicyTarget.Block, PolicyTarget.CurrentExit, is PolicyTarget.Channel -> target
 }
 
-internal fun folderStrategyTitle(selection: FolderSelection): String = when (selection) {
+internal fun folderStrategyTitle(selection: FolderSelection): String = when (selection.normalized()) {
     FolderSelection.PREFERRED -> "Предпочтительный"
-    FolderSelection.STABLE -> "Самый стабильный"
-    FolderSelection.LOWEST_LATENCY -> "Самый быстрый"
+    FolderSelection.STABLE, FolderSelection.LOWEST_LATENCY -> "Самый стабильный"
 }
 
-internal fun folderStrategyText(selection: FolderSelection): String = when (selection) {
+internal fun folderStrategyText(selection: FolderSelection): String = when (selection.normalized()) {
     FolderSelection.PREFERRED -> "Работает выбранный конфиг. Соседи — только если он перестал отвечать."
-    FolderSelection.STABLE -> "Рабочий выход не меняется. После сбоя берётся тот, у кого меньше всего сбоев за последние 30 минут."
-    FolderSelection.LOWEST_LATENCY -> "На более быстрый выход переходим, только если он быстрее на 40 мс и на 25 %, и не чаще раза в 10 минут. " +
-        "Открытые соединения доживают на прежнем выходе, новые идут через новый."
+    FolderSelection.STABLE, FolderSelection.LOWEST_LATENCY ->
+        "Рабочий выход не меняется. После сбоя берётся тот, у кого меньше всего сбоев за последние 30 минут."
 }

@@ -323,7 +323,7 @@ class PolicyConfigAssemblerTest {
         val policy = NetworkPolicy(
             device = PolicyTree(PolicyScope.Device, listOf(PolicyNode("folder", target = PolicyTarget.Folder("eu")))),
             trees = listOf(tree),
-            folderPolicies = listOf(FolderPolicy("eu", FolderSelection.LOWEST_LATENCY, "nl", autoSwap = true)),
+            folderPolicies = listOf(FolderPolicy("eu", FolderSelection.STABLE, "nl", autoSwap = true)),
         )
         val config = PolicyConfigAssembler.assemble(workspace(policy), EnginePlatform.WINDOWS)
         assertTrue(config.errors.toString(), config.isValid)
@@ -331,12 +331,10 @@ class PolicyConfigAssemblerTest {
         val folder = config.folders.single()
         assertEquals(2, folder.candidateTags.size)
         val manifest = (root(config.exitManifestJson).getValue("folders") as JsonArray).single().jsonObject
-        assertEquals("fastest", manifest.getValue("selection").jsonPrimitive.content)
-        // The core learns the «самый быстрый» thresholds and that backups are checked always.
-        assertEquals("fast", manifest.getValue("strategy").jsonPrimitive.content)
-        assertEquals("40", manifest.getValue("min_gain_ms").jsonPrimitive.content)
-        assertEquals("25", manifest.getValue("min_gain_percent").jsonPrimitive.content)
-        assertEquals("600000", manifest.getValue("switch_min_interval_ms").jsonPrimitive.content)
+        assertEquals("preferred", manifest.getValue("selection").jsonPrimitive.content)
+        // «Самый быстрый» removed: stable strategy, backups still checked always.
+        assertEquals("stable", manifest.getValue("strategy").jsonPrimitive.content)
+        assertTrue("min_gain_ms" !in manifest)
         assertEquals("true", manifest.getValue("backup_checks").jsonPrimitive.content)
         assertEquals("true", manifest.getValue("auto_swap").jsonPrimitive.content)
         assertTrue(rules(config).any { it["outbound"]?.jsonPrimitive?.content == folder.tag })

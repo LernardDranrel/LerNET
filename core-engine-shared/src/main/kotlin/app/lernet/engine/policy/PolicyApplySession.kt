@@ -2,6 +2,7 @@ package app.lernet.engine.policy
 
 import app.lernet.routing.RoutePlatform
 import app.lernet.routing.policy.NetworkPolicy
+import app.lernet.routing.policy.normalizedFolderSelections
 import app.lernet.routing.policy.PolicyInventory
 import app.lernet.routing.policy.PolicyProgram
 import app.lernet.routing.policy.PolicyProgramCompiler
@@ -37,13 +38,14 @@ data class PolicyApplyState(
 
 /** Publication requires an acknowledgement from an atomic backend and the original TUN identity. */
 class PolicyApplySession(initial: NetworkPolicy, private val platform: RoutePlatform) {
-    @Volatile var saved: NetworkPolicy = initial
+    // «Самый быстрый» → «Самый стабильный» for old saved policies.
+    @Volatile var saved: NetworkPolicy = initial.normalizedFolderSelections()
         private set
 
-    @Volatile var draft: NetworkPolicy = initial
+    @Volatile var draft: NetworkPolicy = initial.normalizedFolderSelections()
         private set
 
-    @Volatile var state = PolicyApplyState(initial.revision)
+    @Volatile var state = PolicyApplyState(saved.revision)
         private set
     private var generation = 0L
     private var pending: PolicyApplyTicket? = null
@@ -52,7 +54,7 @@ class PolicyApplySession(initial: NetworkPolicy, private val platform: RoutePlat
 
     @Synchronized
     fun edit(policy: NetworkPolicy) {
-        draft = policy.copy(revision = saved.revision)
+        draft = policy.normalizedFolderSelections().copy(revision = saved.revision)
     }
 
     @Synchronized
@@ -64,7 +66,7 @@ class PolicyApplySession(initial: NetworkPolicy, private val platform: RoutePlat
     @Synchronized
     fun save(inventory: PolicyInventory, persist: (NetworkPolicy) -> Unit): List<String> {
         if (pending != null) return listOf("Дождись применения предыдущей версии")
-        val candidate = draft.copy(revision = Math.addExact(saved.revision, 1))
+        val candidate = draft.normalizedFolderSelections().copy(revision = Math.addExact(saved.revision, 1))
         val program = PolicyProgramCompiler.compile(candidate, inventory, platform)
         if (!program.isValid) return program.errors.map { it.message }
         persist(candidate)

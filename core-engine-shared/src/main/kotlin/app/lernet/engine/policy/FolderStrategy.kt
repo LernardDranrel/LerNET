@@ -3,11 +3,10 @@ package app.lernet.engine.policy
 import kotlin.random.Random
 
 /**
- * «Самый быстрый»: a faster neighbour replaces a healthy exit only when the gain is real and rare.
- * Both conditions must hold (≥40 ms AND ≥25 %), and at most one such switch per 10 minutes, so two
- * servers with similar latency never ping-pong. A failure is not a "fast switch": failover still
- * happens at once.
+ * Legacy thresholds of the removed «Самый быстрый» strategy. Kept for reading old manifests; selection
+ * no longer leaves a healthy exit for speed (ТСПУ / «только мёртвый»).
  */
+@Deprecated("«Самый быстрый» removed; folder selection migrates to STABLE.")
 object FastSwitchRule {
     const val MIN_GAIN_MS = 40L
     const val MIN_GAIN_PERCENT = 25L
