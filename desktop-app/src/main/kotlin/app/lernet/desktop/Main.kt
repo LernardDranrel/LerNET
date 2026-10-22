@@ -134,21 +134,34 @@ internal val desktopTypography = Typography(
 
 fun main(args: Array<String>) {
     val startupCheck = args.firstOrNull { it.startsWith("--verify-startup=") }?.substringAfter('=')
+    // Started by «Запускать при входе в систему»: open in the tray and bring back a VPN that was left on.
+    val autostart = WindowsAutostart.ARGUMENT in args
     var startupFallbackMessage: String? = null
     if (startupCheck == null && System.getProperty("os.name").startsWith("Windows")) {
         val saved = runCatching { DesktopStore().load() }.getOrDefault(StoredState())
+        if (autostart && !saved.autostart) return
         if (DesktopStartup.needsElevation(saved, WindowsElevation.isElevated)) {
-            val elevation = WindowsElevation.relaunchAsAdministrator()
+            val elevation = WindowsElevation.relaunchAsAdministrator(if (autostart) WindowsAutostart.ARGUMENT else null)
             if (elevation.isSuccess) return
             startupFallbackMessage = "Не удалось запустить VPN от имени администратора. Доступен локальный прокси: " +
                 (elevation.exceptionOrNull()?.let { app.lernet.engine.text.UserText.of(it, "запрос прав отменён") } ?: "запрос прав отменён")
         }
     }
-    desktopApplication(startupCheck, startupFallbackMessage)
+    desktopApplication(startupCheck, startupFallbackMessage, autostart)
 }
 
-private fun desktopApplication(startupCheck: String?, startupFallbackMessage: String?) = application {
-    val controller = remember { DesktopController().also { startupFallbackMessage?.let(it::showMessage) } }
+private fun desktopApplication(startupCheck: String?, startupFallbackMessage: String?, autostart: Boolean = false) = application {
+    val controller = remember {
+        DesktopController().also {
+            startupFallbackMessage?.let(it::showMessage)
+            if (startupCheck == null) {
+                it.startSubscriptionSchedule()
+                it.syncAutostart()
+                // The VPN comes back only if the user left it on; «Отключить» clears that.
+                if (autostart && it.sessionMarks.resumeWanted) it.connect()
+            }
+        }
+    }
     val expert = remember { if (startupCheck == null) DesktopExpertController(controller) else null }
     DisposableEffect(controller, expert) {
         val closed = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -164,7 +177,7 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
             closeController()
         }
     }
-    var visible by remember { mutableStateOf(true) }
+    var visible by remember { mutableStateOf(!autostart) }
     var networkWindowOpen by remember { mutableStateOf(false) }
     val windowState = rememberWindowState(size = DpSize(1180.dp, 760.dp))
     val tunnel by controller.tunnel.state.collectAsState()
@@ -836,6 +849,7 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                         ProfileRow(profile, profile.id == saved.selectedProfileId, !selectionLocked, probes[profile.id],
                             onProbe = { controller.probe(listOf(profile.id)) }, onMove = { controller.moveProfile(profile.id, it) },
                             onDuplicate = { controller.duplicateProfile(profile.id) },
+                            onRefreshSubscription = profile.subscriptionUrl?.takeIf(String::isNotBlank)?.let { url -> { controller.refreshSubscription(url) } },
                             groups = saved.groups, onSetGroup = { destination ->
                                 if (controller.setGroup(profile.id, destination) && destination != null) expanded = expanded + destination
                             },
@@ -851,6 +865,7 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                     ProfileRow(profile, profile.id == saved.selectedProfileId, !selectionLocked, probes[profile.id],
                         onProbe = { controller.probe(listOf(profile.id)) }, onMove = { controller.moveProfile(profile.id, it) },
                         onDuplicate = { controller.duplicateProfile(profile.id) },
+                        onRefreshSubscription = profile.subscriptionUrl?.takeIf(String::isNotBlank)?.let { url -> { controller.refreshSubscription(url) } },
                         groups = saved.groups, onSetGroup = { destination ->
                             if (controller.setGroup(profile.id, destination) && destination != null) expanded = expanded + destination
                         },
@@ -1496,6 +1511,7 @@ private fun ProfileGlyph() {
 @Composable
 private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boolean, probe: ProbeResult?, onProbe: () -> Unit,
     onMove: (Int) -> Unit, onDuplicate: () -> Unit, groups: List<StoredGroup>, onSetGroup: (String?) -> Unit,
+    onRefreshSubscription: (() -> Unit)? = null,
     dragging: Boolean, dropTarget: Boolean, indent: Boolean, dragOffset: Offset,
     onBounds: (Rect) -> Unit, onDragStart: (Offset) -> Unit, onDrag: (Offset) -> Unit, onDragEnd: () -> Unit,
     onDelete: () -> Unit, compact: Boolean = false, onClick: () -> Unit) {
@@ -1548,6 +1564,10 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
                         DropdownMenuItem(text = { Text("Ниже") }, onClick = { onMove(1); menu = false })
                         DropdownMenuItem(text = { Text("Переместить в папку…") }, onClick = { menu = false; folderMenu = true })
                         DropdownMenuItem(text = { Text("Дублировать") }, onClick = { onDuplicate(); menu = false })
+                        // Your choice, renames and edits are kept; the change takes effect at the next connect.
+                        onRefreshSubscription?.let { refresh ->
+                            DropdownMenuItem(text = { Text("Обновить подписку") }, onClick = { refresh(); menu = false })
+                        }
                     }
                     DropdownMenu(folderMenu, onDismissRequest = { folderMenu = false }) {
                         DropdownMenuItem(text = { Text("Без папки") }, onClick = { onSetGroup(null); folderMenu = false })
@@ -1625,6 +1645,21 @@ private fun Diagnostics(saved: StoredState, tunnel: TunnelSnapshot, diagnostics:
             FilterChip(display == "history", onClick = { display = "history" }, label = { Text("История · ${history.size}") })
             Spacer(Modifier.width(7.dp))
             FilterChip(display == "log", onClick = { display = "log" }, label = { Text("Технический журнал") })
+        }
+        if (display == "log") Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                // Secrets (keys, passwords, links) are removed from the journal before it is written.
+                TextButton(onClick = {
+                    java.awt.Toolkit.getDefaultToolkit().systemClipboard
+                        .setContents(java.awt.datatransfer.StringSelection(controller.journalForClipboard()), null)
+                    controller.showMessage("Последние строки журнала скопированы")
+                }) { Text("Скопировать") }
+                TextButton(onClick = {
+                    val dialog = FileDialog(null as Frame?, "Сохранить журнал", FileDialog.SAVE)
+                    dialog.file = "LerNET-журнал-" + java.time.LocalDate.now() + ".txt"
+                    dialog.isVisible = true
+                    dialog.file?.let { controller.saveJournal(Path.of(dialog.directory, it)) }
+                    dialog.dispose()
+                }) { Text("Сохранить журнал") }
         }
         if (diagnostics.error.isNotBlank() && tunnel.status == TunnelStatus.RUNNING) {
             Text(diagnostics.error, color = desktopColors.error, fontSize = 12.sp)
@@ -1799,7 +1834,7 @@ private fun TraceView(trace: TraceSnapshot, detailsRequest: Int, onRefresh: () -
                 TextButton(onClick = onRefresh) { Text("Проверить путь") }
                 TextButton(onClick = { expanded = !expanded }, enabled = trace.hops.isNotEmpty()) { Text(if (expanded) "Свернуть" else "Подробности") }
             }
-            Text(trace.message.ifBlank { "Путь появится после проверки. Подключаться для этого не нужно." }, color = muted, fontSize = 12.sp)
+            Text(trace.message.ifBlank { "Путь проверяется только по кнопке «Проверить путь»: проверка идёт мимо VPN. Подключаться для этого не нужно." }, color = muted, fontSize = 12.sp)
             if (trace.hops.isNotEmpty()) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text("Компьютер", color = desktopColors.onSurface, fontSize = 12.sp)
@@ -1876,7 +1911,6 @@ private fun bytesText(value: Long): String = when {
 @Composable
 internal fun Settings(saved: StoredState, controller: DesktopController, onRequestElevation: () -> Unit,
     localProxy: LocalProxyAccess? = null, locked: Boolean = false) {
-    var path by remember(saved.corePath) { mutableStateOf(saved.corePath) }
     var mtu by remember(saved.tunMtu) { mutableStateOf(saved.tunMtu.toString()) }
     var xmuxMin by remember(saved.xmuxConcurrency) { mutableStateOf(saved.xmuxConcurrency.substringBefore('-')) }
     var xmuxMax by remember(saved.xmuxConcurrency) { mutableStateOf(saved.xmuxConcurrency.substringAfter('-')) }
@@ -1939,7 +1973,7 @@ internal fun Settings(saved: StoredState, controller: DesktopController, onReque
             ) {
                 Column(Modifier.weight(1f)) {
                     Text("Дополнительно", style = MaterialTheme.typography.titleLarge)
-                    Text("MTU, XMUX, журнал, рукопожатие TLS, адрес проверки связи, путь к ядру",
+                    Text("MTU, XMUX, журнал, рукопожатие TLS, адрес проверки связи",
                         color = muted, fontSize = 12.sp)
                 }
                 FolderChevron(advanced)
@@ -2039,11 +2073,16 @@ internal fun Settings(saved: StoredState, controller: DesktopController, onReque
                     enabled = journalMb.toIntOrNull()?.let { it in 1..500 && it != saved.journalMaxMb } == true) { Text("Сохранить") }
             }
         }
+        Panel {
+            SettingHeading("ЗАПУСК", "Автозапуск", "LerNET сам возвращает VPN после перезагрузки компьютера, как и на телефоне.")
+            SecurityToggle("Запускать при входе в систему",
+                "LerNET запустится в трее и, если VPN был включён, сам подключит его снова. Кнопка «Отключить» отменяет это до следующего подключения.",
+                saved.autostart, controller::setAutostart)
+        }
         if (advanced) Panel {
+            // Only the bundled, hash-checked core runs: the leak guard lets exactly this file through Windows.
             SettingHeading("ЯДРО", "sing-box-lx " + WindowsBoxProcess.PINNED_CORE_VERSION,
-                "Встроенное ядро поддерживает Android-конфиги и XHTTP. Пустое поле использует комплектную версию.")
-            OutlinedTextField(path, { path = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Свой путь к sing-box.exe") }, singleLine = true)
-            Button(onClick = { controller.setCorePath(path) }, enabled = path != saved.corePath) { Text("Сохранить путь") }
+                "LerNET работает только со своим встроенным ядром: оно проверено и одинаково на Android и Windows.")
         }
     }
 }

@@ -57,6 +57,10 @@ Name: "{autodesktop}\LerNET"; Filename: "{app}\LerNET.exe"; Tasks: desktopicon
 [Run]
 Filename: "{app}\LerNET.exe"; Description: "Запустить LerNET"; Flags: postinstall nowait skipifsilent
 
+[UninstallRun]
+; «Запускать при входе в систему» lives in Task Scheduler; remove it with the program.
+Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""LerNET\Autostart"" /F"; Flags: runhidden; RunOnceId: "DeleteAutostart"
+
 [Code]
 const
   UninstallRoot = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';

@@ -16,6 +16,16 @@ class SecretRedactorTest {
     }
 
     @Test
+    fun redactsShareLinksOfEveryProtocol() {
+        val raw = "trojan://pw1@h:443 ss://YWVzOnB3@h:1 hy2://pw2@h:1 tuic://u:pw3@h:1 vmess://eyJpZCI6InB3NCJ9 hysteria2://pw5@h:1"
+        val redacted = SecretRedactor.redact(raw)
+        listOf("pw1", "YWVzOnB3", "pw2", "pw3", "eyJpZCI6InB3NCJ9", "pw5").forEach { assertThat(redacted).doesNotContain(it) }
+        assertThat(redacted).contains("trojan://***")
+        assertThat(redacted).contains("tuic://***")
+        assertThat(SecretRedactor.redact("class://keep")).isEqualTo("class://keep")
+    }
+
+    @Test
     fun redactsAssembledJsonSecrets() {
         val raw = """{"outbounds":[{"uuid":"11111111-1111-1111-1111-111111111111",""" +
             """"password":"pw","private_key":"pk","pbk":"pub","sid":"abcd"}]}"""

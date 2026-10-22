@@ -1084,6 +1084,11 @@ class ConnectionControllerTest {
         controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
         runCurrent()
         assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
+        // The path check goes past the VPN: connecting never starts it.
+        assertThat(tracer.started).isFalse()
+        controller.refreshHop()
+        runCurrent()
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
         assertThat(controller.snapshot.value.hopRunning).isTrue()
         assertThat(tracer.started).isTrue()
         assertThat(tracer.finished).isFalse()
@@ -1108,6 +1113,8 @@ class ConnectionControllerTest {
         controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
         runCurrent()
         assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
+        controller.refreshHop()
+        runCurrent()
         assertThat(controller.snapshot.value.hopRunning).isTrue()
         assertThat(controller.snapshot.value.hops).hasSize(1)
         assertThat(controller.snapshot.value.hops[0].timedOut).isTrue()
@@ -1123,7 +1130,7 @@ class ConnectionControllerTest {
     }
 
     @Test
-    fun connectTracesTheDialTargetOnceUntilManualRefresh() = runTest(dispatcher) {
+    fun connectNeverTracesThePathOnItsOwnOnlyTheButtonDoes() = runTest(dispatcher) {
         val engine = RecordingBoxEngine()
         val tracer = CountingHopTracer()
         val controller = controller(
@@ -1138,29 +1145,25 @@ class ConnectionControllerTest {
         )
         controller.pathTracer = tracer
         reachConnected(this, controller, engine)
-        val hops = controller.snapshot.value.hops
-        assertThat(tracer.calls).isEqualTo(1)
-        // Instant tracer finished before TCP (timedOut), then TCP seals a synthetic dest.
-        assertThat(hops).hasSize(2)
-        assertThat(hops[0].address).isEqualTo("example.com")
-        assertThat(hops[0].timedOut).isTrue()
-        assertThat(hops[1].synthetic).isTrue()
-        assertThat(hops[1].timedOut).isFalse()
-        assertThat(controller.snapshot.value.hopChecked).isTrue()
+        assertThat(tracer.calls).isEqualTo(0)
+        assertThat(controller.snapshot.value.hops).isEmpty()
+        assertThat(controller.snapshot.value.hopChecked).isFalse()
 
         testScheduler.advanceTimeBy(7_000)
         runCurrent()
-        assertThat(tracer.calls).isEqualTo(1)
+        assertThat(tracer.calls).isEqualTo(0)
+        assertThat(controller.snapshot.value.hops).isEmpty()
         assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
 
         controller.refreshHop()
         runCurrent()
-        assertThat(tracer.calls).isEqualTo(2)
-        assertThat(controller.snapshot.value.hops.single().timedOut).isFalse()
+        assertThat(tracer.calls).isEqualTo(1)
+        assertThat(controller.snapshot.value.hopChecked).isTrue()
+        assertThat(controller.snapshot.value.hops.first().address).isEqualTo("example.com")
     }
 
     @Test
-    fun failedTcpProbeRetriesAndRecordsOnePath() = runTest(dispatcher) {
+    fun retriesNeverTraceThePath() = runTest(dispatcher) {
         val engine = RecordingBoxEngine()
         val tracer = CountingHopTracer()
         val controller = controller(
@@ -1173,9 +1176,10 @@ class ConnectionControllerTest {
         controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
         runCurrent()
         assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.RECONNECTING)
-        assertThat(tracer.calls).isAtLeast(1)
-        assertThat(controller.snapshot.value.hops.single().timedOut).isTrue()
-        assertThat(controller.snapshot.value.hops.single().country).isNull()
+        testScheduler.advanceTimeBy(60_000)
+        runCurrent()
+        assertThat(tracer.calls).isEqualTo(0)
+        assertThat(controller.snapshot.value.hops).isEmpty()
     }
 
     @Test

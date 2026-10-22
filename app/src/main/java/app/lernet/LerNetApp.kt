@@ -17,6 +17,8 @@ import app.lernet.ui.expert.ExpertCoordinator
 class LerNetApp : Application() {
     @Inject lateinit var expertCoordinator: ExpertCoordinator
     @Inject lateinit var simpleSessionCoordinator: app.lernet.vpn.SimpleSessionCoordinator
+    @Inject lateinit var subscriptions: app.lernet.subscription.SubscriptionAutoRefresh
+    private val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
     lateinit var logStore: AppLogStore
         private set
 
@@ -40,6 +42,8 @@ class LerNetApp : Application() {
         )
         LibboxNative.warmupFromApplication(this)
         CrashTrail.mark("application onCreate warmup scheduled")
+        // Subscriptions refresh on their own schedule while LerNET runs (with the VPN on, the service keeps it running).
+        subscriptions.start(appScope)
     }
 
     companion object {

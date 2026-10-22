@@ -249,6 +249,24 @@ class WindowsBoxProcess internal constructor(
         runCatching { appendJournal(line) }
     }
 
+    /**
+     * «Сохранить журнал»: the previous and the current segment, oldest first, with secrets removed once more
+     * (lines are already redacted on write). [header] goes on top: version and system, no personal data.
+     */
+    fun journalText(header: String, maxBytes: Long = 20L * 1024 * 1024): String = synchronized(journalLock) {
+        val parts = listOf(directory.resolve("session.log.1"), directory.resolve("session.log"))
+            .filter(Files::exists)
+            .map { path ->
+                val size = Files.size(path)
+                Files.newInputStream(path).use { input ->
+                    if (size > maxBytes) input.skipNBytes(size - maxBytes)
+                    String(input.readAllBytes(), Charsets.UTF_8)
+                }
+            }
+        val body = parts.joinToString("").takeLast(maxBytes.toInt())
+        header.trimEnd() + "\n\n" + SecretRedactor.redact(body.ifBlank { "Журнал пуст: подключений в этой установке ещё не было.\n" })
+    }
+
     private fun appendJournal(line: String) = synchronized(journalLock) {
         Files.createDirectories(directory)
         val current = directory.resolve("session.log")

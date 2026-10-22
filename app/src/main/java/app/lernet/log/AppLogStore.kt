@@ -108,8 +108,6 @@ class AppLogStore(
         )
     }
 
-    fun shouldOfferAtBoot(): Boolean = offerBanner
-
     @Synchronized
     fun flushSession(): File {
         dir.mkdirs()
@@ -194,13 +192,6 @@ class AppLogStore(
         DurableFile.write(crashFile, report)
         PublicCrashMirror.writeFile(publicDir, CRASH_NAME, report)
         flushSession()
-    }
-
-    fun pendingCrashFile(): File? {
-        if (!offerBanner && !pendingFile.exists() && !previousUnclean) return null
-        return crashLastFile.takeIf { it.exists() && it.length() > 0 }
-            ?: crashFile.takeIf { it.exists() }
-            ?: flushShareBundle()
     }
 
     fun ringBytes(): Long = if (ringFile.exists()) ringFile.length() else 0L

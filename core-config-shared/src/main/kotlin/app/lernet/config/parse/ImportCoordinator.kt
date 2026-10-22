@@ -2,11 +2,13 @@ package app.lernet.config.parse
 
 import app.lernet.config.model.ProfileSource
 import app.lernet.config.net.RemoteTextFetcher
+import app.lernet.config.subscription.SubscriptionSchedule
 
 class ImportCoordinator(
     private val fetcher: RemoteTextFetcher,
 ) {
-    fun importVless(link: String): ImportResult = VlessParser.parse(link)
+    /** One share link of any supported protocol (the name stays from the time only VLESS was accepted). */
+    fun importVless(link: String): ImportResult = ShareLinkParser.parse(link)
 
     fun importPastedJson(raw: String): ImportResult =
         JsonConfigParser.parse(raw, ProfileSource.JSON_PASTE, defaultName = "JSON")
@@ -27,7 +29,8 @@ class ImportCoordinator(
         val checked = validateHttpUrl(url, field = "subscriptionUrl")
         if (checked != null) return ImportResult.Failure(listOf(checked))
         return when (val fetched = fetcher.fetch(url)) {
-            is RemoteTextFetcher.Result.Ok -> SubscriptionParser.parse(fetched.body, url)
+            is RemoteTextFetcher.Result.Ok ->
+                SubscriptionParser.parse(fetched.body, url, SubscriptionSchedule.headerHours(fetched.headers["profile-update-interval"]))
             is RemoteTextFetcher.Result.Err ->
                 ImportResult.Failure(listOf(FieldError("subscriptionUrl", fetched.message)))
         }

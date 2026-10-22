@@ -111,6 +111,7 @@ private fun SettingsColumn(
     ) {
         // v2: everyday settings first; engine tuning folds into «Дополнительно».
         RunModeCard(state, onIntent)
+        StartupCard()
         ProxyPasswordCard(state, onIntent)
         LogsCard(onShareLogs, onOpenDiag)
         UpdatesCard()
@@ -174,6 +175,38 @@ private fun DebugPipeCard(onIntent: (SettingsIntent) -> Unit) {
             modifier = Modifier.fillMaxWidth().lernetButton(),
         ) {
             Text(stringResource(R.string.debug_simulate_pipe_silent))
+        }
+    }
+}
+
+/** Same behaviour as «Запускать при входе в систему» on Windows: a VPN left on comes back after a restart. */
+@Composable
+private fun StartupCard() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var enabled by remember { mutableStateOf(app.lernet.vpn.BootRestorePreference.enabled(context)) }
+    PanelCard(Modifier.testTag("settings_startup")) {
+        Text(stringResource(R.string.settings_startup), style = MaterialTheme.typography.titleMedium)
+        androidx.compose.foundation.layout.Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Text(stringResource(R.string.settings_boot_restore), modifier = Modifier.weight(1f))
+            androidx.compose.material3.Switch(
+                checked = enabled,
+                onCheckedChange = {
+                    enabled = it
+                    app.lernet.vpn.BootRestorePreference.set(context, it)
+                },
+                modifier = Modifier.testTag("settings_boot_restore"),
+            )
+        }
+        Text(
+            stringResource(R.string.settings_boot_restore_help),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        OutlinedButton(
+            onClick = { runCatching { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_VPN_SETTINGS)) } },
+            modifier = Modifier.fillMaxWidth().lernetButton(),
+        ) {
+            Text(stringResource(R.string.lockdown_hint_open))
         }
     }
 }

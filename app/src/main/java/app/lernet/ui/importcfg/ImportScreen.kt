@@ -289,6 +289,7 @@ private fun ImportFeedback(
         Column(verticalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap)) {
             Text(stringResource(R.string.import_saved, state.savedCount), color = MaterialTheme.colorScheme.secondary)
             ImportUnusedParts(state.unusedParts)
+            state.skipped?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
     }
 }
