@@ -56,6 +56,15 @@ sealed class PolicyEvent {
     ) : PolicyEvent()
 
     data object PermissionDenied : PolicyEvent()
+
+    /** The physical network changed: rounds without an answer counted on the old one say nothing now. */
+    data object NetworkChanged : PolicyEvent()
+
+    /**
+     * The checked folder config could not be started (its profile disappeared meanwhile). The VPN stays:
+     * the session returns to [backToOutboundId] and looks again after a pause.
+     */
+    data class SwitchFailed(val backToOutboundId: String) : PolicyEvent()
 }
 
 sealed class PolicyCommand {

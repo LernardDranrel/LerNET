@@ -438,8 +438,9 @@ class ConnectionController(
         return group.outboundIds.filter { it != activeOutboundId }.take(ConfigAssembler.MAX_STANDBY).mapNotNull { id ->
             val outbound = try {
                 resolve(id)?.first?.selectedOutbound()
-            } catch (error: Exception) {
-                if (error is CancellationException) throw error
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
                 null
             } ?: return@mapNotNull null
             HandshakeKey.fromOutboundJson(outbound.singBoxJson)?.let { outboundKeys[id] = it }
@@ -608,6 +609,8 @@ class ConnectionController(
         networkChangedAtMs = clock()
         // A new network may let resting configs through: they may be tried once more (the level stays).
         if (penalties.onNetworkChanged(clock())) LerNetLog.i(TAG, "network changed: resting configs may be tried again")
+        // Rounds without an answer counted on the old network say nothing about this one.
+        mutex.withLock { dispatchLocked(PolicyEvent.NetworkChanged) }
         // Bytes that stalled while the network was gone say nothing about filters.
         blockingDetector.reset()
         // Results from the previous network say nothing about this one.
@@ -687,7 +690,8 @@ class ConnectionController(
         when (command) {
             is PolicyCommand.StartEngine -> {
                 engineReady = false
-                if (pendingOutboundId != null && command.outboundId != pendingOutboundId) {
+                val previous = pendingOutboundId
+                if (previous != null && command.outboundId != previous) {
                     failoverSwitchJob?.cancel()
                     failoverSwitchJob = scope.launch {
                         val target = try {
@@ -698,7 +702,8 @@ class ConnectionController(
                             null
                         }
                         if (target == null) {
-                            dispatch(PolicyEvent.EngineFailed(ConnectionCause.FailoverExhausted(context.group?.name ?: "?")))
+                            // The VPN stays: back to the running config, look again after a pause.
+                            dispatch(PolicyEvent.SwitchFailed(previous))
                         } else {
                             if (machineState.snapshot.state != ConnectionState.CONNECTING ||
                                 machineState.snapshot.activeOutboundId != command.outboundId
@@ -890,8 +895,9 @@ class ConnectionController(
         if (tag != null) {
             val l7 = try {
                 engine.probeOutbound(tag, L7_PROBE_URL, CANDIDATE_CHECK_TIMEOUT_MS)
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Exception) {
-                if (error is CancellationException) throw error
                 Result.failure(error)
             }
             LerNetLog.i(TAG, "candidate $outboundId check via $tag ok=${l7.isSuccess}")
@@ -1106,14 +1112,7 @@ class ConnectionController(
                 ) {
                     return@launch
                 }
-                val reason = synchronized(schedule) { schedule.takeDue(healthClockMs) } ?: continue
-                // A check opens a connection through the active server: it must fit the handshake budget.
-                if (!takeActiveBudget()) {
-                    val wait = activeBudgetWaitMs().coerceAtLeast(HEALTH_TICK_MS)
-                    LerNetLog.i(TAG, "tunnel check reason=$reason deferred ${wait}ms: handshake budget")
-                    synchronized(schedule) { schedule.defer(reason, healthClockMs + wait) }
-                    continue
-                }
+                val reason = dueWithinBudget(schedule) ?: continue
                 val result = try {
                     probe()
                 } catch (error: CancellationException) {
@@ -1147,6 +1146,19 @@ class ConnectionController(
                 }
             }
         }
+    }
+
+    /**
+     * The reason of a tunnel check that is due now and fits the handshake budget (a check opens a
+     * connection through the active server); a due check over budget is deferred until it fits.
+     */
+    private fun dueWithinBudget(schedule: TunnelProbeSchedule): TunnelProbeSchedule.Reason? {
+        val reason = synchronized(schedule) { schedule.takeDue(healthClockMs) } ?: return null
+        if (takeActiveBudget()) return reason
+        val wait = activeBudgetWaitMs().coerceAtLeast(HEALTH_TICK_MS)
+        LerNetLog.i(TAG, "tunnel check reason=$reason deferred ${wait}ms: handshake budget")
+        synchronized(schedule) { schedule.defer(reason, healthClockMs + wait) }
+        return null
     }
 
     private suspend fun noteBlocking(sign: app.lernet.engine.policy.BlockingSign?) {
@@ -1190,13 +1202,14 @@ class ConnectionController(
                     return@launch
                 }
                 val phase = dnsHealth.phase
-                if (dnsHealth.onDeadline() == DnsHealthAction.Hold) continue
+                val held = dnsHealth.onDeadline() == DnsHealthAction.Hold
                 // Never a restart. Only real DNS failures after a working start ask for a tunnel check;
                 // no DNS at all (idle phone, screen off) proves nothing.
-                if (phase != app.lernet.engine.policy.DnsHealthPhase.RecoveringFromFail) continue
-                CrashTrail.mark("dns health hint phase=$phase")
-                LerNetLog.w(TAG, "dns health: dns failed and no dns query ok for ${dnsHealth.deadlineMs}ms: asking for a tunnel check")
-                dispatch(PolicyEvent.DnsHealthTimeout)
+                if (!held && phase == app.lernet.engine.policy.DnsHealthPhase.RecoveringFromFail) {
+                    CrashTrail.mark("dns health hint phase=$phase")
+                    LerNetLog.w(TAG, "dns health: dns failed and no dns query ok for ${dnsHealth.deadlineMs}ms: asking for a tunnel check")
+                    dispatch(PolicyEvent.DnsHealthTimeout)
+                }
             }
         }
     }

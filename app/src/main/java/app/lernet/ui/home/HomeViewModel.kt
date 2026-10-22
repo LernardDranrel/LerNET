@@ -470,18 +470,42 @@ class HomeViewModel @Inject constructor(
     /**
      * Waits until the handshake budget allows one more connection ([key]'s server, or the active one
      * when null) and takes it. Meanwhile the row of [id] shows how long, refreshed every second.
+     * False when a newer check of the same row replaced this one (nothing is taken then).
      */
-    private suspend fun awaitBudget(id: String, requestId: Long, key: app.lernet.engine.policy.HandshakeKey?) {
+    private suspend fun awaitBudget(id: String, requestId: Long, key: app.lernet.engine.policy.HandshakeKey?): Boolean {
+        fun current() = overlay.value.probes[id]?.requestId == requestId
         fun show(waitMs: Long?) = overlay.update { old ->
             val probe = old.probes[id]
             if (probe?.requestId == requestId) old.copy(probes = old.probes + (id to probe.copy(budgetWaitMs = waitMs))) else old
         }
-        while (!(key?.let(controller::takeBudget) ?: controller.takeActiveBudget())) {
+        while (current() && !(key?.let(controller::takeBudget) ?: controller.takeActiveBudget())) {
             val wait = key?.let(controller::budgetWaitMs) ?: controller.activeBudgetWaitMs()
             show(wait)
             delay(wait.coerceIn(200L, 1_000L))
         }
         show(null)
+        return current()
+    }
+
+    /**
+     * «Проверить» for a config that is not the running one. Through the tunnel the check is one more
+     * connection via the active server; without it, one more connection straight to that server.
+     * Null when a newer check replaced this one while it waited for the budget.
+     */
+    private suspend fun checkServer(
+        probe: app.lernet.engine.net.TunnelFirstBackupProbe,
+        endpoint: OutboundEndpoint,
+        outboundJson: String?,
+        connected: Boolean,
+        id: String,
+        requestId: Long,
+    ): ProfileProbe? {
+        val route = app.lernet.config.net.AppTraffic.route as? app.lernet.config.net.AppTraffic.Route.Through
+        val access = route?.access?.takeIf { connected }
+        val key = if (access != null) null else app.lernet.engine.policy.HandshakeKey.fromOutboundJson(outboundJson)
+        if ((access != null || key != null) && !awaitBudget(id, requestId, key)) return null
+        val result = probe.check(endpoint, access, userAsked = true)
+        return ProfileProbe(tcpMs = result?.latencyMs, reachable = result?.ok == true, throughTunnel = result?.throughTunnel == true)
     }
 
     private suspend fun probeProfiles(ids: List<String>) {
@@ -506,33 +530,21 @@ class HomeViewModel @Inject constructor(
                     endpoint == null -> ProfileProbe(reachable = false)
                     // The running config is already connected: measure it through the tunnel only.
                     active -> ProfileProbe(reachable = true, tcpMs = snapshot.serverTcpMs)
-                    else -> {
-                        val access = if (connected) (app.lernet.config.net.AppTraffic.route as? app.lernet.config.net.AppTraffic.Route.Through)?.access else null
-                        // Through the tunnel every check is one more connection via the active server;
-                        // without it, one more connection straight to that server.
-                        val key = if (access != null) {
-                            null
-                        } else {
-                            app.lernet.engine.policy.HandshakeKey.fromOutboundJson(profiles[id]?.selectedOutbound()?.singBoxJson)
-                        }
-                        if (access != null || key != null) awaitBudget(id, requestId, key)
-                        val result = probe.check(endpoint, access, userAsked = true)
-                        ProfileProbe(tcpMs = result?.latencyMs, reachable = result?.ok == true, throughTunnel = result?.throughTunnel == true)
-                    }
+                    else -> checkServer(probe, endpoint, profiles[id]?.selectedOutbound()?.singBoxJson, connected, id, requestId)
                 }
-                val tunnel = if (active) {
-                    awaitBudget(id, requestId, null)
+                // A row that a newer check replaced (null) is left to that check.
+                val tunnel = if (active && awaitBudget(id, requestId, null)) {
                     AndroidTunnelProbe.measure(LocalListeners.appProxy(snapshot.compiledJson))
                 } else {
                     null
                 }
-                val result = server.copy(
+                val result = server?.copy(
                     tunnelMs = tunnel?.getOrNull(),
                     tunnelChecked = tunnel != null,
                     requestId = requestId,
                 )
                 overlay.update { old ->
-                    if (old.probes[id]?.requestId == requestId) {
+                    if (result != null && old.probes[id]?.requestId == requestId) {
                         old.copy(probes = old.probes + (id to result))
                     } else {
                         old

@@ -134,12 +134,13 @@ class ConfigEditorViewModel @Inject constructor(
 
     fun onIntent(intent: ConfigEditorIntent) {
         when (intent) {
-            is ConfigEditorIntent.Server -> edit { it.copy(server = intent.value, fieldError = null) }
-            is ConfigEditorIntent.Port -> edit { it.copy(port = intent.value, fieldError = null) }
-            is ConfigEditorIntent.Sni -> edit { it.copy(sni = intent.value, fieldError = null) }
-            is ConfigEditorIntent.Path -> edit { it.copy(path = intent.value, fieldError = null) }
-            is ConfigEditorIntent.Mode -> edit { it.copy(mode = intent.value, fieldError = null) }
-            is ConfigEditorIntent.Fingerprint -> edit { it.copy(fingerprint = intent.value, fieldError = null) }
+            is ConfigEditorIntent.Server,
+            is ConfigEditorIntent.Port,
+            is ConfigEditorIntent.Sni,
+            is ConfigEditorIntent.Path,
+            is ConfigEditorIntent.Mode,
+            is ConfigEditorIntent.Fingerprint,
+            -> edit { withField(it, intent).copy(fieldError = null) }
             is ConfigEditorIntent.DnsServer -> editDns(intent.index) { it.copy(server = intent.value) }
             is ConfigEditorIntent.DnsType -> editDns(intent.index) { it.copy(type = intent.value) }
             ConfigEditorIntent.TunnelDns -> edit {
@@ -154,6 +155,16 @@ class ConfigEditorViewModel @Inject constructor(
             ConfigEditorIntent.ToggleEngine -> _state.update { it.copy(showEngine = !it.showEngine) }
             ConfigEditorIntent.Save -> save()
         }
+    }
+
+    private fun withField(state: ConfigEditorUiState, intent: ConfigEditorIntent): ConfigEditorUiState = when (intent) {
+        is ConfigEditorIntent.Server -> state.copy(server = intent.value)
+        is ConfigEditorIntent.Port -> state.copy(port = intent.value)
+        is ConfigEditorIntent.Sni -> state.copy(sni = intent.value)
+        is ConfigEditorIntent.Path -> state.copy(path = intent.value)
+        is ConfigEditorIntent.Mode -> state.copy(mode = intent.value)
+        is ConfigEditorIntent.Fingerprint -> state.copy(fingerprint = intent.value)
+        else -> state
     }
 
     private suspend fun load() {
