@@ -260,6 +260,22 @@ class PlatformTextParityTest {
         assertEquals("2 из 3", ExpertWords.exitsValue(2, 3))
         assertEquals("1 активное", ExpertWords.connectionsValue(1))
         assertEquals("11 активных", ExpertWords.connectionsValue(11))
+        same("expert_exits_empty_title", ExpertWords.EXITS_EMPTY)
+        same("expert_sleeping_only", ExpertWords.SLEEPING_ONLY)
+        same("expert_sleeping_none", ExpertWords.SLEEPING_NONE)
+        same("expert_external_add", ExpertWords.EXTERNAL_ADD)
+        same("expert_external_edit", ExpertWords.EXTERNAL_EDIT)
+        assertEquals("Скорость ещё не измерена", ExpertWords.eventsRate(null, null))
+        assertEquals("Скорость 2 из 3: ↑ 1,5 КБ/с · ↓ 2 МБ/с", ExpertWords.eventsRate(1536, 2L * 1024 * 1024, 2, 3))
+        assertEquals(
+            "Прямой выход · основной интерфейс wlan0: IPv4 — маршрут есть; IPv6 — пути нет",
+            ExpertWords.directFamilies(app.lernet.engine.policy.ExpertDirectNetworkFacts(
+                interfaceName = "wlan0",
+                ipv4 = app.lernet.engine.policy.DirectFamilyAvailability.AVAILABLE,
+                ipv6 = app.lernet.engine.policy.DirectFamilyAvailability.UNAVAILABLE,
+                source = "test", networkEpoch = 0, observedAtMs = 0,
+            )),
+        )
     }
 
     @Test

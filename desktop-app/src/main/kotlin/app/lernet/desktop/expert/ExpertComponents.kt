@@ -268,8 +268,4 @@ internal fun DomainRecognitionQualification() {
     )
 }
 
-internal fun formatTraffic(bytes: Long): String = when {
-    bytes < 1024 -> "$bytes Б"
-    bytes < 1024 * 1024 -> "${"%.1f".format(bytes / 1024.0)} КБ"
-    else -> "${"%.1f".format(bytes / (1024.0 * 1024.0))} МБ"
-}
+internal fun formatTraffic(bytes: Long): String = app.lernet.engine.text.TrafficUnits.bytes(bytes)

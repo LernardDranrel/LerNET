@@ -65,14 +65,14 @@ internal fun ExpertExits(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit,
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
-            FilterChip(sleepingOnly, { sleepingOnly = !sleepingOnly }, label = { Text("Только спящие") })
+            FilterChip(sleepingOnly, { sleepingOnly = !sleepingOnly }, label = { Text(app.lernet.engine.text.ExpertWords.SLEEPING_ONLY) })
             OutlinedButton(
                 onClick = {
                     editingExternal = null
                     externalEditor = true
                 },
                 enabled = !state.busy && state.externalSavePending == null
-            ) { Text("Добавить внешний выход") }
+            ) { Text(app.lernet.engine.text.ExpertWords.EXTERNAL_ADD) }
             OutlinedButton(onClick = { onIntent(ExpertIntent.Refresh) }, enabled = !state.busy) { Text("Обновить") }
         }
         Text(
@@ -84,9 +84,9 @@ internal fun ExpertExits(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit,
             if (exits.isEmpty()) {
                 item {
                     ExpertEmpty(
-                        if (state.exits.isEmpty()) "Конфигов пока нет" else "Спящих конфигов нет",
+                        if (state.exits.isEmpty()) app.lernet.engine.text.ExpertWords.EXITS_EMPTY else app.lernet.engine.text.ExpertWords.SLEEPING_NONE.substringBefore(". "),
                         if (state.exits.isNotEmpty()) {
-                            "Все конфиги сейчас на связи или ждут проверки. Сними фильтр, чтобы увидеть весь список."
+                            "Все конфиги сейчас на связи или ждут проверки. " + app.lernet.engine.text.ExpertWords.SLEEPING_NONE.substringAfter(". ")
                         } else {
                             "Эксперт берёт те же конфиги, что и режим VPN. Добавь их там — ссылкой, QR-кодом или файлом, — " +
                                 "и они появятся здесь, когда схема направит в них трафик. " +

@@ -175,21 +175,24 @@ private fun TunControl(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, c
                     applied = state.appliedRevision != null,
                 )?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = ExpertColors.muted) }
                 val policy = state.applied.takeIf { running } ?: state.saved
-                Text(
-                    "Основной путь — ${ExpertPolicyEditing.targetName(policy.device.defaultTarget, state).replaceFirstChar { it.lowercase() }}",
-                    style = MaterialTheme.typography.bodySmall, color = ExpertColors.muted
-                )
-                state.directNetwork?.takeIf { running }?.let { facts ->
+                val words = app.lernet.engine.text.ExpertWords
+                // As on the phone: «Основной путь — … · сведения», the direct-exit facts open on demand.
+                var details by remember { mutableStateOf(false) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "Прямой выход${facts.interfaceName?.let { " · основной интерфейс $it" }.orEmpty()}: " +
-                            "IPv4 — ${familyMeaning(facts.ipv4)}; IPv6 — ${familyMeaning(facts.ipv6)}",
-                        style = MaterialTheme.typography.bodySmall, color = ExpertColors.muted,
+                        "Основной путь — ${ExpertPolicyEditing.targetName(policy.device.defaultTarget, state).replaceFirstChar { it.lowercase() }} · ",
+                        style = MaterialTheme.typography.bodySmall, color = ExpertColors.muted
                     )
+                    Text(
+                        if (details) words.HIDE_DETAILS else words.DETAILS,
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button) { details = !details },
+                    )
+                }
+                if (details) state.directNetwork?.takeIf { running }?.let { facts ->
+                    Text(words.directFamilies(facts), style = MaterialTheme.typography.bodySmall, color = ExpertColors.muted)
                     if (facts.ipv6 == DirectFamilyAvailability.UNAVAILABLE) {
-                        Text(
-                            "IPv6 напрямую недоступен. Возможности VPN-выходов проверяются отдельно.",
-                            style = MaterialTheme.typography.bodySmall, color = ExpertColors.muted,
-                        )
+                        Text(words.NO_IPV6, style = MaterialTheme.typography.bodySmall, color = ExpertColors.muted)
                     }
                 }
             }
@@ -204,12 +207,6 @@ private fun TunControl(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, c
     }
 }
 
-private fun familyMeaning(value: DirectFamilyAvailability): String = when (value) {
-    DirectFamilyAvailability.AVAILABLE -> "маршрут есть"
-    DirectFamilyAvailability.LIMITED -> "есть отдельные маршруты"
-    DirectFamilyAvailability.UNAVAILABLE -> "пути нет"
-    DirectFamilyAvailability.UNKNOWN -> "недостаточно данных"
-}
 
 @Composable
 internal fun ExpertLiveStreams(
@@ -270,12 +267,10 @@ internal fun ExpertLiveStreams(
         Text(
             buildString {
                 append(
-                    if (activeRates.isEmpty()) {
-                        "Скорость ещё не измерена"
-                    } else {
-                        (if (activeRates.size < activeCount) "Скорость ${activeRates.size} из $activeCount: " else "") +
-                            "↑ ${formatTraffic(activeRates.sumOf { it.upload })}/с  ↓ ${formatTraffic(activeRates.sumOf { it.download })}/с"
-                    }
+                    if (activeRates.isEmpty()) app.lernet.engine.text.ExpertWords.RATE_UNKNOWN
+                    else app.lernet.engine.text.ExpertWords.eventsRate(
+                        activeRates.sumOf { it.upload }, activeRates.sumOf { it.download }, activeRates.size, activeCount,
+                    )
                 )
                 if (state.connectionHistoryTruncated) {
                     append(" · показаны последние ${state.connectionHistoryLimit}, вытеснено ${state.connectionDroppedCount}")
@@ -327,8 +322,7 @@ private fun TrafficColumn(
                 Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(title, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                Text(flows.size.toString(), color = ExpertColors.muted)
+                Text("$title · ${flows.size}", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
                 FilterChip(live, {
                     if (live) {
                         live = false

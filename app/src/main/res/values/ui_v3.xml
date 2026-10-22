@@ -5,8 +5,6 @@
     <string name="expert_events_connections">Соединения · %1$d</string>
     <string name="expert_events_actions">Действия LerNET · %1$d</string>
     <string name="expert_activity_long">Длительные</string>
-    <string name="expert_events_rate">↑ %1$s/с · ↓ %2$s/с · новые сверху</string>
-    <string name="expert_events_rate_unknown">Скорость ещё не измерена · новые сверху</string>
     <string name="expert_events_title">Соединения</string>
     <string name="expert_actions_hint">Применение схемы, пробуждение и отказ выходов, смена выхода. Новые сверху.</string>
     <!-- Expert: pult tiles (m4) -->

@@ -229,7 +229,7 @@ class ExpertScreenTest {
             FixtureTheme { ExpertExternalExitDetails(profile, {}, {}) }
         }
         rule.onNodeWithText("Fixture adapter").assertIsDisplayed()
-        rule.onNodeWithText("Изменить внешний прокси").assertDoesNotExist()
+        rule.onNodeWithText("Изменить внешний выход").assertDoesNotExist()
         capture("android-expert-corporate-unavailable.png", dialog = true)
     }
 

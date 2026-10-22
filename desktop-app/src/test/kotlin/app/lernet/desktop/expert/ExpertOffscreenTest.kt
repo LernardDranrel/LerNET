@@ -86,7 +86,7 @@ class ExpertOffscreenTest {
         }
         try {
             screenshot(scene, "overview")
-            assertThat(nodes(scene).any { texts(it).contains("Эксперт · твои правила для каждого соединения") }).isTrue()
+            assertThat(nodes(scene).any { texts(it).contains("Своя схема") }).isTrue()
             // v3 sections (m3): «Выходы» became «Конфиги», connections live in «События», protection is «Защита и DNS».
             listOf("Схема", "Проверка пути", "Конфиги", "События", "Защита и DNS").forEach { title ->
                 val navigation = nodes(scene).first {

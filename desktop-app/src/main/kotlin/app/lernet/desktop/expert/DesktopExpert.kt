@@ -130,12 +130,9 @@ fun DesktopExpert(
                 Column(Modifier.weight(1f)) {
                     // G4 (as in VPN mode and on the phone): the active item in the left column names the page,
                     // no second title above the content.
-                    // X9: the mode subtitle only on the pult; other pages explain themselves.
+                    // No subtitles: the phone has none; only the Windows-only app settings page explains itself.
                     val subtitle = when (page) {
-                        ExpertPage.OVERVIEW -> "Эксперт · твои правила для каждого соединения"
-                        ExpertPage.ROUTES -> "Правила устройства, конфигов и папок"
                         ExpertPage.APP_SETTINGS -> "Общие настройки приложения: действуют и в режиме VPN"
-                        ExpertPage.LIBRARY -> "Те же конфиги и папки, что в режиме VPN"
                         else -> null
                     }
                     subtitle?.let { Text(it, color = ExpertColors.muted) }

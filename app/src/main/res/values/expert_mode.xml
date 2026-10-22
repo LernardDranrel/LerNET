@@ -158,8 +158,8 @@
     <string name="expert_observation_revision">Версия правил для запроса: %1$s</string>
     <string name="expert_import_invalid">Архив не распознан или повреждён. Проверь, что выбран файл экспорта LerNET; содержимое конфигов в сообщение об ошибке не включено.</string>
     <string name="expert_export_busy">Список конфигов изменился во время переключения схемы. Дождись завершения и повтори экспорт: архив со старыми данными не создан.</string>
-    <string name="expert_external_add">Добавить внешний прокси</string>
-    <string name="expert_external_edit">Изменить внешний прокси</string>
+    <string name="expert_external_add">Добавить внешний выход</string>
+    <string name="expert_external_edit">Изменить внешний выход</string>
     <string name="expert_external_transport_fixed">Тип существующего выхода сохраняется. Для другого протокола создай отдельный конфиг.</string>
     <string name="expert_external_details">Сведения о выходе</string>
     <string name="expert_external_name">Название выхода</string>

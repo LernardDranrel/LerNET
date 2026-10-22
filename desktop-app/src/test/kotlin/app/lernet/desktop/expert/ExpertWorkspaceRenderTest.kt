@@ -40,8 +40,8 @@ class ExpertWorkspaceRenderTest {
             }
             try {
                 screenshot(scene, "workspace-$width-overview")
-                // The pult subtitle sits right of the section column (N1: sections live in the left column).
-                val heading = nodes(scene).first { "Эксперт · твои правила для каждого соединения" in texts(it) }
+                // The pult content («Своя схема») sits right of the section column (N1: sections live in the left column).
+                val heading = nodes(scene).first { "Своя схема" in texts(it) }
                 assertThat(heading.boundsInRoot.left).isAtLeast(218f)
                 assertThat(heading.boundsInRoot.right).isAtMost(width - 22f)
                 // The v3 sections (m3): the same five as the phone, then «Защита и DNS» under «Настройки».

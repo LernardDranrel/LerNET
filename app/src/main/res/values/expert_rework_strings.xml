@@ -73,12 +73,6 @@
     <string name="expert_lamp_pending">Проверяем связь…</string>
     <string name="expert_lamp_healthy">Работает</string>
     <string name="expert_lamp_error">Ошибка</string>
-    <string name="expert_family_available">маршрут есть</string>
-    <string name="expert_family_limited">есть отдельные маршруты</string>
-    <string name="expert_family_unavailable">пути нет</string>
-    <string name="expert_family_unknown">недостаточно данных</string>
-    <string name="expert_direct_families">Direct · основной интерфейс %1$s: IPv4 — %2$s; IPv6 — %3$s</string>
-    <string name="expert_direct_no_ipv6">IPv6 напрямую недоступен. Возможности VPN-выходов проверяются отдельно.</string>
     <string name="expert_error_route_ipv4">Вне туннеля нет доступного маршрута IPv4 к этому адресу</string>
     <string name="expert_error_route_ipv6">Вне туннеля нет доступного маршрута IPv6 к этому адресу; IPv6 через VPN проверяется отдельно</string>
     <string name="expert_error_route_manager">Система сейчас не даёт управлять маршрутами</string>
@@ -87,8 +81,6 @@
     <string name="expert_error_ingress_not_ready">Туннель ещё не подтвердил готовность своего адаптера</string>
     <string name="expert_error_ingress_timeout">Туннель не подтвердил готовность маршрутизации за отведённое время</string>
     <string name="expert_open_menu">Разделы Эксперта</string>
-    <string name="expert_tunnel_details">сведения</string>
-    <string name="expert_hide_tunnel_details">скрыть сведения</string>
     <string name="expert_app_tools">Приложение</string>
     <string name="expert_profiles_folders">Конфиги и папки</string>
     <string name="expert_profiles_hint">Нажми конфиг для настройки. Выходы Эксперта выбираются в схеме.</string>

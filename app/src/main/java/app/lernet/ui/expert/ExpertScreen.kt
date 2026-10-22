@@ -611,7 +611,7 @@ private fun ExpertStatus(
                             style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center
                         )
                         Text(
-                            stringResource(if (details) R.string.expert_hide_tunnel_details else R.string.expert_tunnel_details),
+                            if (details) app.lernet.engine.text.ExpertWords.HIDE_DETAILS else app.lernet.engine.text.ExpertWords.DETAILS,
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.heightIn(min = 48.dp).wrapContentHeight()
                                 .clickable(role = androidx.compose.ui.semantics.Role.Button) { details = !details }
@@ -666,21 +666,9 @@ private fun ExpertStatus(
         androidx.compose.animation.AnimatedVisibility(details) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 runtime.directNetwork?.takeIf { runtime.phase == ExpertSessionPhase.RUNNING }?.let { facts ->
-                    fun familyResource(value: DirectFamilyAvailability): Int = when (value) {
-                        DirectFamilyAvailability.AVAILABLE -> R.string.expert_family_available
-                        DirectFamilyAvailability.LIMITED -> R.string.expert_family_limited
-                        DirectFamilyAvailability.UNAVAILABLE -> R.string.expert_family_unavailable
-                        DirectFamilyAvailability.UNKNOWN -> R.string.expert_family_unknown
-                    }
-                    Text(
-                        stringResource(
-                            R.string.expert_direct_families, facts.interfaceName ?: stringResource(R.string.expert_family_unknown),
-                            stringResource(familyResource(facts.ipv4)), stringResource(familyResource(facts.ipv6)),
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                    Text(app.lernet.engine.text.ExpertWords.directFamilies(facts), style = MaterialTheme.typography.bodySmall)
                     if (facts.ipv6 == DirectFamilyAvailability.UNAVAILABLE) {
-                        Text(stringResource(R.string.expert_direct_no_ipv6), style = MaterialTheme.typography.bodySmall)
+                        Text(app.lernet.engine.text.ExpertWords.NO_IPV6, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -828,17 +816,13 @@ private fun ExpertEventsSwitch(runtime: app.lernet.engine.policy.ExpertRuntimeSt
 @Composable
 private fun ExpertEventsRate(rate: FlowTrafficRate?) {
     Text(
-        if (rate == null) stringResource(R.string.expert_events_rate_unknown)
-        else stringResource(R.string.expert_events_rate, humanBytes(rate.upload), humanBytes(rate.download)),
+        // Shared with Windows; «новые сверху» is said once, under the list.
+        app.lernet.engine.text.ExpertWords.eventsRate(rate?.upload, rate?.download),
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
 
-internal fun humanBytes(bytes: Long): String = when {
-    bytes >= 1_048_576 -> String.format(java.util.Locale.ROOT, "%.1f МБ", bytes / 1_048_576.0)
-    bytes >= 1_024 -> "${bytes / 1_024} КБ"
-    else -> "$bytes Б"
-}
+internal fun humanBytes(bytes: Long): String = app.lernet.engine.text.TrafficUnits.bytes(bytes)
 
 /** «Действия LerNET»: every note of the app, newest first (before, only the last five were shown). */
 @Composable

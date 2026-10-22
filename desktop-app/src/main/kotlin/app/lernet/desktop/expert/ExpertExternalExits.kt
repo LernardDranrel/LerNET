@@ -171,7 +171,7 @@ internal fun ExpertExternalExitEditor(
             onDismiss()
         }
     }
-    ExpertModal(if (original == null) "Добавить внешний выход" else "Изменить внешний выход", onDismiss, {
+    ExpertModal(if (original == null) app.lernet.engine.text.ExpertWords.EXTERNAL_ADD else app.lernet.engine.text.ExpertWords.EXTERNAL_EDIT, onDismiss, {
         val token = UUID.randomUUID().toString()
         pendingToken = token
         localFailure = null
