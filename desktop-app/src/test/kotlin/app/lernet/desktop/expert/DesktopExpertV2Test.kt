@@ -25,9 +25,10 @@ import org.junit.Test
 @OptIn(ExperimentalComposeUiApi::class)
 class DesktopExpertV2Test {
     @Test
-    fun `bottom menu lists the five expert sections and settings stay aside`() {
-        assertThat(ExpertBottomPages.map { it.title }).containsExactly("Пульт", "Схема", "Конфиги", "Правила", "События").inOrder()
-        assertThat(ExpertBottomPages).doesNotContain(ExpertPage.PROTECTION)
+    fun `the side column lists the five expert sections and settings stay aside`() {
+        // UI v3 (mockup 3): the sections moved to the left column; the simulator is «Проверка пути» (N7).
+        assertThat(ExpertNavPages.map { it.title }).containsExactly("Пульт", "Схема", "Конфиги", "Проверка пути", "События").inOrder()
+        assertThat(ExpertNavPages).doesNotContain(ExpertPage.PROTECTION)
     }
 
     @Test

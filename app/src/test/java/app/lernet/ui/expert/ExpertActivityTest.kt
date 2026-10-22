@@ -13,7 +13,10 @@ class ExpertActivityTest {
         val all = listOf(active, closed, unknown)
         assertThat(filterExpertConnections(all, "tele", ExpertActivityFilter.ACTIVE)).containsExactly(active)
         assertThat(filterExpertConnections(all, "EXAMPLE", ExpertActivityFilter.CLOSED)).containsExactly(closed)
-        assertThat(filterExpertConnections(all, "", ExpertActivityFilter.UNKNOWN)).containsExactly(unknown)
+        // UI v3: «Длительные» replaced the old «Неизвестно» chip, the same set as Windows.
+        val long = active.copy(id = "l", startedAtMs = 0)
+        assertThat(filterExpertConnections(all + long, "", ExpertActivityFilter.LONG, nowMs = 60_000)).containsExactly(long)
+        assertThat(filterExpertConnections(all + long, "", ExpertActivityFilter.ALL, nowMs = 60_000)).contains(unknown)
         assertThat(filterExpertConnections(all, "blocked", ExpertActivityFilter.ALL)).isEmpty()
     }
 }

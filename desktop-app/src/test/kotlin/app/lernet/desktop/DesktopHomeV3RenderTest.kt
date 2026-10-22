@@ -88,7 +88,8 @@ class DesktopHomeV3RenderTest {
         val scene = ImageComposeScene(1124, 900, Density(1f), content = theme {
             Row(Modifier.fillMaxSize().padding(22.dp)) {
                 ProfileHome(controller.state.value.saved, TunnelSnapshot(TunnelStatus.RUNNING), false, emptyMap(), null, TraceSnapshot(),
-                    controller, {}, {}, localProxy = null, tried = report, history = history, onOpenRules = {}, onOpenJournal = {})
+                    controller, {}, localProxy = null, tried = report, diagnostics = CoreDiagnostics(connections = history),
+                    onOpenRules = {}, onOpenJournal = {})
             }
         })
         try {

@@ -155,7 +155,7 @@ class HomeStatesScreenshotTest {
                             profiles = listOf(nl, de, fi), groups = listOf(group), activeProfileId = "nl",
                             probes = mapOf("nl" to ProfileProbe(tcpMs = 38, reachable = true, tunnelMs = 142, tunnelChecked = true),
                                 "de" to ProfileProbe(tcpMs = null, reachable = false)),
-                            actions = DrawerActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {},
+                            actions = DrawerActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {},
                                 { _, _, _ -> }, { _, _ -> }, {}, { _, _ -> }, { _, _ -> }, { _, _ -> }),
                         )
                     }
