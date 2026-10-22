@@ -136,6 +136,8 @@ internal val desktopColors = darkColorScheme(
     surface = Color(0xFF101724), onSurface = Color(0xFFECF0F8),
     surfaceVariant = panel, onSurfaceVariant = muted,
     outline = Color(0xFF3B4961), outlineVariant = Color(0xFF253249), error = Color(0xFFFFB4AB),
+    // The phone's error colours (core-ui LerNetErrorContainer…): the failure card is the same red on both.
+    onError = Color(0xFF690005), errorContainer = Color(0xFF8C1D18), onErrorContainer = Color(0xFFFFDAD6),
 )
 internal val desktopTypography = Typography(
     headlineMedium = TextStyle(fontSize = 27.sp, lineHeight = 34.sp, fontWeight = FontWeight.SemiBold),
@@ -1086,19 +1088,22 @@ private fun ConfigChoiceMenu(open: Boolean, saved: StoredState, exclude: String?
 @Composable
 private fun HomeFailedCard(error: ConnectionError?, technical: String, saved: StoredState, selected: StoredProfile,
     controller: DesktopController, onOpenRules: (String) -> Unit) {
-    val title = error?.message?.let { app.lernet.engine.text.UserText.clean(it, it) }?.takeIf { it.isNotBlank() } ?: HomeWords.FAILED
+    // As on the phone the card names what failed; «Не удалось подключиться» is already the headline above it.
+    val title = (error?.message ?: technical.takeIf { it.isNotBlank() && it !in plainStates })
+        ?.let { app.lernet.engine.text.UserText.clean(it, it) }?.takeIf { it.isNotBlank() } ?: HomeWords.FAILED
     val detail = technical.takeIf { it.isNotBlank() && it != title && it !in plainStates }
     var expanded by remember { mutableStateOf(false) }
     var other by remember { mutableStateOf(false) }
-    Surface(color = desktopColors.error.copy(alpha = .12f), shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, desktopColors.error.copy(alpha = .35f)), modifier = Modifier.fillMaxWidth().testTag("connection_error_card")) {
+    val onCard = ButtonDefaults.textButtonColors(contentColor = desktopColors.onErrorContainer)
+    Surface(color = desktopColors.errorContainer, contentColor = desktopColors.onErrorContainer, shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth().testTag("connection_error_card")) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, fontWeight = FontWeight.SemiBold, color = desktopColors.onSurface)
+            Text(title, fontWeight = FontWeight.SemiBold)
             if (detail != null) {
-                TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) HomeWords.HIDE_DETAILS else HomeWords.DETAILS) }
+                TextButton(colors = onCard, onClick = { expanded = !expanded }) { Text(if (expanded) HomeWords.HIDE_DETAILS else HomeWords.DETAILS) }
                 if (expanded) {
-                    Text(detail, color = muted, fontSize = 12.sp)
-                    TextButton(onClick = { copyToClipboard(detail) }) { Text("Скопировать") }
+                    Text(detail, fontSize = 12.sp)
+                    TextButton(colors = onCard, onClick = { copyToClipboard(detail) }) { Text("Скопировать") }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1107,15 +1112,15 @@ private fun HomeFailedCard(error: ConnectionError?, technical: String, saved: St
                     Text(HomeWords.RETRY)
                 }
                 Box(Modifier.weight(1f)) {
-                    OutlinedButton(onClick = { other = true }, modifier = Modifier.fillMaxWidth()) { Text(HomeWords.OTHER_CONFIG) }
+                    androidx.compose.material3.FilledTonalButton(onClick = { other = true }, modifier = Modifier.fillMaxWidth()) { Text(HomeWords.OTHER_CONFIG) }
                     ConfigChoiceMenu(other, saved, exclude = selected.id, onDismiss = { other = false }) {
                         controller.dismissConnectionError(); controller.select(it)
                     }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                error?.routeOwnerId?.let { owner -> TextButton(onClick = { controller.dismissConnectionError(); onOpenRules(owner) }) { Text("Открыть правила") } }
-                TextButton(onClick = {
+                error?.routeOwnerId?.let { owner -> TextButton(colors = onCard, onClick = { controller.dismissConnectionError(); onOpenRules(owner) }) { Text("Открыть правила") } }
+                TextButton(colors = onCard, onClick = {
                     val dialog = FileDialog(null as Frame?, "Сохранить журнал", FileDialog.SAVE)
                     dialog.file = "LerNET-журнал-" + java.time.LocalDate.now() + ".txt"
                     dialog.isVisible = true

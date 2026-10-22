@@ -154,10 +154,12 @@ class WindowsBoxProcess internal constructor(
                             return@thread
                         }
                         attempt++
-                        val detail = lastFatal.get()?.let(SecretRedactor::redact)?.take(180)?.let { ": $it" }.orEmpty()
+                        // Plain words as on the phone; the raw core line and exit code stay in the technical journal.
+                        val reason = lastFatal.get()?.let { " · " + app.lernet.engine.text.CoreFailureWords.title(it) }.orEmpty()
+                        logDiagnostic("core exited (code $code)" + lastFatal.get()?.let { ": " + SecretRedactor.redact(it).take(180) }.orEmpty())
                         mutable.update {
                             it.copy(status = TunnelStatus.RECONNECTING,
-                                message = "VPN включён · подключение прервалось (код $code), восстанавливаем$detail")
+                                message = "VPN включён · подключение прервалось, восстанавливаем$reason")
                         }
                     }
                     Thread.sleep(retryDelayMs(attempt))

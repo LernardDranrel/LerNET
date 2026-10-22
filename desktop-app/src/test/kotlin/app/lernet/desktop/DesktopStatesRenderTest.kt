@@ -134,7 +134,7 @@ class DesktopStatesRenderTest {
     })
     private val silent = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.RUNNING, "Подключено"), {
         it.copy(probes = heldProbes, healthVerified = false, hold = app.lernet.engine.policy.LinkHold.ALL_SILENT,
-            healthMessage = app.lernet.engine.policy.LinkJudge.holdMessage(app.lernet.engine.policy.LinkHold.ALL_SILENT, "1 мин 35 с"))
+            healthMessage = app.lernet.engine.policy.LinkJudge.holdMessage(app.lernet.engine.policy.LinkHold.ALL_SILENT, app.lernet.engine.policy.RecheckJitter.label(94_000)))
     })
     private val budgetWait = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.RUNNING, "Подключено"), {
         it.copy(probes = goodProbes + ("nl" to ProbeResult(latencyMs = 38, checking = true, budgetWaitMs = 42_000)),

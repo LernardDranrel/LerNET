@@ -303,6 +303,19 @@ class PlatformTextParityTest {
     }
 
     @Test
+    fun coreFailureTitlesMatchThePhoneCauses() {
+        listOf(
+            "dial tcp 203.0.113.5:443: connect: connection refused",
+            "remote error: tls: handshake failure", "x509: certificate signed by unknown authority",
+            "reality handshake failed", "read: connection reset by peer", "unexpected EOF",
+            "dial tcp: i/o timeout", "context deadline exceeded", "network is unreachable",
+            "start service: something else", "",
+        ).forEach { raw ->
+            assertEquals(raw, app.lernet.engine.EngineErrorMapper.map(raw).titleRu(), app.lernet.engine.text.CoreFailureWords.title(raw))
+        }
+    }
+
+    @Test
     fun schemaWordsMatchWindows() {
         val words = app.lernet.engine.text.SchemaWords
         same("route_schema", words.VIEW_SCHEMA)

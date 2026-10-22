@@ -142,7 +142,8 @@ private fun SettingsList(
                     listOf(stringResource(R.string.mode_vpn), stringResource(R.string.mode_proxy)),
                     if (state.settings.mode == RunMode.PROXY) 1 else 0,
                     { onIntent(SettingsIntent.SetMode(if (it == 1) RunMode.PROXY else RunMode.FULL_VPN)) },
-                    Modifier.width(196.dp).testTag("settings_mode_switch"),
+                    // 196 dp cut «Полный VPN» to «Полный» (maxLines = 1, no ellipsis).
+                    Modifier.width(240.dp).testTag("settings_mode_switch"),
                 )
             }
             Text(
