@@ -1600,6 +1600,21 @@ private fun Diagnostics(saved: StoredState, tunnel: TunnelSnapshot, diagnostics:
             Spacer(Modifier.width(7.dp))
             FilterChip(display == "log", onClick = { display = "log" }, label = { Text("Технический журнал") })
         }
+        if (display == "log") Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                // Secrets (keys, passwords, links) are removed from the journal before it is written.
+                TextButton(onClick = {
+                    java.awt.Toolkit.getDefaultToolkit().systemClipboard
+                        .setContents(java.awt.datatransfer.StringSelection(controller.journalForClipboard()), null)
+                    controller.showMessage("Последние строки журнала скопированы")
+                }) { Text("Скопировать") }
+                TextButton(onClick = {
+                    val dialog = FileDialog(null as Frame?, "Сохранить журнал", FileDialog.SAVE)
+                    dialog.file = "LerNET-журнал-" + java.time.LocalDate.now() + ".txt"
+                    dialog.isVisible = true
+                    dialog.file?.let { controller.saveJournal(Path.of(dialog.directory, it)) }
+                    dialog.dispose()
+                }) { Text("Сохранить журнал") }
+        }
         if (diagnostics.error.isNotBlank() && tunnel.status == TunnelStatus.RUNNING) {
             Text(diagnostics.error, color = desktopColors.error, fontSize = 12.sp)
         }

@@ -42,10 +42,6 @@ object LogShare {
         }
     }
 
-    fun shareCrash(context: Context, file: File) {
-        shareOrReport(context, file, context.getString(R.string.share_crash))
-    }
-
     private fun shareOrReport(context: Context, file: File, title: String) {
         runCatching { shareFile(context, file, title) }.onFailure { showFailure(context) }
     }

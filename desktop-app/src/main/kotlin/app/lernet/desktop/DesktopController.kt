@@ -737,6 +737,30 @@ class DesktopController(
         profile?.modeOverride ?: state.value.saved.mode, WindowsElevation.isElevated,
     )
     fun showMessage(message: String) { mutable.update { it.copy(message = message) } }
+
+    /** «Сохранить журнал»: both journal segments into one file the user chose; nothing is sent anywhere. */
+    fun saveJournal(target: Path) {
+        thread(name = "lernet-windows-save-journal", isDaemon = true) {
+            runCatching {
+                val temp = target.resolveSibling(target.fileName.toString() + ".tmp")
+                Files.writeString(temp, tunnel.journalText(journalHeader()))
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING)
+            }.onSuccess { mutable.update { it.copy(message = "Журнал сохранён: $target") } }
+                .onFailure { error -> mutable.update { it.copy(message = app.lernet.engine.text.UserText.withReason("Не удалось сохранить журнал", error)) } }
+        }
+    }
+
+    /** «Скопировать»: the lines shown on screen (already without secrets), with the same header. */
+    fun journalForClipboard(): String =
+        journalHeader() + "\n\n" + app.lernet.config.redact.SecretRedactor.redact(tunnel.state.value.logs.joinToString("\n"))
+
+    private fun appVersion(): String = runCatching {
+        DesktopController::class.java.getResourceAsStream("/lernet-version.txt")!!.bufferedReader().use { it.readText().trim() }
+    }.getOrDefault("?")
+
+    private fun journalHeader(): String =
+        "LerNET ${appVersion()} для Windows · ядро sing-box-lx ${WindowsBoxProcess.PINNED_CORE_VERSION} · " +
+            "${System.getProperty("os.name")} ${System.getProperty("os.version")} · ${java.time.OffsetDateTime.now()}"
     fun dismissConnectionError() { mutable.update { it.copy(connectionError = null) } }
     fun setHealthUrl(url: String) = change { it.copy(healthUrl = url.trim()) }
     fun setStrictRoute(enabled: Boolean) = change { it.copy(strictRoute = enabled) }

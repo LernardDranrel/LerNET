@@ -238,9 +238,8 @@
     <string name="share_logs">Отправить журнал</string>
     <string name="share_last_log">Отправить последний журнал</string>
     <string name="share_logs_hint">Отчёт о последнем сеансе для разработчика. Копия сохраняется в Загрузки / LerNET.</string>
-    <string name="crash_title">Прошлый вылет — поделиться логом</string>
+    <string name="crash_title">Прошлый сеанс LerNET оборвался</string>
     <string name="crash_body">Прошлый сеанс оборвался. Отправить отчёт разработчику?</string>
-    <string name="share_crash">Поделиться отчётом</string>
     <string name="dismiss_crash">Закрыть</string>
     <string name="logs_share_failed">Не удалось открыть шаринг</string>
     <string name="settings_about">О приложении</string>
