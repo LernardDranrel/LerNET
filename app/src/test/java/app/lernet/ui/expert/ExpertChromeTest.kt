@@ -40,7 +40,7 @@ class ExpertChromeTest {
     @Test
     fun bottomMenuHasTheFiveExpertSectionsInOrder() {
         assertThat(ExpertBottomSections.map { rule.activity.getString(it.label) })
-            .containsExactly("Пульт", "Схема", "Конфиги", "Правила", "События").inOrder()
+            .containsExactly("Пульт", "Схема", "Конфиги", "Проверка пути", "События").inOrder()
     }
 
     @Test
@@ -72,10 +72,13 @@ class ExpertChromeTest {
         rule.onNodeWithTag("expert_tab_simulation").performClick()
         rule.runOnIdle { assertThat(section).isEqualTo(ExpertSection.SIMULATION) }
         capture("android-expert-v2-rules.png")
-        rule.onNodeWithTag("expert_top_journal").performClick()
+        // N3: «События» is the fifth section of the bottom menu, no ⓘ in the top bar.
+        rule.onNodeWithTag("expert_tab_journal").performClick()
         rule.runOnIdle { assertThat(section).isEqualTo(ExpertSection.JOURNAL) }
         capture("android-expert-v2-events.png")
-        rule.onNodeWithTag("expert_top_settings").performClick()
+        // N5: Expert settings («Защита и DNS») and app settings live in ⋮, not behind a ⚙ in the bar.
+        rule.onNodeWithTag("expert_more").performClick()
+        rule.onNodeWithTag("expert_menu_settings").performClick()
         rule.runOnIdle { assertThat(settings).isEqualTo(1) }
     }
 

@@ -132,6 +132,8 @@ class UiV3ScreensTest {
     }
 
     @Test fun drawer() {
+        // The drawer has an endless animation; time is advanced by hand (as in HomeStatesScreenshotTest).
+        rule.mainClock.autoAdvance = false
         val noop1: (String) -> Unit = {}
         val actions = DrawerActions(noop1, {}, noop1, {}, {}, noop1, noop1, noop1, noop1, noop1, noop1, noop1, { _, _ -> }, {},
             { _, _, _ -> }, { _, _ -> }, noop1, { _, _ -> }, { _, _ -> }, { _, _ -> })
@@ -140,6 +142,7 @@ class UiV3ScreensTest {
                 ModalDrawerSheet { ConfigDrawer(profiles, groups, "nl", emptyMap(), actions) }
             }
         }
+        rule.mainClock.advanceTimeBy(2_000)
         shot("android-drawer")
     }
 

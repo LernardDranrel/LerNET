@@ -115,7 +115,8 @@ class ConnectionHeroTest {
             }
         }
         rule.onNodeWithContentDescription("Отключить").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Открыть схему маршрутизации").assertIsEnabled().performClick()
+        // H2: no ⤨ icon on the button card; the rules open from «Правила» in the config line.
+        rule.onNodeWithText("Правила").assertIsEnabled().performClick()
         rule.runOnIdle { assertThat(openedOwner).isEqualTo(profile.id) }
         rule.onNodeWithText(profile.name).assertIsDisplayed()
         rule.onNodeWithText("46 мс").assertIsDisplayed()
@@ -168,6 +169,8 @@ class ConnectionHeroTest {
         rule.onNodeWithText("Нет связи · VPN держим").assertExists()
         rule.onNodeWithText("Конфиг из другой папки").assertExists()
         rule.onNodeWithText("Выключить VPN").assertExists()
+        // H7: one hint at a time in the attention zone; the skipped-conditions card folds behind «Ещё 1».
+        rule.onNodeWithText("Ещё 1").assertExists().performClick()
         rule.onNodeWithText("Пропущенные условия").assertExists()
         rule.onNodeWithText("Все конфиги папки «Европа» недоступны").assertExists()
         rule.onNodeWithText("Helsinki").assertExists()

@@ -252,6 +252,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
         val startTicket = when (intent) {
             UiIntent.Start -> startGate.requestStart()
             UiIntent.Stop -> {
+                simple.sessionMarks.expertStopped()
                 startGate.requestStop()
                 null
             }
@@ -626,7 +627,25 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
         }
     }
 
+    /**
+     * «Запускать при входе в систему»: brings back the Expert the user left on, as Android does after a reboot.
+     * The workspace loads in the background, so the start waits for it (up to 30 s).
+     */
+    fun resumeAtSignIn() {
+        scope.launch {
+            repeat(60) {
+                if (runtime != null) {
+                    dispatch(UiIntent.Start)
+                    return@launch
+                }
+                delay(500)
+            }
+            showFailure("Эксперт не включился при входе в систему: рабочая область не загрузилась", null)
+        }
+    }
+
     private fun present(snapshot: ExpertRuntimeState) {
+        if (snapshot.desiredEnabled && snapshot.phase == ExpertSessionPhase.RUNNING) simple.sessionMarks.expertWanted()
         val config = backend.assembled
         val policy = snapshot.appliedPolicy
         val protected = policy?.let {

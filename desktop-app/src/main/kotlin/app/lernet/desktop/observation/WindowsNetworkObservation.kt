@@ -119,8 +119,10 @@ internal class WindowsNetworkObservation(private val runner: ObservationCommandR
                     .firstNotNullOfOrNull { fields[it]?.takeIf(String::isNotBlank) } ?: definition.title
                 EvidenceRow(key, title, fields)
             }
+            // Wi-Fi: the raw netsh text stays as is; a parsed «wifi» row goes in front for the summary table.
+            val wifi = if (definition.id == "wlan") rows.flatMap { WindowsWlanText.parse(it.fields["Interfaces"].orEmpty()) } else emptyList()
             return source(definition, if (state == SourceState.AVAILABLE && rows.isEmpty()) SourceState.EMPTY else state,
-                rows, value["detail"]?.jsonPrimitive?.content.orEmpty()).copy(complete = value["complete"]?.jsonPrimitive?.booleanOrNull ?: true)
+                wifi + rows, value["detail"]?.jsonPrimitive?.content.orEmpty()).copy(complete = value["complete"]?.jsonPrimitive?.booleanOrNull ?: true)
         }
 
         private fun stableId(source: String, fields: Map<String, String>, index: Int): String {

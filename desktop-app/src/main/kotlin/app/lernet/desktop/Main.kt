@@ -152,7 +152,9 @@ fun main(args: Array<String>) {
     if (startupCheck == null && System.getProperty("os.name").startsWith("Windows")) {
         val saved = runCatching { DesktopStore().load() }.getOrDefault(StoredState())
         if (autostart && !saved.autostart) return
-        if (DesktopStartup.needsElevation(saved, WindowsElevation.isElevated)) {
+        // The Expert left on comes back at sign-in and needs the administrator rights of its TUN.
+        val expertResume = autostart && runCatching { DesktopSessionMarks(DesktopStore().workDirectory()).expertResumeWanted }.getOrDefault(false)
+        if (DesktopStartup.needsElevation(saved, WindowsElevation.isElevated) || (expertResume && !WindowsElevation.isElevated)) {
             val elevation = WindowsElevation.relaunchAsAdministrator(if (autostart) WindowsAutostart.ARGUMENT else null)
             if (elevation.isSuccess) return
             startupFallbackMessage = "Не удалось запустить VPN от имени администратора. Доступен локальный прокси: " +
@@ -169,12 +171,23 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
             if (startupCheck == null) {
                 it.startSubscriptionSchedule()
                 it.syncAutostart()
-                // The VPN comes back only if the user left it on; «Отключить» clears that.
-                if (autostart && it.sessionMarks.resumeWanted) it.connect()
             }
         }
     }
-    val expert = remember { if (startupCheck == null) DesktopExpertController(controller) else null }
+    val expert = remember {
+        if (startupCheck == null) {
+            DesktopExpertController(controller).also { expert ->
+                // Only what the user left on comes back; «Отключить» / «Выключить» clears it (same order as Android).
+                when (SignInResume.decide(autostart, controller.sessionMarks.expertResumeWanted, controller.sessionMarks.resumeWanted)) {
+                    SignInResume.EXPERT -> expert.resumeAtSignIn()
+                    SignInResume.VPN -> controller.connect()
+                    SignInResume.NONE -> Unit
+                }
+            }
+        } else {
+            null
+        }
+    }
     DisposableEffect(controller, expert) {
         val closed = java.util.concurrent.atomic.AtomicBoolean(false)
         val closeController = { if (closed.compareAndSet(false, true)) { expert?.close(); controller.close() } }
