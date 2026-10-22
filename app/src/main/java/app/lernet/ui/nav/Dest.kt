@@ -13,7 +13,6 @@ sealed class Dest(val route: String) {
 
     data object Network : Dest("network")
 
-    data object Groups : Dest("groups")
 
     data object Routes : Dest("routes/{profileId}") {
         fun of(profileId: String): String = "routes/$profileId"

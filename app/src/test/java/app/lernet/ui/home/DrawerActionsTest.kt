@@ -20,7 +20,7 @@ class DrawerActionsTest {
         onSelect = { events += "select:$it" }, onConfig = { events += "edit:$it" },
         onImport = {}, onImportIntoGroup = {}, onImportArchive = {}, onExportAll = {}, onExportGroup = {},
         onCreateGroup = {}, onGroupRoutes = {}, onRoutes = {}, onDelete = {}, onDuplicate = {},
-        onRename = { _, _ -> }, onGroups = {}, onProbe = {}, onMoveProfile = { _, _, _ -> },
+        onRename = { _, _ -> }, onProbe = {}, onMoveProfile = { _, _, _ -> },
         onRenameGroup = { _, _ -> }, onDeleteGroup = {}, onSetAutoFailover = { _, _ -> },
         onMoveGroup = { _, _ -> }, onReorderUngrouped = { _, _ -> },
     )

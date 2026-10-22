@@ -98,8 +98,8 @@
     <string name="expert_error_ingress_not_ready">Туннель ещё не подтвердил готовность своего адаптера</string>
     <string name="expert_error_ingress_timeout">Туннель не подтвердил готовность маршрутизации за отведённое время</string>
     <string name="expert_open_menu">Разделы экспертного режима</string>
-    <string name="expert_tunnel_details">Сведения о туннеле</string>
-    <string name="expert_hide_tunnel_details">Скрыть сведения</string>
+    <string name="expert_tunnel_details">сведения</string>
+    <string name="expert_hide_tunnel_details">скрыть сведения</string>
     <string name="expert_app_tools">Приложение</string>
     <string name="expert_profiles_folders">Конфиги и папки</string>
     <string name="expert_profiles_hint">Нажми конфиг для настройки. Выходы Эксперта выбираются в схеме.</string>

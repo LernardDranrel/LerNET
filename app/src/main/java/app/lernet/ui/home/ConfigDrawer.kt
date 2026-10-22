@@ -701,10 +701,6 @@ private fun FolderHeader(
                             menu = false
                             actions.onExportGroup(group.id)
                         })
-                        DropdownMenuItem(text = { Text(stringResource(R.string.drawer_manage_folders)) }, onClick = {
-                            menu = false
-                            actions.onGroups()
-                        })
                     }
                 }
             }

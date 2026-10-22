@@ -34,7 +34,7 @@ import app.lernet.ui.controls.ExpertFramedBox
 import app.lernet.ui.icons.LerNetSymbols
 import kotlinx.coroutines.delay
 
-/** Expert's own bottom menu (v2): Пульт · Схема · Конфиги · Правила · События. Safety settings stay in ☰. */
+/** Expert's own bottom menu: Пульт · Схема · Конфиги · Проверка · События. «Защита и DNS» is in ⋮ (audit N4, m4). */
 internal val ExpertBottomSections = listOf(
     ExpertSection.OVERVIEW,
     ExpertSection.SCHEMA,
@@ -64,7 +64,7 @@ internal fun ExpertBottomMenu(section: ExpertSection, onSection: (ExpertSection)
                 selected = section == item,
                 onClick = { onSection(item) },
                 icon = { Icon(item.icon(), contentDescription = null) },
-                label = { Text(stringResource(item.label), maxLines = 1) },
+                label = { Text(stringResource(item.short), maxLines = 1) },
                 modifier = Modifier.testTag("expert_tab_${item.name.lowercase()}"),
             )
         }

@@ -1,5 +1,18 @@
 package app.lernet.ui.expert
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.draw.clip
 import android.app.Activity
 import android.content.Intent
 import android.net.VpnService
@@ -84,10 +97,10 @@ import app.lernet.ui.controls.NetworkLeverLamp
 import app.lernet.ui.icons.LerNetSymbols
 import app.lernet.ui.motion.rememberReduceMotion
 
-internal enum class ExpertSection(val label: Int) {
+internal enum class ExpertSection(val label: Int, val short: Int = label) {
     OVERVIEW(R.string.expert_section_overview),
     SCHEMA(R.string.expert_section_schema),
-    SIMULATION(R.string.expert_section_simulation),
+    SIMULATION(R.string.expert_section_simulation, R.string.expert_section_simulation_short),
     EXITS(R.string.expert_section_exits),
     JOURNAL(R.string.expert_section_journal),
     SAFETY(R.string.expert_section_safety),
@@ -99,12 +112,14 @@ internal fun ExpertRoute(
     section: ExpertSection, onSectionChange: (ExpertSection) -> Unit,
     onOpenDrawer: () -> Unit,
     onSettings: () -> Unit = {},
+    onNetwork: () -> Unit = {},
 ) {
     val viewModel: ExpertViewModel = hiltViewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val snackbar = remember { SnackbarHostState() }
+    val appSnackbar = app.lernet.ui.nav.LocalAppSnackbar.current
+    val snackbar = remember(appSnackbar) { appSnackbar ?: SnackbarHostState() }
     val splash = rememberExpertSplash(context)
     var switchPrompt by rememberSaveable { mutableStateOf(false) }
     var handover by rememberSaveable(stateSaver = ExpertOptionalJsonSaver<Pair<String, NetworkPolicy>>()) { mutableStateOf<Pair<String, NetworkPolicy>?>(null) }
@@ -256,6 +271,7 @@ internal fun ExpertRoute(
         formMemory = viewModel.formMemory,
         selectedSection = section, onSectionChange = onSectionChange, onOpenDrawer = onOpenDrawer,
         onSettings = onSettings,
+        onNetwork = onNetwork,
         frameAnimateIn = !splash.firstEntry,
     )
     if (splash.visible) ExpertSplash()
@@ -282,6 +298,7 @@ internal fun ExpertScreen(
     onSectionChange: ((ExpertSection) -> Unit)? = null,
     onOpenDrawer: () -> Unit = {},
     onSettings: () -> Unit = {},
+    onNetwork: () -> Unit = {},
     frameAnimateIn: Boolean = false,
 ) {
     var localSection by rememberSaveable { mutableStateOf(ExpertSection.OVERVIEW) }
@@ -297,60 +314,57 @@ internal fun ExpertScreen(
     var dnsEditor by rememberSaveable(stateSaver = ExpertOptionalJsonSaver<PolicyDnsSettings>()) { mutableStateOf<PolicyDnsSettings?>(null) }
     var healthEditor by rememberSaveable(stateSaver = ExpertOptionalJsonSaver<PolicyHealthSettings>()) { mutableStateOf<PolicyHealthSettings?>(null) }
     val reduced = rememberReduceMotion()
+    // «Защита и DNS» opens from ⋮ and is not in the bottom menu: Back returns to the pult.
+    androidx.activity.compose.BackHandler(enabled = section == ExpertSection.SAFETY) { selectSection(ExpertSection.OVERVIEW) }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
             Column {
+                // Audit N2–N5 (mockup m4): ☰ = configs and folders, the mode switch sits in the title, everything else in ⋮.
                 TopAppBar(
                     navigationIcon = {
                         IconButton(onOpenDrawer) {
-                            Icon(LerNetSymbols.menu(), contentDescription = stringResource(R.string.expert_open_menu))
+                            Icon(LerNetSymbols.menu(), contentDescription = stringResource(R.string.cd_configs))
                         }
                     },
                     title = {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            LerNetLogo(size = 28.dp)
-                            Column {
-                                Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleLarge)
-                                Text(stringResource(section.label), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
+                        AppModeTabs(true, onVpn, {}, Modifier.width(220.dp).testTag("expert_mode_switch"))
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                     actions = {
-                        IconButton({ selectSection(ExpertSection.JOURNAL) }, Modifier.testTag("expert_top_journal")) {
-                            Icon(LerNetSymbols.info(), contentDescription = stringResource(R.string.expert_section_journal))
-                        }
-                        IconButton(onSettings, Modifier.testTag("expert_top_settings")) {
-                            Icon(LerNetSymbols.settings(), contentDescription = stringResource(R.string.expert_top_settings))
-                        }
-                        IconButton(onClick = { archiveMenu = true }, enabled = state.inventory != null) {
-                            Icon(
-                                LerNetSymbols.more(),
-                                contentDescription = stringResource(R.string.expert_archive_actions),
-                            )
+                        IconButton(onClick = { archiveMenu = true }, Modifier.testTag("expert_more")) {
+                            Icon(LerNetSymbols.more(), contentDescription = stringResource(R.string.expert_more))
                         }
                         DropdownMenu(archiveMenu, onDismissRequest = { archiveMenu = false }) {
                             DropdownMenuItem(
+                                text = { Text(stringResource(R.string.expert_section_safety)) },
+                                onClick = { archiveMenu = false; selectSection(ExpertSection.SAFETY) },
+                                modifier = Modifier.testTag("expert_menu_safety"),
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.expert_menu_app_settings)) },
+                                onClick = { archiveMenu = false; onSettings() },
+                                modifier = Modifier.testTag("expert_menu_settings"),
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.expert_menu_network)) },
+                                onClick = { archiveMenu = false; onNetwork() },
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
                                 text = { Text(stringResource(R.string.expert_import)) },
-                                onClick = {
-                                    archiveMenu = false
-                                    onImport()
-                                },
+                                enabled = state.inventory != null,
+                                onClick = { archiveMenu = false; onImport() },
                             )
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.expert_export)) },
-                                onClick = {
-                                    archiveMenu = false
-                                    onExport()
-                                },
+                                enabled = state.inventory != null,
+                                onClick = { archiveMenu = false; onExport() },
                             )
                         }
                     }
                 )
-                AppModeTabs(true, onVpn, {})
-
             }
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -402,17 +416,25 @@ internal fun ExpertScreen(
                             Text(stringResource(R.string.expert_permission_denied), color = MaterialTheme.colorScheme.error)
                         }
                         ExpertStatus(state, onIntent, onStart, reduced)
-                        ExpertNowCard(runtime, onOpenEvents = { selectSection(ExpertSection.JOURNAL) })
+                        ExpertTiles(runtime, state, ::selectSection)
                     }
                 } else if (visible == ExpertSection.JOURNAL) {
-                    ExpertActivity(runtime, bundle, onSimulate = { connection, historical ->
-                        simulationConnection = connection
-                        historicalPath = historical
-                        simulationRequest++
-                        selectSection(ExpertSection.SIMULATION)
-                    }, onClear = { onIntent(ExpertIntent.ClearConnectionHistory) }, header = { rate ->
-                        ExpertEventsHeader(runtime, rate)
-                    })
+                    // Audit X2 (mockup m6): one switch «Соединения · N | Действия LerNET · N», each list in full.
+                    var actions by rememberSaveable { mutableStateOf(false) }
+                    Column(Modifier.fillMaxSize()) {
+                        ExpertEventsSwitch(runtime, actions) { actions = it }
+                        Box(Modifier.weight(1f)) {
+                            if (actions) ExpertActionsList(runtime)
+                            else ExpertActivity(runtime, bundle, onSimulate = { connection, historical ->
+                                simulationConnection = connection
+                                historicalPath = historical
+                                simulationRequest++
+                                selectSection(ExpertSection.SIMULATION)
+                            }, onClear = { onIntent(ExpertIntent.ClearConnectionHistory) }, header = { rate ->
+                                ExpertEventsRate(rate)
+                            })
+                        }
+                    }
                 } else {
                     LazyColumn(
                         Modifier.fillMaxSize(),
@@ -444,17 +466,15 @@ internal fun ExpertScreen(
                             ExpertSection.EXITS -> item { ExpertExits(runtime, bundle, onIntent, onSaveExternal, onSaveDraft, formMemory) }
                             ExpertSection.SIMULATION -> item { ExpertSimulation(runtime, bundle, simulationConnection, historicalPath, simulationRequest, formMemory) }
                             ExpertSection.SAFETY -> item {
-                                OutlinedButton(
-                                    { dnsEditor = runtime.draft.dns }, Modifier.fillMaxWidth(),
-                                    enabled = onSaveDns != null,
-                                ) { Text(stringResource(R.string.expert_dns_title)) }
-
-                                OutlinedButton(
-                                    { healthEditor = runtime.draft.health }, Modifier.fillMaxWidth(),
-                                    enabled =
-                                    onSaveHealth != null
-                                ) {
-                                    Text(stringResource(R.string.expert_health_title))
+                                // Audit X7: one page «Защита и DNS» — rows that open the editors, then the protection facts.
+                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text(stringResource(R.string.expert_section_safety), style = MaterialTheme.typography.titleLarge)
+                                PanelCard {
+                                    ExpertLinkRow(stringResource(R.string.expert_dns_row), stringResource(R.string.expert_dns_row_hint),
+                                        enabled = onSaveDns != null, tag = "expert_dns_row") { dnsEditor = runtime.draft.dns }
+                                    HorizontalDivider()
+                                    ExpertLinkRow(stringResource(R.string.expert_health_row), stringResource(R.string.expert_health_row_hint),
+                                        enabled = onSaveHealth != null, tag = "expert_health_row") { healthEditor = runtime.draft.health }
                                 }
                                 PanelCard {
                                     Text(
@@ -489,21 +509,9 @@ internal fun ExpertScreen(
                                         Text(stringResource(R.string.expert_android_settings))
                                     }
                                 }
-                            }
-                            ExpertSection.JOURNAL -> {
-                                if (runtime.reasons.isEmpty()) {
-                                    item {
-                                        Text(stringResource(R.string.expert_journal_empty))
-                                    }
-                                }
-                                runtime.reasons.asReversed().forEach { reason ->
-                                    item(key = reason.sequence) {
-                                        PanelCard {
-                                            Text(reason.message, style = MaterialTheme.typography.bodyMedium)
-                                        }
-                                    }
                                 }
                             }
+                            ExpertSection.JOURNAL -> Unit
                         }
                     }
                 }
@@ -580,8 +588,11 @@ private fun ExpertStatus(
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val summary: @Composable () -> Unit = {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(stringResource(R.string.expert_tunnel_title), textAlign = TextAlign.Center, style = MaterialTheme.typography.headlineSmall)
-                Text(statusText, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium,
+                // Mockup m4: «Своя схема · работает» on one line, the path and «сведения» on the next.
+                androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center,
+                    verticalArrangement = Arrangement.Center) {
+                Text(stringResource(R.string.expert_tunnel_title) + " · ", textAlign = TextAlign.Center, style = MaterialTheme.typography.titleLarge)
+                Text(statusText, textAlign = TextAlign.Center, style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.testTag("expert_pult_headline"),
                     color = when (pult) {
                         app.lernet.engine.policy.PultStatus.PROBLEM -> MaterialTheme.colorScheme.error
@@ -589,13 +600,24 @@ private fun ExpertStatus(
                         app.lernet.engine.policy.PultStatus.OFF -> MaterialTheme.colorScheme.onSurfaceVariant
                         else -> MaterialTheme.colorScheme.tertiary
                     })
+                }
                 note?.let { Text(it, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary) }
                 state.inventory?.let { inventory ->
                     val policy = runtime.appliedPolicy ?: runtime.saved
-                    Text(
-                        stringResource(R.string.expert_default_path_summary, targetTitle(policy.device.defaultTarget, inventory, policy).replaceFirstChar { it.lowercase() }),
-                        style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center
-                    )
+                    androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center,
+                        itemVerticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            stringResource(R.string.expert_default_path_summary, targetTitle(policy.device.defaultTarget, inventory, policy).replaceFirstChar { it.lowercase() }) + " · ",
+                            style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center
+                        )
+                        Text(
+                            stringResource(if (details) R.string.expert_hide_tunnel_details else R.string.expert_tunnel_details),
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.heightIn(min = 48.dp).wrapContentHeight()
+                                .clickable(role = androidx.compose.ui.semantics.Role.Button) { details = !details }
+                                .testTag("expert_tunnel_details"),
+                        )
+                    }
                 }
                 }
             }
@@ -640,9 +662,6 @@ private fun ExpertStatus(
                 modifier = Modifier.fillMaxWidth().testTag("expert_pult_schema"),
                 textAlign = TextAlign.Center,
             )
-        }
-        TextButton({ details = !details }, Modifier.fillMaxWidth()) {
-            Text(stringResource(if (details) R.string.expert_hide_tunnel_details else R.string.expert_tunnel_details))
         }
         androidx.compose.animation.AnimatedVisibility(details) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -712,58 +731,134 @@ internal fun ExpertUptimeLine(runtime: app.lernet.engine.policy.ExpertRuntimeSta
         }
     }
     val label = app.lernet.engine.policy.ExpertUptime.label(runtime, now) ?: return
-    Column(Modifier.testTag("expert_uptime"), horizontalAlignment = Alignment.CenterHorizontally) {
+    // Mockup m4: one line «БЕЗ ПЕРЕРЫВА · 14 дн 06 ч».
+    Row(Modifier.testTag("expert_uptime"), verticalAlignment = Alignment.CenterVertically) {
         Text(
-            stringResource(R.string.expert_uptime_title).uppercase(),
-            style = MaterialTheme.typography.labelSmall,
+            stringResource(R.string.expert_uptime_title).uppercase() + " · ",
+            style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.tertiary,
         )
-        Text(label, style = MaterialTheme.typography.headlineSmall)
+        Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary)
     }
 }
 
-/** «Сейчас» on the pult: a short summary; the connections themselves are in «События». */
+/** Audit X1 (mockup m4): three tiles that lead to Конфиги, События and Защита instead of a long text link. */
 @Composable
-private fun ExpertNowCard(runtime: app.lernet.engine.policy.ExpertRuntimeState, onOpenEvents: () -> Unit) {
+private fun ExpertTiles(runtime: app.lernet.engine.policy.ExpertRuntimeState, state: ExpertUiState, open: (ExpertSection) -> Unit) {
     val exits = runtime.exits
     val working = exits.count { it.phase == app.lernet.engine.policy.ExitPhase.READY }
-    val sleeping = exits.count { it.phase == app.lernet.engine.policy.ExitPhase.SLEEPING }
-    val down = exits.count { it.phase == app.lernet.engine.policy.ExitPhase.FAILED || it.phase == app.lernet.engine.policy.ExitPhase.DEGRADED }
     val active = runtime.connections.count { it.active == true }
-    PanelCard {
-        Text(stringResource(R.string.expert_now_title).uppercase(), style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.tertiary)
-        ExpertNowRow(stringResource(R.string.expert_now_exits),
-            if (exits.isEmpty()) stringResource(R.string.expert_now_exits_none)
-            else stringResource(R.string.expert_now_exits_value, working, sleeping, down))
-        ExpertNowRow(stringResource(R.string.expert_now_connections), active.toString())
-        TextButton(onOpenEvents, Modifier.fillMaxWidth().testTag("expert_open_events")) {
-            Text(stringResource(R.string.expert_now_open_events))
+    val protectionOk = runtime.inactiveNodeIds.isEmpty()
+    Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ExpertTile(stringResource(R.string.expert_tile_exits), stringResource(R.string.expert_tile_exits_value, working, exits.size),
+            Modifier.weight(1f).testTag("expert_tile_exits")) { open(ExpertSection.EXITS) }
+        ExpertTile(stringResource(R.string.expert_tile_connections), active.toString(),
+            Modifier.weight(1f).testTag("expert_open_events")) { open(ExpertSection.JOURNAL) }
+        ExpertTile(stringResource(R.string.expert_tile_protection),
+            stringResource(if (protectionOk) R.string.expert_tile_protection_on else R.string.expert_tile_protection_check),
+            Modifier.weight(1f).testTag("expert_tile_safety"), warn = !protectionOk) { open(ExpertSection.SAFETY) }
+    }
+}
+
+@Composable
+private fun ExpertTile(title: String, value: String, modifier: Modifier, warn: Boolean = false, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val label = stringResource(R.string.expert_tile_open, title)
+    Column(
+        modifier.fillMaxHeight().heightIn(min = 64.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+            .background(scheme.surfaceVariant.copy(alpha = .55f))
+            .clickable(onClickLabel = label, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+        Text("$value ›", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+            color = if (warn) scheme.tertiary else scheme.onSurface, maxLines = 1)
+    }
+}
+
+/** A list row that opens a page or editor: title, one-line hint, chevron. 56 dp, the whole row is the target. */
+@Composable
+internal fun ExpertLinkRow(title: String, hint: String, enabled: Boolean = true, tag: String? = null, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp)
+            .clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
+            .then(if (tag != null) Modifier.testTag(tag) else Modifier)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** Top of «События»: the two lists side by side as one segmented switch, with their sizes. */
+@Composable
+private fun ExpertEventsSwitch(runtime: app.lernet.engine.policy.ExpertRuntimeState, actions: Boolean, onChange: (Boolean) -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp)
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(50))
+            .border(1.dp, scheme.outlineVariant, androidx.compose.foundation.shape.RoundedCornerShape(50)).padding(3.dp)
+            .selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        listOf(false to stringResource(R.string.expert_events_connections, runtime.connections.size),
+            true to stringResource(R.string.expert_events_actions, runtime.reasons.size)).forEach { (value, label) ->
+            val selected = actions == value
+            Box(
+                Modifier.weight(1f).heightIn(min = 40.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(50))
+                    .background(if (selected) scheme.secondaryContainer else scheme.background)
+                    .selectable(selected, role = androidx.compose.ui.semantics.Role.Tab) { onChange(value) }
+                    .testTag(if (value) "expert_events_actions" else "expert_events_connections"),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1,
+                    color = if (selected) scheme.onSecondaryContainer else scheme.onSurfaceVariant)
+            }
         }
     }
 }
 
+/** Audit X4: speed in KB/s like everywhere else, one line. */
 @Composable
-private fun ExpertNowRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
-        Text(value, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.End, modifier = Modifier.padding(start = 12.dp))
-    }
+private fun ExpertEventsRate(rate: FlowTrafficRate?) {
+    Text(
+        if (rate == null) stringResource(R.string.expert_events_rate_unknown)
+        else stringResource(R.string.expert_events_rate, humanBytes(rate.upload), humanBytes(rate.download)),
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
-/** Top of «События»: speed, active count and the latest app notes, above search and history. */
+internal fun humanBytes(bytes: Long): String = when {
+    bytes >= 1_048_576 -> String.format(java.util.Locale.ROOT, "%.1f МБ", bytes / 1_048_576.0)
+    bytes >= 1_024 -> "${bytes / 1_024} КБ"
+    else -> "$bytes Б"
+}
+
+/** «Действия LerNET»: every note of the app, newest first (before, only the last five were shown). */
 @Composable
-private fun ExpertEventsHeader(runtime: app.lernet.engine.policy.ExpertRuntimeState, rate: FlowTrafficRate?) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(stringResource(R.string.expert_flow_active_count, runtime.connections.count { it.active == true }),
-            style = MaterialTheme.typography.bodySmall)
-        Text(
-            if (rate == null) stringResource(R.string.expert_flow_rate_unknown)
-            else stringResource(R.string.expert_flow_rate, rate.upload, rate.download),
-            style = MaterialTheme.typography.bodySmall,
-        )
-        runtime.reasons.asReversed().take(5).forEach { reason ->
-            PanelCard { Text(reason.message, style = MaterialTheme.typography.bodyMedium) }
+private fun ExpertActionsList(runtime: app.lernet.engine.policy.ExpertRuntimeState) {
+    LazyColumn(
+        Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item { ExpertHint(R.string.expert_actions_hint) }
+        if (runtime.reasons.isEmpty()) item { Text(stringResource(R.string.expert_journal_empty)) }
+        items(runtime.reasons.asReversed(), key = { it.sequence }) { reason ->
+            PanelCard {
+                Text(observationTimeTitle(reason.atMs), style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(reason.message, style = MaterialTheme.typography.bodyMedium,
+                    color = when (reason.level) {
+                        app.lernet.engine.policy.ExpertReasonLevel.ERROR -> MaterialTheme.colorScheme.error
+                        app.lernet.engine.policy.ExpertReasonLevel.WARNING -> MaterialTheme.colorScheme.tertiary
+                        else -> MaterialTheme.colorScheme.onSurface
+                    })
+            }
         }
     }
 }

@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- UI v3 (audit 22.10.2026): new texts in one file so other branches merge cleanly. -->
+<resources>
+    <!-- Expert: «События» = details (m6) -->
+    <string name="expert_events_connections">Соединения · %1$d</string>
+    <string name="expert_events_actions">Действия LerNET · %1$d</string>
+    <string name="expert_activity_long">Длительные</string>
+    <string name="expert_events_rate">↑ %1$s/с · ↓ %2$s/с · новые сверху</string>
+    <string name="expert_events_rate_unknown">Скорость ещё не измерена · новые сверху</string>
+    <string name="expert_events_title">Соединения</string>
+    <string name="expert_actions_hint">Применение схемы, пробуждение и отказ выходов, смена выхода. Новые сверху.</string>
+    <!-- Expert: pult tiles (m4) -->
+    <string name="expert_tile_exits">Конфиги</string>
+    <string name="expert_tile_exits_value">%1$d / %2$d</string>
+    <string name="expert_tile_connections">Соединения</string>
+    <string name="expert_tile_protection">Защита</string>
+    <string name="expert_tile_protection_on">вкл</string>
+    <string name="expert_tile_protection_check">проверь</string>
+    <string name="expert_tile_open">Открыть «%1$s»</string>
+    <string name="expert_section_simulation_short">Проверка</string>
+    <string name="expert_menu_app_settings">Настройки приложения</string>
+    <string name="expert_menu_network">Анализ сети</string>
+    <string name="expert_more">Ещё</string>
+    <string name="expert_dns_row">DNS Эксперта</string>
+    <string name="expert_dns_row_hint">Через какой выход и какие серверы спрашивать адреса сайтов</string>
+    <string name="expert_health_row">Проверки связи</string>
+    <string name="expert_health_row_hint">Как и как часто проверять выходы</string>
+    <string name="settings_from_expert">Это общие настройки приложения. Они действуют и в режиме VPN, и в Эксперте.</string>
+    <!-- Mode switch (N19) -->
+    <string name="mode_switch">Режим</string>
+    <!-- Status strip (G1) -->
+    <string name="status_connected">Подключено</string>
+    <string name="status_connected_profile">Подключено · %1$s</string>
+    <string name="status_connecting">Подключаемся…</string>
+    <string name="status_reconnecting">Переподключаемся…</string>
+    <string name="status_off">Отключено</string>
+    <string name="status_failed">Не удалось подключиться</string>
+    <string name="status_hold">Нет связи · VPN держим</string>
+    <string name="status_jammed">Связь глушат · держим соединение</string>
+    <string name="status_no_reply">Подключено · нет ответа</string>
+    <string name="status_expert_running">Своя схема работает · %1$s</string>
+    <string name="status_expert_starting">Своя схема включается…</string>
+    <string name="status_expert_stopping">Своя схема выключается…</string>
+    <string name="status_expert_failed">Своя схема: сбой</string>
+    <string name="status_expert_exit_error">Своя схема · сбой выхода</string>
+    <string name="status_dns_ok">DNS работает</string>
+    <string name="status_open">Открыть главный экран</string>
+    <plurals name="connections_count">
+        <item quantity="one">%d соединение</item>
+        <item quantity="few">%d соединения</item>
+        <item quantity="many">%d соединений</item>
+        <item quantity="other">%d соединения</item>
+    </plurals>
+    <!-- Home (m1) -->
+    <string name="home_tap_disconnect">Нажмите, чтобы отключить</string>
+    <string name="home_tap_connect">Нажмите, чтобы подключить</string>
+    <string name="home_change_profile">Сменить ›</string>
+    <string name="home_profile_rules">Правила</string>
+    <string name="home_profile_folder">папка «%1$s»</string>
+    <string name="home_profile_autoswap">автосмена</string>
+    <string name="home_profile_single">без папки</string>
+    <string name="home_link_title">Связь</string>
+    <string name="home_link_check">Проверить</string>
+    <string name="home_link_internet">Интернет через VPN</string>
+    <string name="home_link_server">Сервер</string>
+    <string name="home_link_speed">Скорость</string>
+    <string name="home_link_total">Передано</string>
+    <string name="home_link_path">Путь до сервера</string>
+    <string name="home_link_works">работает · %1$d мс</string>
+    <string name="home_link_answers">отвечает · %1$d мс</string>
+    <string name="home_link_no_answer">нет ответа</string>
+    <string name="home_link_checking">проверяем…</string>
+    <string name="home_link_unchecked">не проверено</string>
+    <string name="home_link_when_connected">после подключения</string>
+    <string name="home_link_path_check">проверить ›</string>
+    <string name="home_link_path_value">%1$s ›</string>
+    <string name="home_journal_row">Журнал запросов ›</string>
+    <string name="home_attention_more">Ещё %1$d</string>
+    <string name="home_attention_less">Свернуть</string>
+    <plurals name="hops_count">
+        <item quantity="one">%d узел</item>
+        <item quantity="few">%d узла</item>
+        <item quantity="many">%d узлов</item>
+        <item quantity="other">%d узла</item>
+    </plurals>
+</resources>

@@ -1,5 +1,11 @@
 package app.lernet.ui.nav
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.runtime.CompositionLocalProvider
+
 import android.app.Activity
 import androidx.activity.compose.LocalActivity
 import android.net.VpnService
@@ -45,7 +51,6 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.compose.runtime.saveable.rememberSaveable
 import app.lernet.ui.expert.ExpertSection
-import app.lernet.ui.expert.ExpertNavigationDrawer
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
@@ -65,8 +70,6 @@ import app.lernet.engine.policy.ExpertSessionPhase
 import app.lernet.ui.diag.DiagScreen
 import app.lernet.ui.network.NetworkObservationRoute
 import app.lernet.ui.diag.DiagViewModel
-import app.lernet.ui.groups.GroupsScreen
-import app.lernet.ui.groups.GroupsViewModel
 import app.lernet.ui.home.ConfigDrawer
 import app.lernet.ui.home.DrawerActions
 import app.lernet.ui.home.HomeEvent
@@ -99,22 +102,15 @@ fun LerNetAppRoot() {
         Dest.Home.route -> false
         else -> expertContext
     }
-    // v2: ☰ in Expert opens the configs and folders, like in the basic mode; sections live in the bottom menu.
-    var expertProfilesOpen by rememberSaveable { mutableStateOf(true) }
+    // Audit N4: ☰ always opens the configs and folders, in both modes; Expert sections live in its bottom menu.
+    // Audit G3: the Expert section is remembered for the whole session, a mode change does not reset it.
     var expertSection by rememberSaveable { mutableStateOf(ExpertSection.OVERVIEW) }
-    LaunchedEffect(expertMode) {
-        // Launch and every mode change open the mode's main screen: the button (basic) or the lever pult (Expert).
-        if (expertMode != expertContext && expertMode) expertSection = ExpertSection.OVERVIEW
-        expertContext = expertMode
-    }
+    LaunchedEffect(expertMode) { expertContext = expertMode }
     val homeViewModel: HomeViewModel = hiltViewModel()
     val homeState by homeViewModel.state.collectAsStateWithLifecycle()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     var drawerDragActive by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    LaunchedEffect(drawerState.currentValue) {
-        if (drawerState.currentValue == DrawerValue.Closed) expertProfilesOpen = true
-    }
     fun openAppPage(route: String) {
         scope.launch { drawerState.close() }
         navController.navigate(route) { launchSingleTop = true }
@@ -177,25 +173,7 @@ fun LerNetAppRoot() {
         drawerState = drawerState,
         gesturesEnabled = !drawerDragActive,
         drawerContent = {
-            if (expertMode && !expertProfilesOpen) ExpertNavigationDrawer(expertSection, onSection = {
-                expertSection = it
-                scope.launch { drawerState.close() }
-                if (entry?.destination?.route != Dest.Expert.route && !navController.popBackStack(Dest.Expert.route, false)) {
-                    navController.navigate(Dest.Expert.route) { launchSingleTop = true }
-                }
-            }, onProfiles = { expertProfilesOpen = true },
-                onSettings = { openAppPage(Dest.Settings.route) },
-                onDiagnostics = { openAppPage(Dest.Diag.route) },
-                onNetwork = { openAppPage(Dest.Network.route) },
-            ) else ConfigDrawer(
-                header = {
-                    if (expertMode) {
-                        androidx.activity.compose.BackHandler(enabled = drawerState.isOpen) { expertProfilesOpen = false }
-                        TextButton({ expertProfilesOpen = false }, Modifier.padding(horizontal = 16.dp)) {
-                            Text(stringResource(R.string.expert_back_to_menu))
-                        }
-                    }
-                },
+            ConfigDrawer(
                 profiles = homeState.profiles,
                 groups = homeState.groups,
                 activeProfileId = homeState.activeProfile?.id,
@@ -224,7 +202,23 @@ fun LerNetAppRoot() {
             )
         },
     ) {
-        Box(Modifier.fillMaxSize()) {
+        val route = entry?.destination?.route
+        val secondary = route != null && route != Dest.Home.route && route != Dest.Expert.route
+        val expertViewModel: ExpertViewModel = hiltViewModel()
+        val expertState by expertViewModel.state.collectAsStateWithLifecycle()
+        Column(Modifier.fillMaxSize()) {
+          if (secondary) {
+            // Audit G1: the connection status stays visible on every secondary screen.
+            StatusStrip(
+                stripStatus(homeState.snapshot, homeState.activeProfile?.name, expertState.runtime),
+                onClick = {
+                    val main = if (expertMode) Dest.Expert.route else Dest.Home.route
+                    if (!navController.popBackStack(main, false)) navController.navigate(main) { launchSingleTop = true }
+                },
+            )
+          }
+          Box(Modifier.fillMaxSize().then(if (secondary) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier)) {
+            CompositionLocalProvider(LocalAppSnackbar provides snackbar) {
             AppNavHost(
                 navController = navController,
                 homeViewModel = homeViewModel,
@@ -238,13 +232,16 @@ fun LerNetAppRoot() {
                 },
                 showCrashBanner = homeState.offerLastLogs && !crashDialogOpen,
             )
-            SnackbarHost(
+            }
+            // Audit G6: one snackbar queue for the whole app. Expert shows it above its bottom menu itself.
+            if (route != Dest.Expert.route) SnackbarHost(
                 hostState = snackbar,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
-                    .padding(bottom = 72.dp),
+                    .padding(bottom = 16.dp),
             )
+          }
         }
     }
 }
@@ -408,10 +405,6 @@ private fun drawerActions(
     onDelete = { homeViewModel.onIntent(HomeIntent.DeleteProfile(it)) },
     onDuplicate = { homeViewModel.onIntent(HomeIntent.DuplicateProfile(it)) },
     onRename = { id, name -> homeViewModel.onIntent(HomeIntent.RenameProfile(id, name)) },
-    onGroups = {
-        close()
-        navController.navigate(Dest.Groups.route)
-    },
     onProbe = { homeViewModel.onIntent(HomeIntent.ProbeProfiles(it)) },
     onMoveProfile = { id, groupId, index -> homeViewModel.onIntent(HomeIntent.MoveProfile(id, groupId, index)) },
     onRenameGroup = { id, name -> homeViewModel.onIntent(HomeIntent.RenameGroup(id, name)) },
@@ -481,6 +474,7 @@ private fun AppNavHost(
             ExpertRoute(
                 section = expertSection, onSectionChange = onExpertSection, onOpenDrawer = onOpenDrawer,
                 onSettings = { navController.navigate(Dest.Settings.route) { launchSingleTop = true } },
+                onNetwork = { navController.navigate(Dest.Network.route) { launchSingleTop = true } },
                 onVpn = { navController.navigate(Dest.Home.route) { popUpTo(Dest.Home.route) { inclusive = true }; launchSingleTop = true } },
                 simpleActive = homeState.snapshot.state in setOf(ConnectionState.CONNECTED, ConnectionState.CONNECTING, ConnectionState.RECONNECTING),
             )
@@ -530,18 +524,6 @@ private fun NavGraphBuilder.secondaryDestinations(
     }
     composable(Dest.Network.route) {
         NetworkObservationRoute(onBack = { navController.popBackStack() })
-    }
-    composable(Dest.Groups.route) {
-        val vm: GroupsViewModel = hiltViewModel()
-        val state by vm.state.collectAsStateWithLifecycle()
-        GroupsScreen(
-            state = state,
-            onIntent = vm::onIntent,
-            onBack = { navController.popBackStack() },
-            onOpenRoutes = { groupId ->
-                navController.navigate(Dest.Routes.of(RouteOwners.group(groupId)))
-            },
-        )
     }
     composable(
         Dest.Routes.route,

@@ -66,23 +66,25 @@ import app.lernet.ui.routes.InstalledApplicationIcon
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/** m6: one feed with one filter, the same chips as on Windows. */
 internal enum class ExpertActivityFilter(val label: Int) {
     ALL(R.string.expert_activity_all),
     ACTIVE(R.string.expert_activity_active),
+    LONG(R.string.expert_activity_long),
     CLOSED(R.string.expert_activity_closed),
-    UNKNOWN(R.string.expert_activity_unknown),
 }
 
 internal fun filterExpertConnections(
     connections: List<ExpertConnectionObservation>,
     query: String,
     filter: ExpertActivityFilter,
+    nowMs: Long = System.currentTimeMillis(),
 ): List<ExpertConnectionObservation> = connections.filter { connection ->
     val stateMatches = when (filter) {
         ExpertActivityFilter.ALL -> true
         ExpertActivityFilter.ACTIVE -> connection.active == true
+        ExpertActivityFilter.LONG -> isLongLivedConnection(connection, nowMs)
         ExpertActivityFilter.CLOSED -> connection.active == false
-        ExpertActivityFilter.UNKNOWN -> connection.active == null
     }
     val search = query.trim()
     stateMatches &&
@@ -116,12 +118,10 @@ internal fun ExpertActivity(
             delay(1_000)
         }
     }
-    val connections = filterExpertConnections(runtime.connections, query, filter).sortedWith(
+    val connections = filterExpertConnections(runtime.connections, query, filter, now).sortedWith(
         compareByDescending<ExpertConnectionObservation> { it.startedAtMs ?: 0L }
             .thenByDescending { it.id.toLongOrNull() ?: 0L }
     )
-    val recent = connections.filterNot { isLongLivedConnection(it, now) }
-    val lasting = connections.filter { isLongLivedConnection(it, now) }
     val sampler = remember(runtime.tun) { FlowTrafficSampler() }
     val current = runtime.connections.filter { runtime.tun != null && it.identity == runtime.tun }
     val rates = remember(runtime.connections, runtime.tun) {
@@ -134,70 +134,45 @@ internal fun ExpertActivity(
     } else {
         null
     }
-    var group by rememberSaveable { mutableStateOf(0) }
-    val panelStates = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val wide = maxWidth >= 840.dp
         val panelHeight = (maxHeight * .85f).coerceIn(200.dp, 760.dp)
-        @Composable fun panel(key: String, flows: List<ExpertConnectionObservation>, modifier: Modifier) {
-            panelStates.SaveableStateProvider(key) {
-                ActivityTrafficPanel(if (key == "recent") "Недавние / разовые" else "Длительные · от 30 с",
-                    flows, modifier.height(panelHeight), runtime.tun) { connection ->
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            item { header(totalRate) }
+            item {
+                OutlinedTextField(
+                    query, { query = it }, Modifier.fillMaxWidth(), singleLine = true,
+                    placeholder = { Text(stringResource(R.string.expert_activity_search)) }
+                )
+            }
+            item {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ExpertActivityFilter.entries.forEach { option ->
+                        FilterChip(filter == option, { filter = option }, label = { Text(stringResource(option.label)) })
+                    }
+                }
+            }
+            if (runtime.connectionHistoryTruncated) item {
+                Text(
+                    stringResource(R.string.expert_history_partial, runtime.connectionDroppedCount),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary
+                )
+            }
+            item(key = "traffic") {
+                ActivityTrafficPanel(stringResource(R.string.expert_events_title), connections,
+                    Modifier.fillMaxWidth().height(panelHeight), runtime.tun) { connection ->
                     ActivityTrafficRow(connection, runtime, rates, now) { detail = connection }
                 }
             }
-        }
-        // Phone: filters, limits and hints fold behind one button so the list gets room (v2 review: «События» too dense).
-        var tools by rememberSaveable { mutableStateOf(false) }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(if (wide) 12.dp else 18.dp)) {
-            item { header(totalRate) }
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(
-                        query, { query = it }, Modifier.fillMaxWidth(), singleLine = true,
-                        label = { Text(stringResource(R.string.expert_activity_search)) }
-                    )
-                    if (!wide) TextButton({ tools = !tools }, Modifier.testTag("expert_events_tools")) {
-                        Text(stringResource(if (tools) R.string.expert_events_tools_hide else R.string.expert_events_tools_show,
-                            stringResource(filter.label)))
-                    }
-                    if (wide || tools) {
-                    Row(
-                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        ExpertActivityFilter.entries.forEach { option ->
-                            FilterChip(filter == option, { filter = option }, label = { Text(stringResource(option.label)) })
-                        }
-                    }
-                    ExpertHint(R.string.expert_long_hint)
-                    Text(
-                        stringResource(R.string.expert_history_limit, runtime.connectionHistoryLimit),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.expert_history_limit, runtime.connectionHistoryLimit),
+                        style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                     TextButton(onClear, enabled = runtime.connections.isNotEmpty()) { Text(stringResource(R.string.expert_history_clear)) }
-                    }
-                    if (runtime.connectionHistoryTruncated) {
-                        Text(
-                            stringResource(R.string.expert_history_partial, runtime.connectionDroppedCount),
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary
-                        )
-                    }
                 }
-            }
-            if (!wide) item {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(group == 0, { group = 0 }, label = { Text("Разовые · ${recent.size}") })
-                    FilterChip(group == 1, { group = 1 }, label = { Text("Длительные · ${lasting.size}") })
-                }
-            }
-            item(key = "traffic") {
-                if (wide) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    panel("recent", recent, Modifier.weight(1f))
-                    panel("lasting", lasting, Modifier.weight(1f))
-                } else if (group == 0) panel("recent", recent, Modifier.fillMaxWidth())
-                else panel("lasting", lasting, Modifier.fillMaxWidth())
             }
         }
     }

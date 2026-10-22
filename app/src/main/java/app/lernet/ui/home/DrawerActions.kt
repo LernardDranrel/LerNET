@@ -14,7 +14,6 @@ data class DrawerActions(
     val onDelete: (String) -> Unit,
     val onDuplicate: (String) -> Unit,
     val onRename: (String, String) -> Unit,
-    val onGroups: () -> Unit,
     val onProbe: (List<String>) -> Unit,
     val onMoveProfile: (String, String?, Int) -> Unit,
     val onRenameGroup: (String, String) -> Unit,
