@@ -91,6 +91,7 @@ object AppModule {
             sessionStore.write(config)
         } },
         backupProbe = app.lernet.engine.net.TunnelFirstBackupProbe(dialer),
+        penalties = persistedPenalties(context),
     ).also { controller ->
         scope.launch {
             app.lernet.vpn.DefaultNetworkMonitor.changes.collect {
@@ -104,4 +105,16 @@ object AppModule {
             localGeoIp.country(ip)?.let { AsnFact(it, null, null) } ?: AsnCaches.shared.lookup(ip)
         }, details = hopDetails::lookup)
     }
+
+    /** Resting configs survive an app restart, so a folder cannot swing A → B → A after a relaunch. */
+    private fun persistedPenalties(context: Context): app.lernet.engine.policy.ConfigPenalties {
+        val prefs = context.getSharedPreferences(RESILIENCE_PREFS, Context.MODE_PRIVATE)
+        return app.lernet.engine.policy.ConfigPenalties().also { penalties ->
+            penalties.decode(prefs.getString(PENALTIES_KEY, null), System.currentTimeMillis())
+            penalties.onChange = { encoded -> prefs.edit().putString(PENALTIES_KEY, encoded).apply() }
+        }
+    }
+
+    private const val RESILIENCE_PREFS = "lernet_resilience"
+    private const val PENALTIES_KEY = "config_penalties"
 }

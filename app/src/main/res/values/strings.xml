@@ -14,6 +14,9 @@
     <string name="state_connected">Подключено</string>
     <string name="state_reconnecting">Переподключаемся…</string>
     <string name="state_waiting_network">Нет сети · VPN держим, ждём, когда сеть вернётся</string>
+    <!-- Same text as LinkJudge.holdMessage (Windows). Nothing restarts while these are shown. -->
+    <string name="state_hold_jammed">Связь глушат · держим соединение, ничего не перезапускаем</string>
+    <string name="state_hold_all_silent">Сеть есть, но ни один сервер не отвечает · возможно, оператор оставил только разрешённые сайты · проверяем изредка</string>
     <string name="state_failed">Не удалось подключиться</string>
     <string name="active_profile">Конфиг: %1$s</string>
     <string name="no_profile">Конфиг не выбран</string>
@@ -361,7 +364,7 @@
     <string name="settings_dns_default_help">Используется при импорте. У существующих конфигов DNS меняется отдельно.</string>
     <string name="settings_direct_dns">Резервный DNS по умолчанию</string>
     <string name="settings_direct_dns_help">IPv4-адрес DNS в исходной сети. Подставляется, когда конфиг не задаёт прямой DNS.</string>
-    <string name="settings_xmux_default">XMUX · параллельные потоки</string>
+    <string name="settings_xmux_default">XHTTP · соединения с сервером</string>
     <string name="settings_xmux_default_help">Подставляется только если серверный конфиг не задаёт xmux.</string>
     <string name="settings_mtu_help">Наибольший размер пакета в VPN. Меняйте, только если сайты открываются частично.</string>
     <string name="settings_fixed_stack">Сетевой стек: gvisor. Другие варианты пока не предлагаются: в этой сборке они нарушали TCP.</string>

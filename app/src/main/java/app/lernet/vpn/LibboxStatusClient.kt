@@ -5,6 +5,7 @@ import app.lernet.engine.EngineEvent
 import app.lernet.engine.compile.DnsQueryLog
 import app.lernet.engine.compile.DnsQueryRecord
 import app.lernet.engine.live.LiveConn
+import app.lernet.engine.live.LiveConnTracker
 import app.lernet.engine.log.CrashTrail
 import app.lernet.engine.redact.LerNetLog
 import io.nekohasekai.libbox.CommandClient
@@ -23,9 +24,11 @@ internal class LibboxStatusClient(
     private val emit: (EngineEvent) -> Unit,
 ) : CommandClientHandler {
     private var client: CommandClient? = null
+    private val tracker = LiveConnTracker()
 
     fun start() {
         close()
+        tracker.reset()
         if (!startLocked(withConnections = true)) {
             LerNetLog.w(TAG, "status client with CommandConnections failed — retry without it")
             close()
@@ -104,10 +107,23 @@ internal class LibboxStatusClient(
         runCatching {
             val iterator = events.iterator() ?: return
             val rows = mutableListOf<LiveConn>()
+            if (events.reset) tracker.reset()
             while (iterator.hasNext()) {
                 val event = iterator.next()
-                val connection = event.connection ?: continue
-                rows += LiveConnMapper.from(connection)
+                val connection = event.connection
+                val id = event.id.orEmpty()
+                // Updates carry only the id and byte deltas: rebuild the row from the last full one,
+                // so a connection that stalls half-way is visible before it closes.
+                val row = when {
+                    connection != null -> tracker.onRow(
+                        LiveConnMapper.from(connection),
+                        closed = connection.closedAt > 0L || event.type.toLong() == Libbox.ConnectionEventClosed,
+                    )
+                    event.type.toLong() == Libbox.ConnectionEventUpdate -> tracker.onUpdate(id, event.uplinkDelta, event.downlinkDelta)
+                    event.type.toLong() == Libbox.ConnectionEventClosed -> tracker.onClosed(id)
+                    else -> null
+                } ?: continue
+                rows += row
             }
             if (rows.isEmpty() && !events.reset) return
             emit(EngineEvent.Connections(reset = events.reset, rows = rows))

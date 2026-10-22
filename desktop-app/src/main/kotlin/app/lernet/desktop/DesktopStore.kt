@@ -91,7 +91,10 @@ data class StoredState(
     val corePath: String = "",
     val rulePositions: Map<String, RulePosition> = emptyMap(),
     val tunMtu: Int = 1500,
-    val xmuxConcurrency: String = "16-16",
+    /** Written by builds before the XHTTP channel setting; kept so old files load, not used. */
+    val xmuxConcurrency: String = "",
+    /** XHTTP connections per server when a config has no xmux of its own: 2, or 1 with «Один канал». */
+    val xmuxChannels: Int = app.lernet.engine.compile.XhttpMode.DEFAULT_CHANNELS,
     val directDnsServer: String = "1.1.1.1",
     val logLevel: String = "info",
     val healthUrl: String = "https://www.gstatic.com/generate_204",
@@ -112,7 +115,7 @@ data class StoredState(
 
 /** One place that turns stored preferences into assembler defaults (VPN, Expert and probes alike). */
 fun StoredState.engineDefaults(strict: Boolean = strictRoute) = app.lernet.engine.compile.EngineDefaults(
-    tunMtu, xmuxConcurrency, directDnsServer, strictRoute = strict,
+    tunMtu = tunMtu, xmuxChannels = xmuxChannels.coerceIn(1, 2), directDnsServer = directDnsServer, strictRoute = strict,
     tlsRecordFragment = tlsRecordFragment,
     realityKeyShare = app.lernet.engine.compile.RealityKeyShare.fromStorage(realityKeyShare).storage,
 )

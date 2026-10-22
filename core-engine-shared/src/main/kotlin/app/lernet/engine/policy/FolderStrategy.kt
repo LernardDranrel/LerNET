@@ -68,8 +68,14 @@ class BackupRotation {
     companion object {
         fun nextDelayMs(random: Random = Random.Default): Long = RecheckJitter.nextMs(random)
 
-        /** Pause between two checks of the «проверить все» button: one by one, not a burst. */
-        fun buttonGapMs(random: Random = Random.Default): Long = random.nextLong(300L, 901L)
+        /**
+         * Pause between two checks of the «проверить все» button: one by one with a random 1.5–4 s gap,
+         * not a burst. Checks through the tunnel also wait for the active server's [HandshakeBudget].
+         */
+        fun buttonGapMs(random: Random = Random.Default): Long = random.nextLong(BUTTON_GAP_MIN_MS, BUTTON_GAP_MAX_MS + 1)
+
+        const val BUTTON_GAP_MIN_MS = 1_500L
+        const val BUTTON_GAP_MAX_MS = 4_000L
     }
 }
 

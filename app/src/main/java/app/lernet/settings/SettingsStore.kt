@@ -43,7 +43,7 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setEngineDefaults(defaults: EngineDefaults) = edit {
         it[TUN_MTU] = defaults.tunMtu.coerceIn(1280, 9000)
-        it[XMUX_CONCURRENCY] = defaults.xmuxConcurrency
+        it[XMUX_CHANNELS] = defaults.xmuxChannels.coerceIn(1, 2)
         it[DIRECT_DNS_SERVER] = defaults.directDnsServer
         it[TLS_RECORD_FRAGMENT] = defaults.tlsRecordFragment
         it[REALITY_KEY_SHARE] = app.lernet.engine.compile.RealityKeyShare.fromStorage(defaults.realityKeyShare).storage
@@ -94,7 +94,9 @@ class SettingsStore(private val context: Context) {
             journalMaxMb = JournalCeiling.mb(this[JOURNAL_MB] ?: JournalCeiling.DEFAULT_MB),
             engineDefaults = EngineDefaults(
                 tunMtu = (this[TUN_MTU] ?: 1500).coerceIn(1280, 9000),
-                xmuxConcurrency = this[XMUX_CONCURRENCY]?.takeIf { it in setOf("1-1", "8-8", "16-16", "32-32") } ?: "16-16",
+                // The old «потоков на соединение» value (xmux_concurrency) is not carried over: the pool is now
+                // bounded by connections, 2 by default, 1 with «Один канал».
+                xmuxChannels = (this[XMUX_CHANNELS] ?: app.lernet.engine.compile.XhttpMode.DEFAULT_CHANNELS).coerceIn(1, 2),
                 directDnsServer = this[DIRECT_DNS_SERVER]?.takeIf { EngineDefaults.validIpv4(it) } ?: "1.1.1.1",
                 tlsRecordFragment = this[TLS_RECORD_FRAGMENT] ?: false,
                 realityKeyShare = app.lernet.engine.compile.RealityKeyShare.fromStorage(this[REALITY_KEY_SHARE]).storage,
@@ -121,7 +123,7 @@ class SettingsStore(private val context: Context) {
         val BANNER = stringPreferencesKey("banner")
         val JOURNAL_MB = intPreferencesKey("journal_mb")
         val TUN_MTU = intPreferencesKey("tun_mtu")
-        val XMUX_CONCURRENCY = stringPreferencesKey("xmux_concurrency")
+        val XMUX_CHANNELS = intPreferencesKey("xmux_channels")
         val DEFAULT_DNS_POLICY = stringPreferencesKey("default_dns_policy")
         val DIRECT_DNS_SERVER = stringPreferencesKey("direct_dns_server")
         val TLS_RECORD_FRAGMENT = booleanPreferencesKey("tls_record_fragment")

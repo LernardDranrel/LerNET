@@ -49,7 +49,7 @@ sealed class SettingsIntent {
     data class SetTlsRecordFragment(val enabled: Boolean) : SettingsIntent()
     data class SetRealityKeyShare(val value: app.lernet.engine.compile.RealityKeyShare) : SettingsIntent()
 
-    data class SetXmuxConcurrency(val value: String) : SettingsIntent()
+    data class SetXmuxSingleChannel(val enabled: Boolean) : SettingsIntent()
 
     data class SetDefaultDnsPolicy(val value: DnsPolicy) : SettingsIntent()
 
@@ -110,9 +110,12 @@ class SettingsViewModel @Inject constructor(
                 is SettingsIntent.SetTunMtu -> settingsStore.setEngineDefaults(
                     current.engineDefaults.copy(tunMtu = intent.value.coerceIn(1280, 9000))
                 )
-                is SettingsIntent.SetXmuxConcurrency -> if (intent.value in setOf("1-1", "8-8", "16-16", "32-32")) {
-                    settingsStore.setEngineDefaults(current.engineDefaults.copy(xmuxConcurrency = intent.value))
-                }
+                is SettingsIntent.SetXmuxSingleChannel -> settingsStore.setEngineDefaults(
+                    current.engineDefaults.copy(
+                        xmuxChannels = if (intent.enabled) app.lernet.engine.compile.XhttpMode.SINGLE_CHANNEL
+                        else app.lernet.engine.compile.XhttpMode.DEFAULT_CHANNELS,
+                    ),
+                )
                 is SettingsIntent.SetTlsRecordFragment ->
                     settingsStore.setEngineDefaults(current.engineDefaults.copy(tlsRecordFragment = intent.enabled))
                 is SettingsIntent.SetRealityKeyShare ->

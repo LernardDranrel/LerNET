@@ -54,7 +54,7 @@ class PipeAffinityTest {
         )
         vless.forEach { outbound ->
             val mux = outbound["transport"]!!.jsonObject["xmux"]!!.jsonObject
-            assertThat(mux["max_concurrency"]!!.jsonPrimitive.content).isEqualTo(XhttpMode.MUX_CONCURRENCY)
+            assertThat(mux["max_connections"]!!.jsonPrimitive.content).isEqualTo(XhttpMode.channelsRange(XhttpMode.DEFAULT_CHANNELS))
         }
         val rules = root["route"]!!.jsonObject["rules"]!!.jsonArray.map { it.jsonObject }
         val youtube = rules.first { it["domain"]?.toString()?.contains("youtube") == true }

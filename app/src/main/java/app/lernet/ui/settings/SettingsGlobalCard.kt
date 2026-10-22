@@ -103,40 +103,20 @@ internal fun DnsDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) 
 
 @Composable
 internal fun XmuxDefaultsCard(state: SettingsUiState, onIntent: (SettingsIntent) -> Unit) {
-    val bounds = state.settings.engineDefaults.xmuxConcurrency.split('-')
-    var expanded by remember { mutableStateOf(false) }
+    val single = state.settings.engineDefaults.xmuxChannels == app.lernet.engine.compile.XhttpMode.SINGLE_CHANNEL
     PanelCard {
         Text(stringResource(R.string.settings_xmux_default), style = MaterialTheme.typography.titleMedium)
         SettingHelp(stringResource(R.string.settings_xmux_explained))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            XmuxBound(bounds.firstOrNull().orEmpty(), stringResource(R.string.settings_xmux_lower), Modifier.weight(1f))
-            XmuxBound(bounds.lastOrNull().orEmpty(), stringResource(R.string.settings_xmux_upper), Modifier.weight(1f))
-        }
-        Box {
-            FilledTonalButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.settings_xmux_choose))
-            }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                listOf("1-1", "8-8", "16-16", "32-32").forEach { value ->
-                    DropdownMenuItem(text = { Text(value) }, onClick = {
-                        expanded = false
-                        onIntent(SettingsIntent.SetXmuxConcurrency(value))
-                    })
-                }
-            }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.settings_xmux_single), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            androidx.compose.material3.Switch(
+                checked = single,
+                onCheckedChange = { onIntent(SettingsIntent.SetXmuxSingleChannel(it)) },
+                modifier = Modifier.testTag("settings_xmux_single"),
+            )
         }
         SettingHelp(stringResource(R.string.settings_xmux_tuning))
         SettingHelp(stringResource(R.string.settings_xmux_default_help))
-    }
-}
-
-@Composable
-private fun XmuxBound(value: String, label: String, modifier: Modifier) {
-    Surface(modifier, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(value, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
-        }
     }
 }
 

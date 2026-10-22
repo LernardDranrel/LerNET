@@ -26,7 +26,7 @@ class ConfigAssemblerTest {
 
     @Test
     fun globalDefaultsAffectOnlyMissingValuesInFinalConfig() {
-        val defaults = EngineDefaults(tunMtu = 1400, xmuxConcurrency = "8-8", directDnsServer = "9.9.9.9")
+        val defaults = EngineDefaults(tunMtu = 1400, xmuxChannels = 1, directDnsServer = "9.9.9.9")
         val assembled = ConfigAssembler.assemble(
             xhttpOutbound(), catchAllProxy(), RunMode.FULL_VPN,
             "info", defaults = defaults
@@ -36,9 +36,44 @@ class ConfigAssemblerTest {
         assertThat(root["inbounds"]!!.jsonArray.first().jsonObject["mtu"]!!.jsonPrimitive.content)
             .isEqualTo("1400")
         val mux = root["outbounds"]!!.jsonArray.first().jsonObject["transport"]!!.jsonObject["xmux"]!!.jsonObject
-        assertThat(mux["max_concurrency"]!!.jsonPrimitive.content).isEqualTo("8-8")
+        assertThat(mux["max_connections"]!!.jsonPrimitive.content).isEqualTo("1-1")
+        assertThat(mux["max_concurrency"]).isNull()
         val direct = root["dns"]!!.jsonObject["servers"]!!.jsonArray.first().jsonObject
         assertThat(direct["server"]!!.jsonPrimitive.content).isEqualTo("9.9.9.9")
+    }
+
+    @Test
+    fun folderBackupsRideAlongAsStandbyOutboundsThatNothingRoutesTo() {
+        val active = sampleOutbound()
+        fun backup(id: String, host: String, extra: String = "") = NormalizedOutbound(
+            id = id, tag = "proxy", type = "vless",
+            singBoxJson = """{"type":"vless","tag":"proxy","server":"$host","server_port":443,""" +
+                """"uuid":"11111111-1111-1111-1111-111111111111",""" +
+                """"tls":{"enabled":true,"server_name":"$host"}$extra}""",
+        )
+        val assembled = ConfigAssembler.assemble(
+            active, catchAllProxy(), RunMode.FULL_VPN, "info",
+            standby = listOf(
+                backup("b1", "b1.example.com"),
+                active,
+                backup("chained", "c.example.com", ""","detour":"proxy""""),
+                NormalizedOutbound(id = "ext", tag = "proxy", type = "direct", singBoxJson = """{"type":"direct","tag":"proxy"}"""),
+                backup("b2", "b2.example.com"),
+            ),
+        )
+        assertThat(assembled.isValid).isTrue()
+        assertThat(assembled.standbyTags).containsExactly("b1", "standby-1", "b2", "standby-2")
+        val root = json.parseToJsonElement(assembled.json).jsonObject
+        val outbounds = root["outbounds"]!!.jsonArray.map { it.jsonObject }
+        val standby = outbounds.single { it["tag"]!!.jsonPrimitive.content == "standby-1" }
+        // Same handshake shape as the active config: firefox unless the profile says otherwise.
+        assertThat(standby["tls"]!!.jsonObject["utls"]!!.jsonObject["fingerprint"]!!.jsonPrimitive.content).isEqualTo("firefox")
+        assertThat(root["route"].toString()).doesNotContain("standby-")
+        assertThat(ConfigAssembler.hasStandby(assembled.json)).isTrue()
+        val stripped = ConfigAssembler.withoutStandby(assembled.json)
+        assertThat(ConfigAssembler.hasStandby(stripped)).isFalse()
+        assertThat(json.parseToJsonElement(stripped).jsonObject["outbounds"]!!.jsonArray).hasSize(outbounds.size - 2)
+        assertThat(ConfigAssembler.withoutStandby(stripped)).isEqualTo(stripped)
     }
 
     @Test
@@ -79,8 +114,8 @@ class ConfigAssemblerTest {
         val transport = json.parseToJsonElement(assembled.json)
             .jsonObject["outbounds"]!!.jsonArray.first().jsonObject["transport"]!!.jsonObject
         assertThat(transport["mode"]?.jsonPrimitive?.content).isEqualTo("auto")
-        assertThat(transport["xmux"]!!.jsonObject["max_concurrency"]?.jsonPrimitive?.content)
-            .isEqualTo(XhttpMode.MUX_CONCURRENCY)
+        assertThat(transport["xmux"]!!.jsonObject["max_connections"]?.jsonPrimitive?.content)
+            .isEqualTo(XhttpMode.channelsRange(XhttpMode.DEFAULT_CHANNELS))
         assertThat(assembled.notes.joinToString()).contains("xhttp mode auto preserved")
     }
 

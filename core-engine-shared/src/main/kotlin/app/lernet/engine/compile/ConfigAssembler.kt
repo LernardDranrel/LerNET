@@ -19,6 +19,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 
@@ -31,6 +32,8 @@ data class AssembledConfig(
     val userProxy: LocalProxyAccess? = null,
     /** LerNET's own requests: the only login/password the internal app-in listener accepts. */
     val appProxy: LocalProxyAccess? = null,
+    /** Folder backups carried only to be checked through this core: outbound id → tag. No rule routes to them. */
+    val standbyTags: Map<String, String> = emptyMap(),
 ) {
     val isValid: Boolean get() = errors.isEmpty()
 
@@ -47,6 +50,11 @@ object ConfigAssembler {
     /** Internal listener for LerNET's own requests (updates, subscriptions, checks). Never without a password. */
     const val APP_PROXY_PORT = 2081
     const val ANDROID_PROBE_URL = "https://cp.cloudflare.com/generate_204"
+    /** Same prefix as [app.lernet.engine.live.LiveVia]: standby checks never count as replies of the active config. */
+    const val STANDBY_TAG_PREFIX = "standby-"
+    const val MAX_STANDBY = 4
+    /** Plain proxy outbounds only: nothing that brings its own interface, chain or endpoint. */
+    private val STANDBY_TYPES = setOf("vless", "vmess", "trojan", "shadowsocks", "hysteria2", "tuic", "anytls")
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -67,6 +75,11 @@ object ConfigAssembler {
          * whatever the user's rules say. Null: no internal listener at all.
          */
         appProxy: LocalProxyAccess? = null,
+        /**
+         * Folder backups to carry as extra outbounds, so a backup is checked by a real request through it
+         * (a full handshake with its server) while the running connection stays up. Nothing routes to them.
+         */
+        standby: List<NormalizedOutbound> = emptyList(),
     ): AssembledConfig {
         if (!compiledRoute.isValid) {
             return AssembledConfig(
@@ -98,11 +111,12 @@ object ConfigAssembler {
             JsonObject(outboundObj.toMutableMap().apply { put("tag", JsonPrimitive(outbound.tag)) }),
             defaults,
         )
-        val xhttp = XhttpMode.normalize(taggedRaw, defaults.xmuxConcurrency)
+        val xhttp = XhttpMode.normalize(taggedRaw, defaults.xmuxChannels)
         val tagged = xhttp.outbound
         val pipeNames = activeRoute.rules.map { it.pipeName.trim() }.filter { it.isNotEmpty() }.distinct()
         val pipeTags = PipeAffinity.tags(pipeNames, setOf(outbound.tag, "direct"))
-        val clones = pipeNames.map { name -> PipeAffinity.clone(taggedRaw, pipeTags.getValue(name), defaults.xmuxConcurrency) }
+        val clones = pipeNames.map { name -> PipeAffinity.clone(taggedRaw, pipeTags.getValue(name), defaults.xmuxChannels) }
+        val standbyOutbounds = standbyEntries(standby, outbound, defaults)
         val proxyAccess = if (mode == RunMode.PROXY) userProxy ?: LocalProxyAccess.random(LocalProxyAccess.USER_PORT) else null
         val inbound = inboundFor(mode, defaults, platform, proxyAccess)
         val preparedDns = DnsBlock.prepare(dnsJson, outbound.tag, dnsPolicy, defaults.directDnsServer)
@@ -126,7 +140,7 @@ object ConfigAssembler {
                 add(inbound)
                 if (appProxy != null) add(localListener(LocalListeners.APP_PROXY_TAG, appProxy))
             })
-            put("outbounds", outboundArray(tagged, clones.map { it.outbound }))
+            put("outbounds", outboundArray(tagged, clones.map { it.outbound } + standbyOutbounds.map { it.second }))
             put("route", routeBlock(rules, finalTag, dns, ruleSets.entries))
         }
         val notes = buildList {
@@ -147,8 +161,40 @@ object ConfigAssembler {
             notes = notes,
             userProxy = proxyAccess,
             appProxy = appProxy,
+            standbyTags = standbyOutbounds.associate { (id, obj) -> id to obj.getValue("tag").jsonPrimitive.content },
         )
     }
+
+    /** True when [json] carries folder backups for checks ([STANDBY_TAG_PREFIX]). */
+    fun hasStandby(json: String): Boolean = json.contains("\"$STANDBY_TAG_PREFIX")
+
+    /** [json] without the standby outbounds; nothing routes to them, so nothing else changes. */
+    fun withoutStandby(json: String): String {
+        if (!hasStandby(json)) return json
+        val root = runCatching { this.json.parseToJsonElement(json).jsonObject }.getOrNull() ?: return json
+        val outbounds = root["outbounds"] as? JsonArray ?: return json
+        val kept = outbounds.filterNot { (it as? JsonObject)?.get("tag")?.jsonPrimitive?.content?.startsWith(STANDBY_TAG_PREFIX) == true }
+        return JsonObject(root.toMutableMap().apply { put("outbounds", JsonArray(kept)) }).toString()
+    }
+
+    private fun standbyEntries(
+        standby: List<NormalizedOutbound>,
+        active: NormalizedOutbound,
+        defaults: EngineDefaults,
+    ): List<Pair<String, JsonObject>> = standby
+        .filter { it.id != active.id && it.type.lowercase() in STANDBY_TYPES }
+        .distinctBy { it.id }
+        .take(MAX_STANDBY)
+        .mapNotNull { candidate ->
+            val obj = runCatching { json.parseToJsonElement(candidate.singBoxJson).jsonObject }.getOrNull() ?: return@mapNotNull null
+            if (ExternalExitProfiles.INTERFACE_FIELD in obj || obj["detour"] != null) return@mapNotNull null
+            candidate.id to obj
+        }
+        .mapIndexed { index, (id, obj) ->
+            val tag = "$STANDBY_TAG_PREFIX${index + 1}"
+            val stamped = TlsHandshake.apply(JsonObject(obj.toMutableMap().apply { put("tag", JsonPrimitive(tag)) }), defaults)
+            id to XhttpMode.normalize(stamped, defaults.xmuxChannels).outbound
+        }
 
     private fun ruleSetEntries(route: CompiledRoute, directory: String): RuleSetAttach {
         val tags = GeoRuleSets.tags(route.rules.flatMap { it.match.geoip })

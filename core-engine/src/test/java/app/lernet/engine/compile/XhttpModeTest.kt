@@ -19,10 +19,10 @@ class XhttpModeTest {
             val transport = result.outbound["transport"]!!.jsonObject
             assertThat(result.remapped).isFalse()
             assertThat(transport["mode"]!!.jsonPrimitive.content).isEqualTo(mode)
-            assertThat(transport["xmux"]!!.jsonObject["max_concurrency"]!!.jsonPrimitive.content)
-                .isEqualTo(XhttpMode.MUX_CONCURRENCY)
+            assertThat(transport["xmux"]!!.jsonObject["max_connections"]!!.jsonPrimitive.content)
+                .isEqualTo("2-2")
             assertThat(result.note).contains("xhttp mode $mode preserved")
-            assertThat(result.note).contains("xmux max_concurrency=${XhttpMode.MUX_CONCURRENCY}")
+            assertThat(result.note).contains("xmux max_connections=2-2")
         }
     }
 

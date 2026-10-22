@@ -321,7 +321,7 @@ class ConnectionControllerTest {
     }
 
     @Test
-    fun tunnelHealthConfirmsTwoFailuresBeforeReconnecting() = runTest(dispatcher) {
+    fun twoFailedTunnelChecksHoldTheCoreWhenThereIsNoBackup() = runTest(dispatcher) {
         val engine = RecordingBoxEngine()
         var checks = 0
         val controller = controller(
@@ -342,15 +342,28 @@ class ConnectionControllerTest {
         assertThat(checks).isEqualTo(1)
         assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
 
-        // The confirmation waits a jittered 3–8 s (here 4 s), not a 2 s burst.
+        // The confirmation waits its jittered pause (here 4 s), not a 2 s burst.
         testScheduler.advanceTimeBy(2_000)
         runCurrent()
         assertThat(checks).isEqualTo(1)
         testScheduler.advanceTimeBy(2_000)
         runCurrent()
         assertThat(checks).isEqualTo(2)
-        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.RECONNECTING)
-        assertThat(controller.snapshot.value.cause).isEqualTo(ConnectionCause.TunnelHealthFailed("HTTP 504"))
+        // Dead config, nothing to switch to: the core and its live connections stay, nothing restarts.
+        val held = controller.snapshot.value
+        assertThat(held.state).isEqualTo(ConnectionState.CONNECTED)
+        assertThat(held.hold).isEqualTo(app.lernet.engine.policy.LinkHold.JAMMED)
+        assertThat(held.nextCheckAtMs).isNotNull()
+        assertThat(engine.startCount).isEqualTo(1)
+        assertThat(engine.stopCount).isEqualTo(0)
+        // The next look comes after the hold pause (about a minute), not at once.
+        testScheduler.advanceTimeBy(40_000)
+        runCurrent()
+        assertThat(checks).isEqualTo(2)
+        testScheduler.advanceTimeBy(40_000)
+        runCurrent()
+        assertThat(checks).isAtLeast(3)
+        assertThat(engine.startCount).isEqualTo(1)
     }
 
     @Test
@@ -398,11 +411,13 @@ class ConnectionControllerTest {
     }
 
     @Test
-    fun repeatedHandshakeResetsAreReportedHonestlyAndLeaveTheConfig() = runTest(dispatcher) {
+    fun repeatedHandshakeResetsHoldTheConnectionAndAskForACheck() = runTest(dispatcher) {
         val engine = RecordingBoxEngine()
+        var checks = 0
         val controller = controller(
             this, engine, hardStopTimeoutMs = 2_500,
             reconnect = ReconnectSettings(maxAttempts = 3, watchdogTimeoutMs = 600_000),
+            tunnelHealthProbe = { checks++; Result.success(40L) },
         )
         controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
         runCurrent()
@@ -414,10 +429,15 @@ class ConnectionControllerTest {
             runCurrent()
         }
         val snap = controller.snapshot.value
-        assertThat(snap.state).isEqualTo(ConnectionState.RECONNECTING)
-        // No other config here: the session keeps the honest reason and retries the same server.
-        assertThat(snap.cause).isEqualTo(ConnectionCause.BlockingSuspected(app.lernet.engine.policy.BlockingSign.RESET_AFTER_HELLO))
-        assertThat(snap.cause!!.labelRu()).contains("TLS")
+        // The detector proves nothing on its own: no restart, no switch, an honest status and one check.
+        assertThat(snap.state).isEqualTo(ConnectionState.CONNECTED)
+        assertThat(snap.hold).isEqualTo(app.lernet.engine.policy.LinkHold.JAMMED)
+        assertThat(engine.startCount).isEqualTo(1)
+        testScheduler.advanceTimeBy(1_100)
+        runCurrent()
+        assertThat(checks).isEqualTo(1)
+        // The check passed: the hold goes away.
+        assertThat(controller.snapshot.value.hold).isNull()
     }
 
     @Test
@@ -522,7 +542,7 @@ class ConnectionControllerTest {
 
     @Test
     fun whenEveryBackupIsDownTheSnapshotListsWhatWasTried() = runTest(dispatcher) {
-        val engine = RecordingBoxEngine()
+        val engine = RecordingBoxEngine(standbyProbe = { Result.failure(java.net.SocketTimeoutException("timeout")) })
         val first = sampleProfile()
         fun backup(n: Int) = first.copy(id = "p$n", name = "резерв $n", selectedOutboundId = "out-$n",
             outbounds = first.outbounds.map { it.copy(id = "out-$n", singBoxJson = it.singBoxJson.replace("example.com", "b$n.example.com")) })
@@ -531,6 +551,7 @@ class ConnectionControllerTest {
             dialer = OutboundDialer { target, _ ->
                 if (target.host.startsWith("b")) Result.failure(java.net.SocketTimeoutException("timeout")) else Result.success(Unit)
             })
+
         controller.setFailoverHandlers(
             resolve = { id -> when (id) {
                 "out-2" -> backup(2) to catchAllNodes().map { it.copy(profileId = "p2") }
@@ -655,13 +676,17 @@ class ConnectionControllerTest {
         assertThat(controller.snapshot.value.cause).isInstanceOf(ConnectionCause.OutboundUnreachable::class.java)
         assertThat(controller.snapshot.value.cause?.technicalDetail()).contains("L7")
         assertThat(engine.startCount).isEqualTo(1)
-        testScheduler.advanceTimeBy(1_000)
+        // No 1 s burst: the first retry waits 5–6.25 s.
+        testScheduler.advanceTimeBy(4_900)
+        runCurrent()
+        assertThat(engine.startCount).isEqualTo(1)
+        testScheduler.advanceTimeBy(1_400)
         runCurrent()
         assertThat(engine.startCount).isAtLeast(2)
     }
 
     @Test
-    fun zeroTrafficAfterConnectedGoesReconnecting() = runTest(dispatcher) {
+    fun idleSilenceAfterConnectedChangesNothing() = runTest(dispatcher) {
         val engine = RecordingBoxEngine()
         val controller = controller(
             this,
@@ -674,12 +699,12 @@ class ConnectionControllerTest {
         engine.emit(EngineEvent.Status(0, 0, 0, 0, 0))
         runCurrent()
         assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
-
-        testScheduler.advanceTimeBy(3_000)
+        // A phone with the screen off sends nothing and gets nothing: that is not a failure.
+        testScheduler.advanceTimeBy(600_000)
         runCurrent()
-        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.RECONNECTING)
-        assertThat(controller.snapshot.value.cause).isInstanceOf(ConnectionCause.WatchdogTimeout::class.java)
-        assertThat(controller.snapshot.value.cause?.titleRu()).isEqualTo("Данные не идут")
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
+        assertThat(controller.snapshot.value.hold).isNull()
+        assertThat(engine.startCount).isEqualTo(1)
     }
 
     @Test
@@ -705,7 +730,7 @@ class ConnectionControllerTest {
     }
 
     @Test
-    fun staleTotalsWithoutGrowthLeaveConnected() = runTest(dispatcher) {
+    fun unansweredRequestsHoldWithoutRestart() = runTest(dispatcher) {
         val engine = RecordingBoxEngine()
         val controller = controller(
             this,
@@ -724,31 +749,17 @@ class ConnectionControllerTest {
         engine.emit(EngineEvent.Status(0, 0, 10_861, 13_202, 3))
         runCurrent()
         assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
-
-        testScheduler.advanceTimeBy(3_000)
-        runCurrent()
+        repeat(20) {
+            engine.emit(EngineEvent.Status(0, 0, 10_861, 13_202, 3))
+            runCurrent()
+            testScheduler.advanceTimeBy(3_000)
+            runCurrent()
+        }
+        // Three open connections, nothing moves: «связь глушат», the core and its connections stay.
         assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
+        assertThat(controller.snapshot.value.hold).isEqualTo(app.lernet.engine.policy.LinkHold.JAMMED)
         assertThat(engine.startCount).isEqualTo(1)
-
-        engine.emit(EngineEvent.Status(0, 0, 10_861, 13_202, 3))
-        runCurrent()
-        testScheduler.advanceTimeBy(3_000)
-        runCurrent()
-        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.RECONNECTING)
-        assertThat(controller.snapshot.value.cause).isInstanceOf(ConnectionCause.WatchdogTimeout::class.java)
-
-        testScheduler.advanceTimeBy(1_000)
-        runCurrent()
-        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
-        assertThat(engine.startCount).isEqualTo(2)
-
-        engine.emit(EngineEvent.Status(0, 0, 0, 0, 0))
-        runCurrent()
-        testScheduler.advanceTimeBy(3_000)
-        runCurrent()
-        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.RECONNECTING)
-        assertThat(controller.snapshot.value.cause).isInstanceOf(ConnectionCause.WatchdogTimeout::class.java)
-        assertThat(engine.startCount).isEqualTo(2)
+        assertThat(engine.stopCount).isEqualTo(0)
     }
 
     @Test
@@ -851,18 +862,19 @@ class ConnectionControllerTest {
         assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
         assertThat(engine.startCount).isEqualTo(1)
 
-        testScheduler.advanceTimeBy(3_000)
+        // The core itself gave up: that is a real reason to start it again.
+        engine.emit(EngineEvent.Failed(ConnectionCause.DialFailure("core exited")))
         runCurrent()
         assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.RECONNECTING)
 
-        testScheduler.advanceTimeBy(1_000)
+        testScheduler.advanceTimeBy(6_300)
         runCurrent()
         // A failed restart is not a reason to drop the VPN: the session keeps recovering.
         assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.RECONNECTING)
         assertThat(controller.snapshot.value.cause).isInstanceOf(ConnectionCause.EngineStartFailed::class.java)
         assertThat(engine.startCount).isEqualTo(2)
         assertThat(engine.stopCount).isEqualTo(0)
-        testScheduler.advanceTimeBy(15_000)
+        testScheduler.advanceTimeBy(20_000)
         runCurrent()
         assertThat(engine.startCount).isAtLeast(3)
         assertThat(engine.stopCount).isEqualTo(0)
@@ -890,7 +902,7 @@ class ConnectionControllerTest {
     }
 
     @Test
-    fun bytesWithoutDnsOkSoftReloadsAgain() = runTest(dispatcher) {
+    fun dnsSilenceBeforeTheFirstAnswerRestartsNothing() = runTest(dispatcher) {
         val engine = RecordingBoxEngine()
         val controller = controller(
             this,
@@ -904,25 +916,114 @@ class ConnectionControllerTest {
         runCurrent()
         assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
         assertThat(controller.snapshot.value.dnsOk).isFalse()
-
-        testScheduler.advanceTimeBy(8_000)
-        runCurrent()
-        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.RECONNECTING)
-        assertThat(controller.snapshot.value.cause).isInstanceOf(ConnectionCause.DnsStalled::class.java)
-        assertThat(controller.snapshot.value.cause?.titleRu()).isEqualTo("Адреса сайтов не находятся")
-
-        testScheduler.advanceTimeBy(1_000)
+        // Before: a «soft reload» of the core after 8 s. Now the DNS gate never restarts anything.
+        testScheduler.advanceTimeBy(120_000)
         runCurrent()
         assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
-        assertThat(engine.startCount).isEqualTo(2)
+        assertThat(engine.startCount).isEqualTo(1)
+        assertThat(engine.stopCount).isEqualTo(0)
+    }
 
-        engine.emit(EngineEvent.Status(0, 0, 200, 300, 1))
+    @Test
+    fun deadConfigChecksBackupsThroughTheRunningCoreAndSwitchesToOneThatAnswers() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine(standbyProbe = { tag ->
+            if (tag == "standby-2") Result.success(120) else Result.failure(java.net.SocketTimeoutException("timeout"))
+        })
+        val first = sampleProfile()
+        fun backup(n: Int) = first.copy(id = "p$n", name = "резерв $n", selectedOutboundId = "out-$n",
+            outbounds = first.outbounds.map { it.copy(id = "out-$n", singBoxJson = it.singBoxJson.replace("example.com", "b$n.example.com")) })
+        val dialed = mutableListOf<String>()
+        val controller = controller(this, engine, hardStopTimeoutMs = 2_500,
+            reconnect = ReconnectSettings(maxAttempts = 5, watchdogTimeoutMs = 600_000),
+            dialer = OutboundDialer { target, _ -> dialed += target.host; Result.success(Unit) })
+        var selected: String? = null
+        controller.setFailoverHandlers(
+            resolve = { id -> when (id) {
+                "out-2" -> backup(2) to catchAllNodes().map { it.copy(profileId = "p2") }
+                "out-3" -> backup(3) to catchAllNodes().map { it.copy(profileId = "p3") }
+                else -> null
+            } },
+            onSelected = { selected = it },
+        )
+        controller.updateSettings(ReconnectSettings(maxAttempts = 5, watchdogTimeoutMs = 600_000), failoverEnabled = true,
+            group = ManualFailoverGroup("g", "Резерв", listOf("out-1", "out-2", "out-3")))
+        controller.connect(first, catchAllNodes(), RunMode.FULL_VPN)
         runCurrent()
-        testScheduler.advanceTimeBy(8_000)
+        // The backups ride along in the core as standby outbounds, not used by any route.
+        assertThat(engine.startedConfigs.single()).contains("\"standby-")
+        engine.emit(EngineEvent.DnsAlive(answers = 1))
         runCurrent()
-        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.RECONNECTING)
-        assertThat(controller.snapshot.value.cause).isInstanceOf(ConnectionCause.DnsStalled::class.java)
+        val dialsBefore = dialed.size
+        controller.onEngineSignal(ConnectionCause.TunnelHealthFailed("HTTP 504"))
+        runCurrent()
+        // A real handshake through the core, one candidate at a time; no bare TCP dial.
+        assertThat(engine.probedTags.filter { it.startsWith("standby-") }).containsExactly("standby-1", "standby-2").inOrder()
+        // The only dial after that is the new config's own start, never the dead candidate.
+        assertThat(dialed.drop(dialsBefore)).doesNotContain("b2.example.com")
+        assertThat(selected).isEqualTo("p3")
         assertThat(engine.startCount).isEqualTo(2)
+        // The dead config rests before it may be tried again; the dead backup too.
+        assertThat(controller.penalties.isResting("out-1", testScheduler.currentTime)).isTrue()
+        assertThat(controller.penalties.isResting("out-2", testScheduler.currentTime)).isTrue()
+        assertThat(controller.penalties.isResting("out-3", testScheduler.currentTime)).isFalse()
+    }
+
+    @Test
+    fun whenNoBackupAnswersThroughTheCoreTheCoreIsKept() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine(standbyProbe = { Result.failure(java.net.SocketTimeoutException("timeout")) })
+        val first = sampleProfile()
+        val second = first.copy(id = "p2", name = "резерв", selectedOutboundId = "out-2",
+            outbounds = first.outbounds.map { it.copy(id = "out-2", singBoxJson = it.singBoxJson.replace("example.com", "b2.example.com")) })
+        val controller = controller(this, engine, hardStopTimeoutMs = 2_500,
+            reconnect = ReconnectSettings(maxAttempts = 5, watchdogTimeoutMs = 600_000))
+        controller.setFailoverHandlers(
+            resolve = { id -> if (id == "out-2") second to catchAllNodes().map { it.copy(profileId = "p2") } else null },
+            onSelected = {},
+        )
+        controller.updateSettings(ReconnectSettings(maxAttempts = 5, watchdogTimeoutMs = 600_000), failoverEnabled = true,
+            group = ManualFailoverGroup("g", "Резерв", listOf("out-1", "out-2")))
+        controller.connect(first, catchAllNodes(), RunMode.FULL_VPN)
+        runCurrent()
+        engine.emit(EngineEvent.DnsAlive(answers = 1))
+        runCurrent()
+        controller.onEngineSignal(ConnectionCause.TunnelHealthFailed("HTTP 504"))
+        runCurrent()
+        assertThat(engine.startCount).isEqualTo(1)
+        assertThat(engine.stopCount).isEqualTo(0)
+        assertThat(controller.snapshot.value.state).isEqualTo(ConnectionState.CONNECTED)
+        // A second death report right away does not check the same resting backup again (no A↔B loop).
+        val probes = engine.probedTags.size
+        controller.onEngineSignal(ConnectionCause.TunnelHealthFailed("HTTP 504"))
+        runCurrent()
+        assertThat(engine.probedTags.size).isEqualTo(probes)
+        assertThat(engine.startCount).isEqualTo(1)
+    }
+
+    @Test
+    fun tunnelChecksWaitForTheHandshakeBudget() = runTest(dispatcher) {
+        val engine = RecordingBoxEngine()
+        var checks = 0
+        val controller = controller(
+            this, engine, hardStopTimeoutMs = 2_500,
+            reconnect = ReconnectSettings(maxAttempts = 3, watchdogTimeoutMs = 600_000),
+            tunnelHealthProbe = { checks++; Result.success(40L) },
+        )
+        controller.connect(sampleProfile(), catchAllNodes(), RunMode.FULL_VPN)
+        runCurrent()
+        engine.emit(EngineEvent.DnsAlive(answers = 1))
+        runCurrent()
+        val key = requireNotNull(app.lernet.engine.policy.HandshakeKey.fromOutboundJson(sampleProfile().outbounds.single().singBoxJson))
+        // The start used one; two more (say, a check from the screen) fill the minute.
+        controller.handshakeBudget.record(key, testScheduler.currentTime)
+        controller.handshakeBudget.record(key, testScheduler.currentTime)
+        testScheduler.advanceTimeBy(5_001)
+        runCurrent()
+        assertThat(checks).isEqualTo(0)
+        // Once the minute is over the deferred check runs.
+        testScheduler.advanceTimeBy(60_000)
+        runCurrent()
+        assertThat(checks).isEqualTo(1)
+        assertThat(engine.startCount).isEqualTo(1)
     }
 
     @Test
@@ -1265,6 +1366,7 @@ class ConnectionControllerTest {
             persistSessionIntent = persist,
             backupProbe = backupProbe,
             backupDelayMs = { 1_000L },
+            clock = { scope.testScheduler.currentTime },
         )
         controller.updateSettings(reconnect, failoverEnabled = false, group = null)
         return controller
@@ -1374,12 +1476,16 @@ private class RecordingBoxEngine(
     private val startError: Throwable? = null,
     private val failOnStartNumber: Int? = null,
     private val probeResult: Result<Int> = Result.success(0),
+    /** Result of a check through a folder backup carried in the running core; null = [probeResult]. */
+    private val standbyProbe: (String) -> Result<Int>? = { null },
 ) : BoxEngine {
     private val _events = MutableSharedFlow<EngineEvent>(extraBufferCapacity = 16)
     var startCount: Int = 0
     var stopCount: Int = 0
     var abortCount: Int = 0
     var probeCount: Int = 0
+    val probedTags = mutableListOf<String>()
+
     val startedConfigs = mutableListOf<String>()
 
     override val isNativeAvailable: Boolean = true
@@ -1416,6 +1522,8 @@ private class RecordingBoxEngine(
 
     override suspend fun probeOutbound(tag: String, url: String, timeoutMs: Int): Result<Int> {
         probeCount += 1
+        probedTags += tag
+        if (tag.startsWith("standby-")) standbyProbe(tag)?.let { return it }
         return probeResult
     }
 

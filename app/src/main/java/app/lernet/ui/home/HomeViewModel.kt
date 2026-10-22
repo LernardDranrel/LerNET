@@ -465,6 +465,11 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    /** Waits until the active server's handshake budget allows one more connection, then takes it. */
+    private suspend fun awaitActiveBudget() {
+        while (!controller.takeActiveBudget()) delay(controller.activeBudgetWaitMs().coerceAtLeast(1_000L))
+    }
+
     private suspend fun probeProfiles(ids: List<String>) {
         val profiles = repository.profiles.first().associateBy { it.id }
         val unique = ids.distinct().filter { it in profiles }
@@ -489,11 +494,18 @@ class HomeViewModel @Inject constructor(
                     active -> ProfileProbe(reachable = true, tcpMs = snapshot.serverTcpMs)
                     else -> {
                         val access = if (connected) (app.lernet.config.net.AppTraffic.route as? app.lernet.config.net.AppTraffic.Route.Through)?.access else null
+                        // Through the tunnel every check is one more connection via the active server.
+                        if (access != null) awaitActiveBudget()
                         val result = probe.check(endpoint, access, userAsked = true)
                         ProfileProbe(tcpMs = result?.latencyMs, reachable = result?.ok == true, throughTunnel = result?.throughTunnel == true)
                     }
                 }
-                val tunnel = if (active) AndroidTunnelProbe.measure(LocalListeners.appProxy(snapshot.compiledJson)) else null
+                val tunnel = if (active) {
+                    awaitActiveBudget()
+                    AndroidTunnelProbe.measure(LocalListeners.appProxy(snapshot.compiledJson))
+                } else {
+                    null
+                }
                 val result = server.copy(
                     tunnelMs = tunnel?.getOrNull(),
                     tunnelChecked = tunnel != null,

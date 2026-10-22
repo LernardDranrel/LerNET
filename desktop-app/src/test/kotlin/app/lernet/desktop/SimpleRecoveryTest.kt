@@ -20,19 +20,25 @@ class SimpleRecoveryTest {
     }
 
     @Test
-    fun quickTriesFirstThenRandomRecheckUpTo5Minutes() {
+    fun quickTriesUseTheSharedBackoffThenRandomRecheckUpTo5Minutes() {
         repeat(300) {
+            // Same pauses as Android: 5, 15, 30, 30 s (each up to a quarter longer, capped at 30 s), never 1–2 s.
+            val steps = listOf(5_000L..6_250L, 15_000L..18_750L, 30_000L..30_000L, 30_000L..30_000L)
             for (attempt in 1..SimpleRecovery.QUICK_ATTEMPTS) {
-                val upper = SimpleRecovery.FIRST_PAUSE_MS shl (attempt - 1)
-                val pause = SimpleRecovery.pauseMs(attempt)
-                assertThat(pause).isAtLeast(upper / 2)
-                assertThat(pause).isAtMost(upper)
+                assertThat(SimpleRecovery.pauseMs(attempt)).isIn(com.google.common.collect.Range.closed(steps[attempt - 1].first, steps[attempt - 1].last))
             }
             val recheck = SimpleRecovery.pauseMs(SimpleRecovery.QUICK_ATTEMPTS + 1 + it % 20)
             assertThat(recheck).isAtLeast(45_000L)
             assertThat(recheck).isAtMost(300_000L)
             assertThat(recheck % 1_000).isEqualTo(0L)
         }
+    }
+
+    @Test
+    fun silentRoundsAndTheHandshakeBudgetStretchThePause() {
+        assertThat(SimpleRecovery.pauseMs(1, budgetWaitMs = 52_000L)).isEqualTo(52_000L)
+        val rare = SimpleRecovery.pauseMs(1, silentRounds = SimpleRecovery.ALL_SILENT_ROUNDS)
+        assertThat(rare).isIn(com.google.common.collect.Range.closed(4 * 60_000L, 6 * 60_000L))
     }
 
     @Test
@@ -48,25 +54,6 @@ class SimpleRecoveryTest {
             .isEqualTo("VPN включён · сеть закрыта, в обход ничего не уходит · повтор через 8 с · check failed")
         assertThat(SimpleRecovery.message(false, 1_000, "")).isEqualTo("VPN не работает · повтор через 1 с")
         assertThat(SimpleRecovery.message(true, 292_000, "")).isEqualTo("VPN включён · сеть закрыта, в обход ничего не уходит · повтор через 4:52")
-    }
-
-    @Test
-    fun failedFolderConfigsComeBackAfterTheRandomPause() {
-        val recheck = UnavailableRecheck { 187_000 }
-        assertThat(recheck.consumeIfDue(0)).isFalse()
-        assertThat(recheck.arm(1_000)).isEqualTo(187_000L)
-        // Arming again does not push the recheck further out.
-        assertThat(recheck.arm(61_000)).isEqualTo(127_000L)
-        assertThat(recheck.consumeIfDue(187_999)).isFalse()
-        assertThat(recheck.consumeIfDue(188_000)).isTrue()
-        assertThat(recheck.consumeIfDue(400_000)).isFalse()
-    }
-
-    @Test
-    fun defaultFolderRecheckIsRandomWithinBounds() {
-        val waits = List(200) { UnavailableRecheck().arm(0) }
-        assertThat(waits.all { it in 45_000L..300_000L && it % 1_000 == 0L }).isTrue()
-        assertThat(waits.toSet().size).isGreaterThan(60)
     }
 
     @Test

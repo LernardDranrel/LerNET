@@ -6,9 +6,17 @@ package app.lernet.engine.live
  */
 class ProxiedReplies {
     private val seen = HashMap<String, Long>()
+    private val sent = HashMap<String, Long>()
 
     /** Monotonic count of observed reply growth on proxied connections. */
     var total: Long = 0
+        private set
+
+    /**
+     * Monotonic bytes sent on proxied connections. Pairs with [total] for the silence rule: the
+     * tunnel's own counter also holds direct traffic, which proves nothing about the config.
+     */
+    var uplinkTotal: Long = 0
         private set
 
     /** Feeds one batch of connection rows; returns true when a proxied connection received new bytes. */
@@ -16,6 +24,7 @@ class ProxiedReplies {
         if (reset) {
             val alive = rows.mapTo(HashSet()) { it.id }
             seen.keys.retainAll(alive)
+            sent.keys.retainAll(alive)
         }
         var grew = false
         rows.forEach { row ->
@@ -25,14 +34,24 @@ class ProxiedReplies {
                 grew = true
                 total += 1
             }
-            if (row.status == LiveConnStatus.OPEN) seen[row.id] = maxOf(before, row.downlink) else seen.remove(row.id)
+            val sentBefore = sent[row.id] ?: 0L
+            if (row.uplink > sentBefore) uplinkTotal += row.uplink - sentBefore
+            if (row.status == LiveConnStatus.CLOSED) {
+                seen.remove(row.id)
+                sent.remove(row.id)
+            } else {
+                seen[row.id] = maxOf(before, row.downlink)
+                sent[row.id] = maxOf(sentBefore, row.uplink)
+            }
         }
         if (seen.size > MAX_TRACKED) seen.clear()
+        if (sent.size > MAX_TRACKED) sent.clear()
         return grew
     }
 
     fun clear() {
         seen.clear()
+        sent.clear()
     }
 
     private companion object {

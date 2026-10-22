@@ -2,9 +2,9 @@ package app.lernet.engine.policy
 
 import app.lernet.engine.ConnectionCause
 import app.lernet.engine.ConnectionState
-import app.lernet.engine.FakeClock
 import app.lernet.engine.RunMode
 import com.google.common.truth.Truth.assertThat
+import kotlin.random.Random
 import org.junit.Test
 
 class ConnectionPolicyMachineTest {
@@ -100,62 +100,6 @@ class ConnectionPolicyMachineTest {
     }
 
     @Test
-    fun zeroTrafficWhileConnectedIsUnhealthy() {
-        var state = connected()
-        state = machine.reduce(state, ctx(), zeroStatus()).first
-        val (next, commands) = machine.reduce(state, ctx(), PolicyEvent.WatchdogMiss)
-        assertThat(next.snapshot.state).isEqualTo(ConnectionState.RECONNECTING)
-        assertThat(next.snapshot.cause).isInstanceOf(ConnectionCause.WatchdogTimeout::class.java)
-        assertThat(next.softReloads).isEqualTo(1)
-        assertThat(commands.filterIsInstance<PolicyCommand.ScheduleRetry>()).isNotEmpty()
-    }
-
-    @Test
-    fun watchdogWhileConnectedKeepsRetryingAfterRecovery() {
-        var state = connected()
-        val first = machine.reduce(state, ctx(), PolicyEvent.WatchdogMiss)
-        state = first.first
-        assertThat(state.snapshot.state).isEqualTo(ConnectionState.RECONNECTING)
-        assertThat(first.second.filterIsInstance<PolicyCommand.ScheduleRetry>()).isNotEmpty()
-
-        state = machine.reduce(state, ctx(), PolicyEvent.EngineStarted).first
-        state = machine.reduce(state, ctx(), PolicyEvent.OutboundReady).first
-        assertThat(state.snapshot.state).isEqualTo(ConnectionState.CONNECTED)
-        state = machine.reduce(state, ctx(), healthyStatus()).first
-        assertThat(state.softReloads).isEqualTo(0)
-
-        val second = machine.reduce(state, ctx(), PolicyEvent.WatchdogMiss)
-        assertThat(second.first.snapshot.state).isEqualTo(ConnectionState.RECONNECTING)
-        assertThat(second.first.snapshot.cause).isInstanceOf(ConnectionCause.WatchdogTimeout::class.java)
-        assertThat(second.second.filterIsInstance<PolicyCommand.ScheduleRetry>()).isNotEmpty()
-        assertThat(second.second.filterIsInstance<PolicyCommand.StopEngine>()).isEmpty()
-    }
-
-    @Test
-    fun reconnectsSameOutboundWithBackoffFromFakeClockMath() {
-        val clock = FakeClock(0)
-        var state = connected()
-        val ctx = ctx()
-        val (retrying, commands) = machine.reduce(
-            state,
-            ctx,
-            PolicyEvent.EngineFailed(ConnectionCause.TlsFailure("hang")),
-        )
-        state = retrying
-        val retry = commands.filterIsInstance<PolicyCommand.ScheduleRetry>().single()
-        assertThat(state.snapshot.state).isEqualTo(ConnectionState.RECONNECTING)
-        assertThat(retry.outboundId).isEqualTo("out-a")
-        assertThat(retry.delayMs).isEqualTo(1_000)
-        clock.advance(retry.delayMs)
-        assertThat(clock.nowMs()).isEqualTo(1_000)
-        val second = machine.reduce(state, ctx, PolicyEvent.EngineFailed(ConnectionCause.DialFailure("rst")))
-        val retry2 = second.second.filterIsInstance<PolicyCommand.ScheduleRetry>().single()
-        assertThat(retry2.outboundId).isEqualTo("out-a")
-        assertThat(retry2.delayMs).isEqualTo(2_000)
-        assertThat(second.first.snapshot.activeOutboundId).isEqualTo("out-a")
-    }
-
-    @Test
     fun exhaustedBurstKeepsRetryingSameOutboundWhenFailoverOff() {
         var state = connected()
         val ctx = ctx(failover = FailoverSettings(enabled = false), group = sampleGroup())
@@ -227,22 +171,6 @@ class ConnectionPolicyMachineTest {
         assertThat(state.consecutiveFailures).isEqualTo(1)
         state = machine.reduce(state, ctx(), PolicyEvent.TunnelVerified).first
         assertThat(state.consecutiveFailures).isEqualTo(0)
-    }
-
-    @Test
-    fun watchdogUsesFakeClock() {
-        val clock = FakeClock(10_000)
-        val watchdog = Watchdog(clock, timeoutMs = 20_000)
-        watchdog.markSuccess()
-        clock.advance(19_999)
-        assertThat(watchdog.isExpired()).isFalse()
-        clock.advance(1)
-        assertThat(watchdog.isExpired()).isTrue()
-        var state = connected()
-        state = machine.reduce(state, ctx(), PolicyEvent.WatchdogMiss).first
-        assertThat(state.snapshot.state).isEqualTo(ConnectionState.RECONNECTING)
-        assertThat(state.snapshot.cause).isInstanceOf(ConnectionCause.WatchdogTimeout::class.java)
-        assertThat(state.snapshot.activeOutboundId).isEqualTo("out-a")
     }
 
     @Test
@@ -378,34 +306,210 @@ class ConnectionPolicyMachineTest {
     }
 
     @Test
-    fun dnsHealthTimeoutSoftReloadsThenRetries() {
-        var state = connected()
-        val first = machine.reduce(state, ctx(), PolicyEvent.DnsHealthTimeout)
-        state = first.first
-        assertThat(state.snapshot.state).isEqualTo(ConnectionState.RECONNECTING)
-        assertThat(state.snapshot.cause).isInstanceOf(ConnectionCause.DnsStalled::class.java)
-        assertThat(first.second.filterIsInstance<PolicyCommand.ScheduleRetry>()).isNotEmpty()
-        assertThat(state.softReloads).isEqualTo(1)
-
-        state = machine.reduce(state, ctx(), PolicyEvent.EngineStarted).first
-        state = machine.reduce(state, ctx(), PolicyEvent.OutboundReady).first
-        assertThat(state.snapshot.state).isEqualTo(ConnectionState.CONNECTED)
-
-        val second = machine.reduce(state, ctx(), PolicyEvent.DnsHealthTimeout)
-        assertThat(second.first.snapshot.state).isEqualTo(ConnectionState.RECONNECTING)
-        assertThat(second.first.snapshot.cause)
-            .isInstanceOf(ConnectionCause.DnsUnreachable::class.java)
-        assertThat(second.second.filterIsInstance<PolicyCommand.ScheduleRetry>()).isNotEmpty()
-        assertThat(second.second.filterIsInstance<PolicyCommand.StopEngine>()).isEmpty()
-    }
-
-    @Test
     fun userDisconnectEndsDisconnected() {
         var state = connected()
         val (next, commands) = machine.reduce(state, ctx(), PolicyEvent.UserDisconnect)
         assertThat(next.snapshot.state).isEqualTo(ConnectionState.DISCONNECTED)
         assertThat(commands.filterIsInstance<PolicyCommand.StopEngine>()).isNotEmpty()
     }
+
+    @Test
+    fun silenceDnsAndBlockDetectorHoldTheConnectionWithoutRestart() {
+        listOf(
+            PolicyEvent.WatchdogMiss,
+            PolicyEvent.DnsHealthTimeout,
+            PolicyEvent.EngineFailed(ConnectionCause.BlockingSuspected(BlockingSign.RESET_AFTER_HELLO)),
+        ).forEach { event ->
+            val (next, commands) = machine.reduce(connected(), folder(), event)
+            assertThat(next.snapshot.state).isEqualTo(ConnectionState.CONNECTED)
+            assertThat(next.snapshot.hold).isEqualTo(LinkHold.JAMMED)
+            assertThat(next.snapshot.cause).isNull()
+            assertThat(commands).containsExactly(PolicyCommand.RequestCheck)
+        }
+    }
+
+    @Test
+    fun repliesThroughTheTunnelClearTheHold() {
+        var state = machine.reduce(connected(), ctx(), PolicyEvent.WatchdogMiss).first
+        state = machine.reduce(state, ctx(), status(downlinkTotal = 1_000, proxiedReplies = 0)).first
+        assertThat(state.snapshot.hold).isEqualTo(LinkHold.JAMMED)
+        state = machine.reduce(state, ctx(), status(downlinkTotal = 2_000, proxiedReplies = 4)).first
+        assertThat(state.snapshot.hold).isNull()
+        assertThat(state.snapshot.state).isEqualTo(ConnectionState.CONNECTED)
+    }
+
+    @Test
+    fun coreFailureRetriesWithTheNewBackoffNotOneSecond() {
+        var state = connected()
+        val first = machine.reduce(state, ctx(), PolicyEvent.EngineFailed(ConnectionCause.TlsFailure("hang")))
+        state = first.first
+        val retry = first.second.filterIsInstance<PolicyCommand.ScheduleRetry>().single()
+        assertThat(retry.outboundId).isEqualTo("out-a")
+        assertThat(retry.reason).isEqualTo(PolicyCommand.REASON_CORE_FAILED)
+        assertThat(retry.delayMs).isIn(com.google.common.collect.Range.closed(5_000L, 6_250L))
+        val second = machine.reduce(state, ctx(), PolicyEvent.EngineFailed(ConnectionCause.DialFailure("rst")))
+        // 15 s step, capped by the user's 8 s ceiling.
+        assertThat(second.second.filterIsInstance<PolicyCommand.ScheduleRetry>().single().delayMs).isEqualTo(8_000L)
+    }
+
+    @Test
+    fun retryNeverComesSoonerThanTheHandshakeBudget() {
+        val (_, commands) = machine.reduce(
+            connected(), ctx(budgetWaitMs = 41_000L), PolicyEvent.EngineFailed(ConnectionCause.DialFailure("rst")),
+        )
+        assertThat(commands.filterIsInstance<PolicyCommand.ScheduleRetry>().single().delayMs).isEqualTo(41_000L)
+    }
+
+    @Test
+    fun connectTimeoutRetryCarriesItsReason() {
+        val state = machine.reduce(MachineState.idle(), ctx(), startEvent()).first
+        val (_, commands) = machine.reduce(state, ctx(), PolicyEvent.ConnectTimeout)
+        assertThat(commands.filterIsInstance<PolicyCommand.ScheduleRetry>().single().reason)
+            .isEqualTo(PolicyCommand.REASON_CONNECT_TIMEOUT)
+    }
+
+    @Test
+    fun deadTunnelKeepsTheCoreAndChecksTheFolderFirst() {
+        val penalties = ConfigPenalties(random = Random(1))
+        val context = ctx(FailoverSettings(true, "g1"), sampleGroup(), penalties)
+        val (next, commands) = machine.reduce(connected(), context, tunnelDead())
+        assertThat(next.snapshot.state).isEqualTo(ConnectionState.CONNECTED)
+        assertThat(next.checking).isTrue()
+        assertThat(commands).containsExactly(PolicyCommand.ProbeGroup(listOf("out-b")))
+        assertThat(penalties.isResting("out-a", 0L)).isTrue()
+    }
+
+    @Test
+    fun onlyACheckedReplacementSwitches() {
+        val penalties = ConfigPenalties(random = Random(1))
+        val context = ctx(FailoverSettings(true, "g1"), sampleGroup(), penalties)
+        val checking = machine.reduce(connected(), context, tunnelDead()).first
+        val (next, commands) = machine.reduce(checking, context, PolicyEvent.ProbeCompleted(setOf("out-b"), setOf("out-b")))
+        assertThat(next.snapshot.state).isEqualTo(ConnectionState.CONNECTING)
+        assertThat(next.snapshot.activeOutboundId).isEqualTo("out-b")
+        assertThat(commands).contains(PolicyCommand.StartEngine("out-b", PolicyCommand.REASON_SWITCH))
+    }
+
+    @Test
+    fun noAnsweringReplacementHoldsAndRestsTheCheckedOnes() {
+        val penalties = ConfigPenalties(random = Random(1))
+        val context = ctx(FailoverSettings(true, "g1"), sampleGroup(), penalties)
+        val checking = machine.reduce(connected(), context, tunnelDead()).first
+        val (next, commands) = machine.reduce(checking, context, PolicyEvent.ProbeCompleted(emptySet(), setOf("out-b")))
+        assertThat(next.snapshot.state).isEqualTo(ConnectionState.CONNECTED)
+        assertThat(next.snapshot.hold).isEqualTo(LinkHold.JAMMED)
+        assertThat(next.silentRounds).isEqualTo(1)
+        assertThat(penalties.isResting("out-b", 0L)).isTrue()
+        val hold = commands.filterIsInstance<PolicyCommand.HoldCheck>().single()
+        assertThat(hold.delayMs).isIn(com.google.common.collect.Range.closed(48_000L, 72_000L))
+        assertThat(commands.filterIsInstance<PolicyCommand.StartEngine>()).isEmpty()
+        assertThat(commands.filterIsInstance<PolicyCommand.ScheduleRetry>()).isEmpty()
+    }
+
+    @Test
+    fun aRestingConfigIsNotPickedAgainSoNoPingPong() {
+        var now = 0L
+        val penalties = ConfigPenalties(random = Random(1))
+        val context = ctx(FailoverSettings(true, "g1"), sampleGroup(), penalties, nowMs = { now })
+        // A dies, B answers: switch to B.
+        var state = machine.reduce(connected(), context, tunnelDead()).first
+        state = machine.reduce(state, context, PolicyEvent.ProbeCompleted(setOf("out-b"), setOf("out-b"))).first
+        state = machine.reduce(state, context, startEvent().copy(outboundId = "out-b")).first
+        state = machine.reduce(state, context, PolicyEvent.OutboundReady).first
+        // A start does not forget that A rests.
+        assertThat(penalties.isResting("out-a", now)).isTrue()
+        now += 30_000
+        // B dies a moment later: A still rests, so nothing switches back.
+        val (next, commands) = machine.reduce(state, context, tunnelDead())
+        assertThat(commands.filterIsInstance<PolicyCommand.ProbeGroup>()).isEmpty()
+        assertThat(commands.filterIsInstance<PolicyCommand.StartEngine>()).isEmpty()
+        assertThat(commands.filterIsInstance<PolicyCommand.HoldCheck>()).hasSize(1)
+        assertThat(next.snapshot.activeOutboundId).isEqualTo("out-b")
+    }
+
+    @Test
+    fun silentRoundsGoToRareChecksAndSayWhiteLists() {
+        var now = 0L
+        val context = ctx(nowMs = { now })
+        var state = connected()
+        val delays = mutableListOf<Long>()
+        repeat(4) {
+            now += 60_000
+            val (next, commands) = machine.reduce(state, context, tunnelDead())
+            state = next
+            commands.filterIsInstance<PolicyCommand.HoldCheck>().singleOrNull()?.let { delays += it.delayMs }
+        }
+        assertThat(state.snapshot.state).isEqualTo(ConnectionState.CONNECTED)
+        assertThat(state.snapshot.hold).isEqualTo(LinkHold.ALL_SILENT)
+        assertThat(state.silentRounds).isEqualTo(4)
+        // Started under 10 minutes ago: no stale-core restart; the pauses only grow.
+        assertThat(delays).hasSize(4)
+        assertThat(delays.zipWithNext().all { (a, b) -> b > a }).isTrue()
+        assertThat(delays.last()).isAtLeast(8 * 60_000L)
+    }
+
+    @Test
+    fun aLongSilentCoreIsStartedOnceMoreAtTheSecondRound() {
+        var now = 0L
+        val context = ctx(nowMs = { now })
+        var state = connected()
+        now = 11 * 60_000L
+        state = machine.reduce(state, context, tunnelDead()).first
+        val (next, commands) = machine.reduce(state, context, tunnelDead())
+        val retry = commands.filterIsInstance<PolicyCommand.ScheduleRetry>().single()
+        assertThat(retry.reason).isEqualTo(PolicyCommand.REASON_STALE_CORE)
+        assertThat(next.silentRounds).isEqualTo(2)
+    }
+
+    @Test
+    fun aTunnelFailureRightAfterANetworkChangeBlamesNothing() {
+        val penalties = ConfigPenalties(random = Random(1))
+        val context = ctx(FailoverSettings(true, "g1"), sampleGroup(), penalties, sinceNetworkChange = 1_000L)
+        val (next, commands) = machine.reduce(connected(), context, tunnelDead())
+        assertThat(commands).containsExactly(PolicyCommand.HoldCheck(LinkJudge.SETTLE_RECHECK_MS))
+        assertThat(next.silentRounds).isEqualTo(0)
+        assertThat(penalties.isResting("out-a", 0L)).isFalse()
+    }
+
+    @Test
+    fun aVerifiedTunnelTakesTheConfigOffTheRestingList() {
+        val penalties = ConfigPenalties(random = Random(1))
+        val context = ctx(penalties = penalties)
+        var state = machine.reduce(connected(), context, tunnelDead()).first
+        assertThat(penalties.isResting("out-a", 0L)).isTrue()
+        state = machine.reduce(state, context, PolicyEvent.TunnelVerified).first
+        assertThat(penalties.entry("out-a")).isNull()
+        assertThat(state.snapshot.hold).isNull()
+        assertThat(state.silentRounds).isEqualTo(0)
+    }
+
+    @Test
+    fun allConfigsSilentAfterCoreFailuresUsesRareChecks() {
+        var state = connected()
+        val context = ctx()
+        var last: PolicyCommand.ScheduleRetry? = null
+        repeat(8) {
+            val step = machine.reduce(state, context, PolicyEvent.EngineFailed(ConnectionCause.DialTimeout(5)))
+            state = step.first
+            last = step.second.filterIsInstance<PolicyCommand.ScheduleRetry>().single()
+        }
+        assertThat(state.snapshot.hold).isEqualTo(LinkHold.ALL_SILENT)
+        assertThat(last!!.reason).isEqualTo(PolicyCommand.REASON_RECHECK)
+        assertThat(last!!.delayMs).isAtLeast(4 * 60_000L)
+    }
+
+    @Test
+    fun watchdogUsesFakeClock() {
+        val clock = app.lernet.engine.FakeClock(10_000)
+        val watchdog = Watchdog(clock, timeoutMs = 20_000)
+        watchdog.markSuccess()
+        clock.advance(19_999)
+        assertThat(watchdog.isExpired()).isFalse()
+        clock.advance(1)
+        assertThat(watchdog.isExpired()).isTrue()
+    }
+
+    private fun tunnelDead() = PolicyEvent.EngineFailed(ConnectionCause.TunnelHealthFailed("timeout"))
 
     private fun connected(): MachineState {
         var state = MachineState.idle()
@@ -449,7 +553,20 @@ class ConnectionPolicyMachineTest {
     private fun ctx(
         failover: FailoverSettings = FailoverSettings(false, null),
         group: ManualFailoverGroup? = null,
-    ) = MachineContext(reconnect, failover, group)
+        penalties: ConfigPenalties = ConfigPenalties(random = Random(7)),
+        nowMs: () -> Long = { 0L },
+        sinceNetworkChange: Long = Long.MAX_VALUE,
+        budgetWaitMs: Long = 0L,
+    ) = MachineContext(
+        reconnect, failover, group,
+        msSinceNetworkChange = { sinceNetworkChange },
+        nowMs = nowMs,
+        penalties = penalties,
+        budgetWaitMs = { budgetWaitMs },
+        random = Random(11),
+    )
+
+    private fun folder() = ctx(failover = FailoverSettings(enabled = true, groupId = "g1"), group = sampleGroup())
 
     private fun sampleGroup() = ManualFailoverGroup(
         id = "g1",

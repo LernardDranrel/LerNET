@@ -20,7 +20,7 @@ class ConfigTruthTest {
         val outbound = xhttpOutbound(withMux = false)
         val preview = ConfigTruth.preview(
             outbound, catchAll(), RunMode.FULL_VPN, "warn",
-            null, DnsPolicy.UNDERLAY, EngineDefaults(tunMtu = 1400, xmuxConcurrency = "8-8")
+            null, DnsPolicy.UNDERLAY, EngineDefaults(tunMtu = 1400, xmuxChannels = 1)
         )
         val full = json.parseToJsonElement(preview.fullEngineJson).jsonObject
         assertThat(full["log"]!!.jsonObject["level"]!!.jsonPrimitive.content).isEqualTo("info")
@@ -66,7 +66,7 @@ class ConfigTruthTest {
         val tun = root["inbounds"]!!.jsonArray.first().jsonObject
         assertThat(tun["stack"]!!.jsonPrimitive.content).isEqualTo(ConfigAssembler.TUN_STACK)
         assertThat(root["route"]!!.jsonObject["final"]!!.jsonPrimitive.content).isEqualTo("proxy")
-        assertThat(assembled.notes.joinToString()).contains("xmux max_concurrency=${XhttpMode.MUX_CONCURRENCY}")
+        assertThat(assembled.notes.joinToString()).contains("xmux max_connections=${XhttpMode.channelsRange(XhttpMode.DEFAULT_CHANNELS)}")
         val fields = fieldsOf(assembled, dns, DnsPolicy.PROFILE)
         val row = fields.single { it.id == TruthFieldId.DNS }
         assertThat(row.overridden).isFalse()
@@ -80,7 +80,7 @@ class ConfigTruthTest {
         val xmux = fields.single { it.id == TruthFieldId.XMUX }
         assertThat(xmux.overridden).isFalse()
         assertThat(xmux.source).isEqualTo(FieldSource.GLOBAL)
-        assertThat(xmux.effectiveValue).isEqualTo(XhttpMode.MUX_CONCURRENCY)
+        assertThat(xmux.effectiveValue).isEqualTo(XhttpMode.channelsRange(XhttpMode.DEFAULT_CHANNELS))
         val log = fields.single { it.id == TruthFieldId.LOG_LEVEL }
         assertThat(log.overridden).isTrue()
         assertThat(log.globalValue).isEqualTo("warn")
@@ -141,7 +141,8 @@ class ConfigTruthTest {
         )
         val xmux = fields.single { it.id == TruthFieldId.XMUX }
         assertThat(xmux.overridden).isFalse()
-        assertThat(xmux.effectiveValue).isEqualTo(XhttpMode.MUX_CONCURRENCY)
+        // The profile's own xmux is what runs.
+        assertThat(xmux.effectiveValue).isEqualTo("16-16")
         assertThat(assembled.notes.joinToString()).contains("xmux kept")
     }
 

@@ -9,6 +9,7 @@ import okhttp3.Request
 
 import app.lernet.engine.RunMode
 import app.lernet.engine.compile.ConfigAssembler
+import app.lernet.engine.policy.TunnelProbeSchedule
 import com.sun.jna.Memory
 import com.sun.jna.Native
 import com.sun.jna.Pointer
@@ -162,6 +163,8 @@ internal object WindowsRouteInspector {
  */
 internal object WindowsTunnelHealth {
     private const val KEEP_ALIVE_MIN = 10L
+    /** Whole-request limit = step limit + 5 s: 15 s steps give the same 20 s as Android ([TunnelProbeSchedule.CALL_TIMEOUT_MS]). */
+    private const val CALL_EXTRA_MS = TunnelProbeSchedule.CALL_TIMEOUT_MS - TunnelProbeSchedule.CHECK_TIMEOUT_MS
     private var cachedKey: Any? = null
     private var cachedClient: OkHttpClient? = null
 
@@ -174,7 +177,7 @@ internal object WindowsTunnelHealth {
             .connectionPool(ConnectionPool(1, KEEP_ALIVE_MIN, TimeUnit.MINUTES))
             .connectTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
             .readTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
-            .callTimeout(timeoutMs.toLong() * 2, TimeUnit.MILLISECONDS)
+            .callTimeout(timeoutMs.toLong() + CALL_EXTRA_MS, TimeUnit.MILLISECONDS)
             .followRedirects(false).followSslRedirects(false)
             .retryOnConnectionFailure(false)
         val builder = if (access != null) LocalProxyHttp.via(base, access) else base.proxy(Proxy.NO_PROXY)
@@ -194,7 +197,7 @@ internal object WindowsTunnelHealth {
         cachedKey = null
     }
 
-    fun check(url: String, mode: RunMode, timeoutMs: Int = 5_000,
+    fun check(url: String, mode: RunMode, timeoutMs: Int = TunnelProbeSchedule.CHECK_TIMEOUT_MS.toInt(),
               routeCheck: (String) -> String? = WindowsRouteInspector::check,
               proxyAccess: LocalProxyAccess? = null): TunnelHealthResult {
         if (mode == RunMode.FULL_VPN) {

@@ -31,4 +31,20 @@ class ProxiedRepliesTest {
         assertThat(replies.observe(true, listOf(row("p2", LiveVia.PROXY, 10)))).isFalse()
         assertThat(replies.total).isEqualTo(2)
     }
+
+    @Test
+    fun uplinkTotalCountsOnlyProxiedBytesSent() {
+        val replies = ProxiedReplies()
+        fun up(id: String, via: LiveVia, sent: Long) = row(id, via, 0).copy(uplink = sent)
+        replies.observe(false, listOf(up("p1", LiveVia.PROXY, 100), up("d1", LiveVia.DIRECT, 9_000)))
+        assertThat(replies.uplinkTotal).isEqualTo(100)
+        replies.observe(false, listOf(up("p1", LiveVia.PROXY, 400)))
+        assertThat(replies.uplinkTotal).isEqualTo(400)
+        // A standby check is not the config's traffic.
+        replies.observe(false, listOf(up("s1", LiveVia.OTHER, 5_000)))
+        assertThat(replies.uplinkTotal).isEqualTo(400)
+        replies.clear()
+        replies.observe(false, listOf(up("p1", LiveVia.PROXY, 450)))
+        assertThat(replies.uplinkTotal).isEqualTo(850)
+    }
 }

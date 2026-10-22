@@ -14,11 +14,37 @@ class TlsHandshakeTest {
         "tls":{"enabled":true,"server_name":"x","reality":{"enabled":true,"public_key":"k"}}}"""
 
     @Test
-    fun oldProfileWithoutUtlsGetsChrome() {
+    fun profileWithoutUtlsGetsFirefox() {
+        assertThat(TlsHandshake.DEFAULT_FINGERPRINT).isEqualTo("firefox")
         val out = TlsHandshake.apply(obj(reality), EngineDefaults())
-        assertThat(tls(out)["utls"]!!.jsonObject["fingerprint"]!!.jsonPrimitive.content).isEqualTo("chrome")
+        assertThat(tls(out)["utls"]!!.jsonObject["fingerprint"]!!.jsonPrimitive.content).isEqualTo("firefox")
         assertThat(tls(out)["record_fragment"]).isNull()
         assertThat(tls(out)["reality"]!!.jsonObject["key_share"]).isNull()
+    }
+
+    @Test
+    fun utlsWithoutFingerprintFromTheNewParserGetsFirefox() {
+        val raw = reality.replace("\"server_name\":\"x\"", "\"server_name\":\"x\",\"utls\":{\"enabled\":true}")
+        val utls = tls(TlsHandshake.apply(obj(raw), EngineDefaults()))["utls"]!!.jsonObject
+        assertThat(utls["fingerprint"]!!.jsonPrimitive.content).isEqualTo("firefox")
+        assertThat(utls["enabled"]!!.jsonPrimitive.content).isEqualTo("true")
+    }
+
+    @Test
+    fun plainTlsWithoutRealityGetsTheSameBrowserShape() {
+        val trojan = obj(
+            """{"type":"trojan","tag":"t","server":"a","server_port":443,"password":"p",""" +
+                """"tls":{"enabled":true,"server_name":"a"}}""",
+        )
+        assertThat(tls(TlsHandshake.apply(trojan, EngineDefaults()))["utls"]!!.jsonObject["fingerprint"]!!.jsonPrimitive.content)
+            .isEqualTo("firefox")
+    }
+
+    @Test
+    fun profileChromeIsKeptAsTheUsersChoice() {
+        val raw = reality.replace("\"server_name\":\"x\"", "\"server_name\":\"x\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"}")
+        val utls = tls(TlsHandshake.apply(obj(raw), EngineDefaults()))["utls"]!!.jsonObject
+        assertThat(utls["fingerprint"]!!.jsonPrimitive.content).isEqualTo("chrome")
     }
 
     @Test

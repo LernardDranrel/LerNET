@@ -1,6 +1,8 @@
 package app.lernet.desktop
 
 import app.lernet.engine.policy.RecheckJitter
+import app.lernet.engine.policy.RetryBackoff
+import app.lernet.engine.policy.SilentNetworkBackoff
 import kotlin.random.Random
 
 /**
@@ -12,10 +14,11 @@ import kotlin.random.Random
  * connection is retried after a pause until it works or the user presses Stop.
  */
 internal object SimpleRecovery {
-    const val FIRST_PAUSE_MS = 5_000L
-    /** Quick tries (pauses up to 5, 10, 20 s) before the config counts as unavailable. */
-    const val QUICK_ATTEMPTS = 3
-    const val MAX_PAUSE_MS = RecheckJitter.MAX_MS
+    /**
+     * Quick tries before the config counts as unavailable: the same four as Android with its default
+     * five attempts (pauses [RetryBackoff]: 5, 15, 30, 30 s, each up to a quarter longer).
+     */
+    const val QUICK_ATTEMPTS = 4
 
     /** True only for failures that a retry cannot fix; then the guard is released. */
     fun isTerminal(failure: TunnelFailure?): Boolean = failure == TunnelFailure.TUN_PERMISSION
@@ -26,16 +29,24 @@ internal object SimpleRecovery {
         desired && !swapped && !isTerminal(failure)
 
     /**
-     * First [QUICK_ATTEMPTS] retries: a short growing pause, random within its upper half.
-     * After that the config is unavailable and is rechecked after a fresh random pause
-     * of 45 s – 5 min in whole seconds ([RecheckJitter]); the network stays closed meanwhile.
+     * Pause before the core is started again, the same rule as Android:
+     * - first [QUICK_ATTEMPTS] retries: [RetryBackoff] (5 → 15 → 30 s, capped at [RetryBackoff.DEFAULT_CAP_MS]);
+     * - then the config is unavailable and is rechecked after a random 45 s – 5 min ([RecheckJitter]);
+     * - in a series of rounds where nothing answered: [SilentNetworkBackoff], up to 15 min;
+     * - never sooner than the server's handshake budget allows.
      */
-    fun pauseMs(attempt: Int, random: Random = Random.Default): Long {
+    fun pauseMs(attempt: Int, silentRounds: Int = 0, budgetWaitMs: Long = 0L, random: Random = Random.Default): Long {
         val safe = attempt.coerceAtLeast(1)
-        if (safe > QUICK_ATTEMPTS) return RecheckJitter.nextMs(random)
-        val upper = FIRST_PAUSE_MS shl (safe - 1)
-        return random.nextLong(upper / 2, upper + 1)
+        val pause = when {
+            silentRounds >= ALL_SILENT_ROUNDS -> SilentNetworkBackoff.delayMs(silentRounds, random)
+            safe > QUICK_ATTEMPTS -> RecheckJitter.nextMs(random)
+            else -> RetryBackoff.delayMs(safe, RetryBackoff.DEFAULT_CAP_MS, 0L, random)
+        }
+        return maxOf(pause, budgetWaitMs)
     }
+
+    /** Rounds without any answer before the status says white lists / shutdown (same as Android). */
+    const val ALL_SILENT_ROUNDS = app.lernet.engine.policy.LinkJudge.ALL_SILENT_ROUNDS
 
     fun message(guardEngaged: Boolean, pauseMs: Long, reason: String): String {
         val seconds = ((pauseMs + 999) / 1000).coerceAtLeast(1)
@@ -44,32 +55,6 @@ internal object SimpleRecovery {
         val wait = if (seconds >= 60) RecheckJitter.label(seconds * 1_000) else "$seconds с"
         return "$head · повтор через $wait$tail"
     }
-}
-
-/**
- * Configs of an auto-switch folder that failed are skipped by the next switch, but not forever:
- * once armed, they become candidates again after a fresh random pause of 45 s – 5 min.
- */
-internal class UnavailableRecheck(private val draw: () -> Long = { RecheckJitter.nextMs() }) {
-    @Volatile private var dueAt = 0L
-
-    /** Arms the timer if it is not running; returns the pause until the recheck. */
-    @Synchronized
-    fun arm(now: Long): Long {
-        if (dueAt == 0L) dueAt = now + draw()
-        return dueAt - now
-    }
-
-    /** True once the pause is over; the timer is then disarmed. */
-    @Synchronized
-    fun consumeIfDue(now: Long): Boolean {
-        if (dueAt == 0L || now < dueAt) return false
-        dueAt = 0L
-        return true
-    }
-
-    @Synchronized
-    fun reset() { dueAt = 0L }
 }
 
 /**

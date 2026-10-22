@@ -35,7 +35,7 @@ internal object ExpertRestartFingerprint {
                 "defaults",
                 buildJsonObject {
                     put("tun_mtu", defaults.tunMtu)
-                    put("xmux_concurrency", defaults.xmuxConcurrency)
+                    put("xmux_channels", defaults.xmuxChannels)
                     put("direct_dns_server", defaults.directDnsServer)
                 }
             )

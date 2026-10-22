@@ -28,13 +28,15 @@ internal data class StoredSimpleSession(
     val mode: RunMode,
     val logLevel: String,
     val tunMtu: Int,
-    val xmuxConcurrency: String,
+    /** Written by builds before the XHTTP channel setting; read and ignored. */
+    val xmuxConcurrency: String = "",
     val directDnsServer: String,
     val proxyTag: String?,
     val dnsPolicy: DnsPolicy,
+    val xmuxChannels: Int = app.lernet.engine.compile.XhttpMode.DEFAULT_CHANNELS,
 ) {
     fun config() = SimpleSessionConfig(profileId, outboundId, compiledJson, mode, logLevel,
-        EngineDefaults(tunMtu, xmuxConcurrency, directDnsServer), proxyTag, dnsPolicy)
+        EngineDefaults(tunMtu = tunMtu, xmuxChannels = xmuxChannels, directDnsServer = directDnsServer), proxyTag, dnsPolicy)
 }
 
 /** A single atomic journal in noBackupFilesDir. Never exported or logged. */
@@ -46,8 +48,8 @@ internal class SimpleSessionJournal(private val path: Path) {
     @Synchronized fun write(config: SimpleSessionConfig?) {
         val record = config?.takeIf { it.mode == RunMode.FULL_VPN }?.let {
             StoredSimpleSession(UUID.randomUUID().toString(), it.profileId, it.outboundId, it.compiledJson,
-                it.mode, it.logLevel, it.defaults.tunMtu, it.defaults.xmuxConcurrency,
-                it.defaults.directDnsServer, it.proxyTag, it.dnsPolicy)
+                it.mode, it.logLevel, it.defaults.tunMtu, directDnsServer = it.defaults.directDnsServer,
+                proxyTag = it.proxyTag, dnsPolicy = it.dnsPolicy, xmuxChannels = it.defaults.xmuxChannels)
         }
         Files.createDirectories(path.parent)
         val temp = path.resolveSibling("${path.fileName}.tmp")
