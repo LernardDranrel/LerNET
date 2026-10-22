@@ -53,9 +53,9 @@ internal enum class ExpertPage(val title: String) {
     OVERVIEW("Пульт"),
     ROUTES("Схема"),
     EXITS("Конфиги"),
-    PREVIEW("Правила"),
+    PREVIEW("Проверка пути"),
     EVENTS("События"),
-    PROTECTION("Настройки Эксперта")
+    PROTECTION("Защита и DNS")
 }
 
 /** Expert's own bottom menu (v2); Expert safety settings stay in the left column. */
@@ -248,7 +248,7 @@ private fun ExpertWorkspaceMenu(state: ExpertUiState, onIntent: (ExpertIntent) -
                     onIntent(ExpertIntent.ClearConnectionHistory)
                 }, enabled = !state.busy
             )
-            DropdownMenuItem(text = { Text("DNS Expert") }, onClick = {
+            DropdownMenuItem(text = { Text("DNS Эксперта") }, onClick = {
                 menu = false
                 dns = true
             }, enabled = !state.busy)

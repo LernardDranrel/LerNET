@@ -46,7 +46,7 @@ internal fun ExpertDnsSettings(state: ExpertUiState, onIntent: (ExpertIntent) ->
     }
     val readOnly = pending != null || state.busy
     ExpertModal(
-        "DNS Expert", onDismiss, ::save,
+        "DNS Эксперта", onDismiss, ::save,
         canSave = chosen.isValid() && !changedElsewhere && !readOnly,
         saveText = "Сохранить в черновик"
     ) {

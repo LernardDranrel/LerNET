@@ -46,7 +46,7 @@ internal fun DesktopModeTabs(
 ) {
     Box(Modifier.fillMaxWidth().height(62.dp).padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
         Row(Modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf(false to "VPN", true to "Экспертный режим").forEach { (mode, title) ->
+            listOf(false to "VPN", true to "Эксперт").forEach { (mode, title) ->
                 val selected = mode == expert
                 val fill by animateColorAsState(
                     if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background,

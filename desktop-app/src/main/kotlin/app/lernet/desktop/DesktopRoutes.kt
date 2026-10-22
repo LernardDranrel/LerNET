@@ -212,7 +212,7 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
                                 DropdownMenuItem(text = {
                                     Column(Modifier.padding(start = 22.dp)) {
                                         Text("└  ${child.name}")
-                                        Text("Действует маршрут папки", color = routeMuted, fontSize = 11.sp)
+                                        Text("Действуют правила папки", color = routeMuted, fontSize = 11.sp)
                                     }
                                 }, onClick = { chooseOwner(child.id) })
                             }
@@ -242,7 +242,7 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
         }
         if (ownerGroup != null) {
             Surface(color = Color(0xFF302B1D), shape = RoundedCornerShape(10.dp)) {
-                Text("Конфиг находится в папке «${ownerGroup.name}». Сейчас для него действует маршрут папки. Эти правила конфига сохранятся, но начнут работать только после переноса конфига из папки.",
+                Text("Конфиг находится в папке «${ownerGroup.name}». Сейчас для него действуют правила папки. Эти правила конфига сохранятся, но начнут работать только после переноса конфига из папки.",
                     color = Color(0xFFF5C16C), modifier = Modifier.padding(12.dp), fontSize = 12.sp)
             }
             Spacer(Modifier.height(10.dp))
@@ -321,7 +321,7 @@ fun DesktopRoutes(saved: StoredState, controller: DesktopController, preferredOw
         AlertDialog(
             onDismissRequest = { pendingOwner = null },
             title = { Text("Несохранённый черновик") },
-            text = { Text("Сохранить изменения маршрутов перед переходом?") },
+            text = { Text("Сохранить изменения правил перед переходом?") },
             confirmButton = { Button(onClick = { if (saveDraft()) { pendingOwner = null; ownerId = target } }) { Text("Сохранить и перейти") } },
             dismissButton = {
                 Row {

@@ -104,7 +104,7 @@
     <string name="expert_profiles_folders">Конфиги и папки</string>
     <string name="expert_profiles_hint">Нажми конфиг для настройки. Выходы Эксперта выбираются в схеме.</string>
     <string name="expert_app_settings">Настройки приложения</string>
-    <string name="expert_device_network">Сеть устройства</string>
+    <string name="expert_device_network">Анализ сети</string>
     <string name="expert_back_to_menu">← Меню Эксперта</string>
     <string name="expert_node_options">Действия с блоком</string>
 </resources>

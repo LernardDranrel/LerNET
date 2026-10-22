@@ -94,7 +94,7 @@ internal fun DesktopNetworkObservation(
         Row(Modifier.fillMaxSize()) {
             if (!compact) Column(Modifier.width(214.dp).fillMaxHeight().background(observationInk).padding(16.dp)) {
                 Text("LerNET", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text("Сеть устройства", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+                Text("Анализ сети", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
                 Spacer(Modifier.height(26.dp))
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                 ObservationPage.entries.forEach { item ->

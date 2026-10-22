@@ -96,7 +96,7 @@ fun DiagScreen(
                     }
                 },
                 actions = {
-                    TextButton(onClick = onOpenNetwork) { Text("Сеть устройства") }
+                    TextButton(onClick = onOpenNetwork) { Text(stringResource(R.string.expert_device_network)) }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )

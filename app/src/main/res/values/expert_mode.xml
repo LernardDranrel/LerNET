@@ -8,7 +8,7 @@
     <string name="expert_section_overview">Пульт</string>
     <string name="expert_section_schema">Схема</string>
     <string name="expert_section_exits">Конфиги</string>
-    <string name="expert_section_safety">Экспертный режим</string>
+    <string name="expert_section_safety">Защита и DNS</string>
     <string name="expert_section_activity">Запросы</string>
     <string name="expert_section_journal">События</string>
     <string name="expert_stopped">Выключено</string>
@@ -148,7 +148,7 @@
     <string name="expert_channel_remove">Удалить неиспользуемый канал</string>
     <string name="expert_restore_applied">Вернуть действующую схему в черновик</string>
     <string name="expert_restore_applied_body">Текущий черновик будет заменён схемой, которую ядро действительно применило. Сохранённая версия и работающий туннель не изменятся.</string>
-    <string name="expert_section_simulation">Правила</string>
+    <string name="expert_section_simulation">Проверка пути</string>
     <string name="expert_simulation_hint">Выбери соединение из истории и посмотри его путь. Для своего примера открой ручной редактор. Это локальный разбор правил: запрос не отправляется, соединение не проверяется.</string>
     <string name="expert_simulation_source">Какую схему проверяем</string>
     <string name="expert_simulation_draft">Черновик</string>

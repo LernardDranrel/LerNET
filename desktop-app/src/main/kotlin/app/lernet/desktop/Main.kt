@@ -202,7 +202,7 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
         onAction = { visible = true },
         menu = {
             Item("Открыть", onClick = { visible = true })
-            Item("Сеть устройства", onClick = { networkWindowOpen = true })
+            Item("Анализ сети", onClick = { networkWindowOpen = true })
             Item("Отключить", onClick = {
                 if (expertUi?.phase in setOf(ExpertPhase.RUNNING, ExpertPhase.STARTING, ExpertPhase.APPLYING, ExpertPhase.FAILED)) {
                     expert?.dispatch(ExpertIntent.Stop)
@@ -569,7 +569,7 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
                     } else {
                         tab = Tab.DIAGNOSTICS
                     }
-                }) { Text(if (error.routeOwnerId != null) "Открыть маршруты" else "Диагностика") }
+                }) { Text(if (error.routeOwnerId != null) "Открыть правила" else "Журнал запросов") }
             },
             dismissButton = {
                 TextButton(onClick = controller::dismissConnectionError) { Text("Закрыть") }
@@ -750,7 +750,7 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                                                 modifier = Modifier.clip(RoundedCornerShape(4.dp))
                                                     .background(green.copy(alpha = .12f))
                                                     .padding(horizontal = 4.dp, vertical = 1.dp)
-                                                    .semantics { contentDescription = "Автопереключение включено" })
+                                                    .semantics { contentDescription = "Автосмена включена" })
                                         }
                                         Spacer(Modifier.width(4.dp))
                                         FolderChevron(group.id in expanded)
@@ -776,7 +776,7 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                                         DropdownMenuItem(text = { Text(if (group.autoSwap) "Выключить автосмену" else "Включить автосмену") },
                                             onClick = { controller.setGroupSwap(group.id, !group.autoSwap); groupMenu = null })
                                         DropdownMenuItem(text = { Text("Добавить конфиг сюда") }, onClick = { onImport(group.id); groupMenu = null })
-                                        DropdownMenuItem(text = { Text("Маршруты папки") }, onClick = { onGroupRoutes(group.id); groupMenu = null })
+                                        DropdownMenuItem(text = { Text("Правила папки") }, onClick = { onGroupRoutes(group.id); groupMenu = null })
                                         DropdownMenuItem(text = { Text("Экспортировать папку") }, onClick = { groupMenu = null; onExportGroup(group) })
                                         DropdownMenuItem(text = { Text("Переименовать") }, onClick = { renameGroup = group; groupMenu = null })
                                         DropdownMenuItem(text = { Text("Удалить папку") }, onClick = { deleteGroup = group; groupMenu = null })
@@ -1573,7 +1573,7 @@ private fun Diagnostics(saved: StoredState, tunnel: TunnelSnapshot, diagnostics:
         }
         Spacer(Modifier.height(13.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Диагностика", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Text("Соединения", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             FilterChip(display == "live", onClick = { display = "live" }, label = { Text("Сейчас") })
             Spacer(Modifier.width(7.dp))
             FilterChip(display == "history", onClick = { display = "history" }, label = { Text("История · ${history.size}") })
