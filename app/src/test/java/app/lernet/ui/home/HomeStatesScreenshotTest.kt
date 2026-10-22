@@ -132,8 +132,9 @@ class HomeStatesScreenshotTest {
     fun holdingWholeScroll() {
         val now = System.currentTimeMillis()
         val report = app.lernet.engine.policy.FailoverReport("Работа", listOf(
-            app.lernet.engine.policy.FailoverAttempt("Нидерланды", "нет ответа · время истекло", now - 60_000),
-            app.lernet.engine.policy.FailoverAttempt("Германия", "сервер отклонил соединение", now)), "1 мин 10 с")
+            // The same attempts as the Windows pair (DesktopStatesRenderTest.holding).
+            app.lernet.engine.policy.FailoverAttempt("Нидерланды", "сервер отвечает, но трафик через него не идёт", now - 60_000),
+            app.lernet.engine.policy.FailoverAttempt("Германия", "нет ответа · время истекло", now - 30_000)), "30 с")
         render("phone-holding-full", base(ConnectionSnapshot.idle().copy(state = ConnectionState.RECONNECTING,
             activeProfileId = "nl", tried = report)).copy(skippedRules = listOf("Блокнот на работе")))
     }

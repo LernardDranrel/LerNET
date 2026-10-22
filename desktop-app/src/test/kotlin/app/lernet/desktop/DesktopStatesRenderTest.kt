@@ -160,8 +160,11 @@ class DesktopStatesRenderTest {
     @Test fun connectingWide() = render("win-connecting-wide", 1440, 900, preview = connecting)
     @Test fun connectedWide() = render("win-connected-wide", 1440, 900, preview = connected)
     @Test fun connectedNarrow() = render("win-connected-1024", 1024, 720, preview = connected)
-    @Test fun holdingWide() = render("win-holding-wide", 1440, 900, preview = holding())
-    @Test fun holdingNarrow() = render("win-holding-1024", 1024, 720, preview = holding())
+    // As the phone's holding fixture: one branch this platform skips («Ещё 1» under the report).
+    private fun withSkipped() = sample().let { it.copy(rules = it.rules +
+        StoredRule("r3", "grp_work", sortIndex = 2, title = "Блокнот на работе", apps = listOf("com.example.notes"))) }
+    @Test fun holdingWide() = render("win-holding-wide", 1440, 900, withSkipped(), holding())
+    @Test fun holdingNarrow() = render("win-holding-1024", 1024, 720, withSkipped(), holding())
     @Test fun failedWide() = render("win-error-wide", 1440, 900, preview = failed)
     @Test fun failedNarrow() = render("win-error-1024", 1024, 720, preview = failed)
     /** The pair of the phone's proxy-connected-full: the same note under the config line. */
