@@ -83,11 +83,9 @@
     <string name="expert_duration_minutes">%1$d мин.</string>
     <string name="expert_duration_seconds">%1$s сек.</string>
     <string name="expert_folder_preferred">Предпочтительный конфиг</string>
-    <string name="expert_folder_fastest">Самый быстрый</string>
     <string name="expert_folder_stable">Самый стабильный</string>
     <string name="expert_folder_preferred_hint">Работает выбранный конфиг. Соседи — только если он перестал отвечать.</string>
     <string name="expert_folder_stable_hint">Рабочий выход не меняется. После сбоя берётся тот, у кого меньше всего сбоев за последние 30 минут.</string>
-    <string name="expert_folder_fastest_hint">На более быстрый выход переходим, только если он быстрее на 40 мс и на 25 %, и не чаще раза в 10 минут. Открытые соединения доживают на прежнем выходе, новые идут через новый.</string>
     <string name="expert_folder_swap">Менять конфиг при отказе</string>
     <string name="expert_folder_hint">Доступность определяется HTTPS через выход, а не ответом сервера. Недоступный выход не приводит к прямому подключению без явно выбранного разрешения.</string>
     <string name="expert_exit_sleeping">Спит</string>

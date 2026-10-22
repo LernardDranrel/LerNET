@@ -87,9 +87,9 @@ internal fun ExpertExits(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit,
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             // Решения 23.10 п.4: все VPN-конфиги, как на телефоне.
             item {
-                Text("Все конфиги", color = ExpertColors.text, fontWeight = FontWeight.SemiBold)
+                Text(app.lernet.engine.text.ExpertWords.ALL_CONFIGS, color = ExpertColors.text, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "Те же, что в режиме VPN. Их можно выбрать целью в схеме или положить в папку.",
+                    app.lernet.engine.text.ExpertWords.ALL_CONFIGS_HINT,
                     color = ExpertColors.muted, fontSize = 12.sp,
                 )
             }
@@ -129,16 +129,16 @@ internal fun ExpertExits(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit,
             }
             // Отдельный блок: задействованные в схеме папки со стратегией и состоянием.
             item {
-                Text("Задействованные в схеме", color = ExpertColors.text, fontWeight = FontWeight.SemiBold)
+                Text(app.lernet.engine.text.ExpertWords.SCHEME_USED, color = ExpertColors.text, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "Папки и выходы, куда схема уже направила трафик, со стратегией выбора.",
+                    app.lernet.engine.text.ExpertWords.SCHEME_USED_HINT,
                     color = ExpertColors.muted, fontSize = 12.sp,
                 )
             }
             if (schemeFolders.isEmpty() && exits.isEmpty()) {
                 item {
                     Text(
-                        "Пока схема никуда не направила трафик. Добавь правило или папку — здесь появятся задействованные конфиги.",
+                        app.lernet.engine.text.ExpertWords.SCHEME_USED_EMPTY,
                         color = ExpertColors.muted, fontSize = 13.sp,
                     )
                 }

@@ -2,6 +2,7 @@ package app.lernet.desktop
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
@@ -10,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -200,7 +202,6 @@ class DesktopStatesRenderTest {
         } finally { scene.close(); controller.close() }
     }
 
-    /** The request journal with rows, a filter and the side panel (J7, J8): the empty journal says little. */
     @Test
     fun journalWithRows() {
         val dir = Files.createTempDirectory("lernet-journal")
@@ -236,5 +237,85 @@ class DesktopStatesRenderTest {
             assertThat(all).contains("Вид связи")
             listOf("Exception", "null.").forEach { word -> assertThat(all.filter { word in it }).isEmpty() }
         } finally { scene.close(); controller.close() }
+    }
+
+    @Test
+    fun importDialog() {
+        val scene = ImageComposeScene(720, 640, Density(1f), content = theme {
+            androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().padding(24.dp)) {
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = {},
+                    title = { androidx.compose.material3.Text(app.lernet.engine.text.ImportWords.TITLE) },
+                    text = {
+                        Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                            androidx.compose.material3.Text(
+                                app.lernet.engine.text.ImportWords.HINT, color = Color(0xFFA1AEC4),
+                            )
+                            androidx.compose.material3.OutlinedTextField(
+                                "", {}, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                                label = { androidx.compose.material3.Text(app.lernet.engine.text.ImportWords.NAME) },
+                                placeholder = { androidx.compose.material3.Text(app.lernet.engine.text.ImportWords.NAME_HINT) },
+                            )
+                            androidx.compose.foundation.layout.Row(
+                                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(7.dp),
+                            ) {
+                                androidx.compose.material3.TextButton({}) {
+                                    androidx.compose.material3.Text(app.lernet.engine.text.ImportWords.PASTE)
+                                }
+                                androidx.compose.material3.TextButton({}) {
+                                    androidx.compose.material3.Text(app.lernet.engine.text.ImportWords.FROM_FILE)
+                                }
+                                androidx.compose.material3.TextButton({}) {
+                                    androidx.compose.material3.Text(app.lernet.engine.text.ImportWords.FROM_QR)
+                                }
+                            }
+                            androidx.compose.foundation.layout.Row(
+                                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
+                            ) {
+                                listOf(
+                                    "Авто",
+                                    app.lernet.engine.text.ImportWords.CHIP_VLESS,
+                                    app.lernet.engine.text.ImportWords.CHIP_JSON,
+                                    app.lernet.engine.text.ImportWords.CHIP_URL,
+                                    app.lernet.engine.text.ImportWords.CHIP_SUB,
+                                ).forEach {
+                                    androidx.compose.material3.FilterChip(
+                                        false, {}, label = { androidx.compose.material3.Text(it) },
+                                    )
+                                }
+                            }
+                            androidx.compose.material3.OutlinedTextField(
+                                "", {}, modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                                placeholder = {
+                                    androidx.compose.material3.Text(app.lernet.engine.text.ImportWords.INPUT_EXAMPLE)
+                                },
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        androidx.compose.material3.TextButton({}) {
+                            androidx.compose.material3.Text(app.lernet.engine.text.ImportWords.ACTION)
+                        }
+                    },
+                    dismissButton = {
+                        androidx.compose.material3.TextButton({}) { androidx.compose.material3.Text("Отмена") }
+                    },
+                )
+            }
+        })
+        try {
+            var clock = 0L
+            repeat(2) { scene.render(clock).close(); clock += 500_000_000L }
+            scene.render(clock).use { image ->
+                val bytes = requireNotNull(image.encodeToData(EncodedImageFormat.PNG)).use { it.bytes }
+                File("build/ux-states").apply { mkdirs() }.resolve("win-import.png").writeBytes(bytes)
+            }
+            val shown = texts(scene)
+            assertThat(shown).contains(app.lernet.engine.text.ImportWords.NAME)
+            assertThat(shown).contains(app.lernet.engine.text.ImportWords.FROM_QR)
+            assertThat(shown).contains(app.lernet.engine.text.ImportWords.CHIP_VLESS)
+        } finally {
+            scene.close()
+        }
     }
 }

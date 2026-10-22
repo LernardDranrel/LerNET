@@ -63,7 +63,12 @@ object ExpertWords {
         else (if (measured in 1 until active) "Скорость $measured из $active: " else "") +
             "↑ ${TrafficUnits.rate(up)} · ↓ ${TrafficUnits.rate(down)}"
 
-    // «Конфиги»
+    // «Конфиги» (решения 23.10 п.4)
+    const val ALL_CONFIGS = "Все конфиги"
+    const val ALL_CONFIGS_HINT = "Те же, что в режиме VPN. Их можно выбрать целью в схеме или положить в папку."
+    const val SCHEME_USED = "Задействованные в схеме"
+    const val SCHEME_USED_HINT = "Папки и выходы, куда схема уже направила трафик, со стратегией выбора."
+    const val SCHEME_USED_EMPTY = "Пока схема никуда не направила трафик. Добавь правило или папку — здесь появятся задействованные конфиги."
     const val EXITS_EMPTY = "Конфигов пока нет"
     const val SLEEPING_ONLY = "Только спящие"
     const val SLEEPING_NONE = "Спящих конфигов нет. Сними фильтр, чтобы увидеть весь список."

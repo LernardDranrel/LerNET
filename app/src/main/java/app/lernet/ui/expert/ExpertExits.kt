@@ -102,6 +102,11 @@ internal fun ExpertExits(
             }
         }
         if (bundle.profiles.isNotEmpty()) ExpertHint(R.string.expert_folder_hint)
+        // Решения 23.10 п.4: отдельный блок «Задействованные в схеме» (как на Windows).
+        if (bundle.groups.isNotEmpty()) {
+            Text(app.lernet.engine.text.ExpertWords.SCHEME_USED, style = MaterialTheme.typography.titleMedium)
+            Text(app.lernet.engine.text.ExpertWords.SCHEME_USED_HINT, style = MaterialTheme.typography.bodySmall)
+        }
         bundle.groups.forEach { folder ->
             val settings = policy.folderPolicies.firstOrNull { it.folderId == folder.id } ?: FolderPolicy(folder.id)
             var preferredOpen by remember(folder.id) { mutableStateOf(false) }
