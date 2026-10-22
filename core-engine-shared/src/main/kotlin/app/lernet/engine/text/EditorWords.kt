@@ -1,0 +1,38 @@
+package app.lernet.engine.text
+
+/** The config editor on both platforms (see [HomeWords]); Windows lays it out in tabs, the phone in one list. */
+object EditorWords {
+    const val TITLE = "Конфиг"
+    const val LOCAL = "На этом устройстве"
+    const val LOCAL_HELP = "DNS, маршруты и параметры VPN задаются клиентом. Их можно менять независимо от сервера."
+    const val REMOTE = "Удалённый сервер"
+    const val REMOTE_HELP = "Адрес, порт, имя для маскировки (SNI) и транспорт должны совпадать с настройками сервера."
+    const val NODE = "Узел"
+    const val NODE_WHY = "Адрес и порт сервера. Сохранение не подключает VPN."
+    const val SERVER = "Сервер"
+    const val PORT = "Порт"
+    const val SERVER_ERROR = "Укажите сервер"
+    const val PORT_ERROR = "Порт от 1 до 65535"
+    const val DISGUISE = "Маскировка"
+    const val SNI = "Имя сайта для маскировки (SNI)"
+    const val FINGERPRINT = "Отпечаток TLS"
+    fun fingerprintDefault(name: String) = "По умолчанию LerNET · $name"
+    const val FINGERPRINT_HELP = "Каким браузером представляется подключение. Если сервер не отвечает, попробуйте другой; " +
+        "«По умолчанию» подойдёт почти всегда."
+    const val PATH = "Путь"
+    const val DNS = "DNS"
+    const val DNS_WHY = "Куда уходят запросы имён сайтов. По умолчанию — через VPN, чтобы сеть их не видела."
+    const val DNS_TYPE = "Тип"
+    const val DNS_TYPE_HELP = "Протокол запроса к DNS-серверу. Изменение может потребовать другой порт или адрес."
+    const val DNS_ADDRESS = "Адрес"
+    const val DNS_ERROR = "Укажите адрес DNS конфига"
+    const val ADVANCED = "Дополнительно"
+    const val ADVANCED_HELP = "Параметры из общих настроек. Они применяются, если конфиг не задаёт своё значение."
+    const val MODE = "Режим XHTTP"
+    const val MODE_HELP = "Способ обмена данными с сервером. Оставьте «Определено системой», если не знаете."
+    const val SYSTEM_DEFINED = "Определено системой"
+    const val ENGINE = "Итоговые настройки подключения"
+    const val COPY_JSON = "Копировать полный JSON"
+    const val JSON_SECRET = "Полный JSON содержит ключи доступа. Буфер обмена доступен другим приложениям."
+    const val SAVE = "Сохранить"
+}

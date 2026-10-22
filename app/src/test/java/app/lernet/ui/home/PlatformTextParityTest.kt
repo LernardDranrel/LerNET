@@ -3,6 +3,7 @@ package app.lernet.ui.home
 import app.lernet.engine.policy.BudgetNotice
 import app.lernet.engine.policy.LinkHold
 import app.lernet.engine.policy.LinkJudge
+import app.lernet.engine.text.EditorWords
 import app.lernet.engine.text.HomeWords
 import app.lernet.engine.text.JournalWords
 import app.lernet.engine.text.SettingsWords
@@ -190,6 +191,42 @@ class PlatformTextParityTest {
         same("journal_nothing_found", JournalWords.NOTHING_FOUND)
         same("diag_system", JournalWords.SYSTEM)
         assertEquals(JournalWords.rule("YouTube"), strings.getValue("journal_rule").replace("%1\$s", "YouTube"))
+    }
+
+    @Test
+    fun editorWordsMatchWindows() {
+        same("cfg_title", EditorWords.TITLE)
+        same("cfg_local_section", EditorWords.LOCAL)
+        same("cfg_local_help", EditorWords.LOCAL_HELP)
+        same("cfg_remote_section", EditorWords.REMOTE)
+        same("cfg_remote_help", EditorWords.REMOTE_HELP)
+        same("cfg_node", EditorWords.NODE)
+        same("cfg_node_why", EditorWords.NODE_WHY)
+        same("cfg_server", EditorWords.SERVER)
+        same("cfg_port", EditorWords.PORT)
+        same("cfg_server_error", EditorWords.SERVER_ERROR)
+        same("cfg_port_error", EditorWords.PORT_ERROR)
+        same("cfg_disguise", EditorWords.DISGUISE)
+        same("cfg_sni", EditorWords.SNI)
+        same("cfg_fingerprint", EditorWords.FINGERPRINT)
+        same("cfg_fingerprint_help", EditorWords.FINGERPRINT_HELP)
+        same("cfg_path", EditorWords.PATH)
+        same("cfg_dns", EditorWords.DNS)
+        same("cfg_dns_why", EditorWords.DNS_WHY)
+        same("cfg_dns_type", EditorWords.DNS_TYPE)
+        same("cfg_dns_type_help", EditorWords.DNS_TYPE_HELP)
+        same("cfg_dns_address", EditorWords.DNS_ADDRESS)
+        same("cfg_dns_error", EditorWords.DNS_ERROR)
+        same("cfg_advanced", EditorWords.ADVANCED)
+        same("cfg_local_defaults_help", EditorWords.ADVANCED_HELP)
+        same("cfg_mode", EditorWords.MODE)
+        same("cfg_mode_help", EditorWords.MODE_HELP)
+        same("cfg_system_defined", EditorWords.SYSTEM_DEFINED)
+        same("cfg_engine", EditorWords.ENGINE)
+        same("cfg_copy_json", EditorWords.COPY_JSON)
+        same("cfg_json_secret_hint", EditorWords.JSON_SECRET)
+        same("cfg_save", EditorWords.SAVE)
+        assertEquals(EditorWords.fingerprintDefault("firefox"), strings.getValue("cfg_fingerprint_default").replace("%1\$s", "firefox"))
     }
 
     @Test

@@ -1,11 +1,15 @@
 package app.lernet.desktop
 
+import app.lernet.engine.text.EditorWords
+import app.lernet.engine.text.SettingsWords
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -22,7 +26,7 @@ import app.lernet.engine.compile.TlsHandshake
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 
-internal enum class EditorPage(val title: String) { LOCAL("На устройстве"), REMOTE("Удалённый сервер"), JSON("Итоговый JSON") }
+internal enum class EditorPage(val title: String) { LOCAL(EditorWords.LOCAL), REMOTE(EditorWords.REMOTE), JSON(EditorWords.ENGINE) }
 private val editorMuted = Color(0xFFA1AEC4)
 private val editorWarning = Color(0xFFF5C16C)
 
@@ -97,8 +101,8 @@ internal fun DesktopProfileEditor(
         MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
             Surface(color = Color(0xFF101724), contentColor = desktopColors.onSurface) {
                 Column(Modifier.fillMaxSize().padding(22.dp)) {
-                    Text("Редактор конфига", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Локальные параметры устройства и параметры удалённого сервера разделены.", color = editorMuted, fontSize = 12.sp)
+                    // As on the phone: the config's own name is the title.
+                    Text(profile.name.ifBlank { EditorWords.TITLE }, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(15.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                         EditorPage.entries.forEach { item -> FilterChip(page == item, onClick = { page = item }, label = { Text(item.title) }) }
@@ -107,20 +111,25 @@ internal fun DesktopProfileEditor(
                     Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(13.dp)) {
                         when (page) {
                             EditorPage.LOCAL -> {
+                                Text(EditorWords.LOCAL_HELP, color = editorMuted, fontSize = 12.sp)
                                 OutlinedTextField(name, { name = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Название конфига") }, singleLine = true)
-                                Text("Режим подключения", fontWeight = FontWeight.SemiBold)
+                                Text(SettingsWords.MODE, fontWeight = FontWeight.SemiBold)
                                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                                    listOf("SYSTEM" to "Определено глобально", "FULL_VPN" to "Полный VPN", "PROXY" to "Локальный прокси").forEach { (value, label) ->
+                                    listOf("SYSTEM" to "Как для всех", "FULL_VPN" to SettingsWords.MODE_VPN, "PROXY" to SettingsWords.MODE_PROXY).forEach { (value, label) ->
                                         FilterChip(runMode == value, onClick = { runMode = value }, label = { Text(label) })
                                     }
                                 }
-                                if (runMode == "SYSTEM") Text("Сейчас глобально: ${if (saved.mode == "PROXY") "локальный прокси" else "полный VPN"}", color = editorWarning, fontSize = 12.sp)
+                                if (runMode == "SYSTEM") Text("Сейчас для всех: ${if (saved.mode == "PROXY") "прокси" else "полный VPN"}", color = editorWarning, fontSize = 12.sp)
                                 HorizontalDivider()
-                                Text("DNS", fontWeight = FontWeight.SemiBold)
-                                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                                    FilterChip(dnsPolicy == "TUNNEL", onClick = { dnsPolicy = "TUNNEL" }, label = { Text("Через VPN") })
-                                    FilterChip(dnsPolicy == "UNDERLAY", onClick = { dnsPolicy = "UNDERLAY" }, label = { Text("Напрямую") })
-                                    FilterChip(dnsPolicy == "PROFILE", onClick = { dnsPolicy = "PROFILE" }, label = { Text("DNS конфига") })
+                                Text(EditorWords.DNS, fontWeight = FontWeight.SemiBold)
+                                Text(EditorWords.DNS_WHY, color = editorMuted, fontSize = 12.sp)
+                                // The phone's three choices, word for word.
+                                listOf("TUNNEL" to SettingsWords.DNS_TUNNEL, "UNDERLAY" to SettingsWords.DNS_DIRECT,
+                                    "PROFILE" to SettingsWords.DNS_PROFILE).forEach { (value, label) ->
+                                    Row(Modifier.clickable { dnsPolicy = value }, verticalAlignment = Alignment.CenterVertically) {
+                                        RadioButton(dnsPolicy == value, onClick = { dnsPolicy = value })
+                                        Text(label, fontSize = 14.sp)
+                                    }
                                 }
                                 preview?.userChanges?.takeIf { it.isNotEmpty() }?.let { changes ->
                                     Text(app.lernet.engine.compile.ConfigNotes.HEADER, color = editorWarning, fontSize = 12.sp)
@@ -128,52 +137,69 @@ internal fun DesktopProfileEditor(
                                 }
                                 if (effectiveDnsPolicy == "PROFILE") {
                                     Box {
-                                        OutlinedButton(onClick = { dnsTypeOpen = true }) { Text("Тип: $dnsType") }
+                                        OutlinedButton(onClick = { dnsTypeOpen = true }) { Text("${EditorWords.DNS_TYPE}: $dnsType") }
                                         DropdownMenu(dnsTypeOpen, onDismissRequest = { dnsTypeOpen = false }) {
                                             (listOf("udp", "tcp", "tls", "https", "quic", "h3") + dnsType).distinct().forEach { value ->
                                                 DropdownMenuItem(text = { Text(value) }, onClick = { dnsType = value; dnsTypeOpen = false })
                                             }
                                         }
                                     }
-                                    OutlinedTextField(dnsServer, { dnsServer = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Адрес DNS-сервера") },
-                                        isError = !dnsValid, supportingText = { Text("Должен соответствовать выбранному типу DNS") })
-                                } else Text("Используется DNS устройства: ${saved.directDnsServer}. Значение задаётся в глобальных настройках.", color = editorWarning, fontSize = 12.sp)
+                                    Text(EditorWords.DNS_TYPE_HELP, color = editorMuted, fontSize = 12.sp)
+                                    OutlinedTextField(dnsServer, { dnsServer = it }, modifier = Modifier.fillMaxWidth(), label = { Text(EditorWords.DNS_ADDRESS) },
+                                        isError = !dnsValid, supportingText = { if (!dnsValid) Text(EditorWords.DNS_ERROR) })
+                                } else if (effectiveDnsPolicy == "UNDERLAY") {
+                                    // Only the direct choice uses this server; «через VPN» never did (the old line said it always).
+                                    Text("${SettingsWords.DIRECT_DNS}: ${saved.directDnsServer} — «${SettingsWords.TITLE}» → «${SettingsWords.EXPERTS}».",
+                                        color = editorMuted, fontSize = 12.sp)
+                                }
                                 HorizontalDivider()
-                                Text(
-                                    "Глобальные значения: MTU ${saved.tunMtu} · XHTTP-соединений ${saved.xmuxChannels} · журнал ${saved.logLevel}",
+                                Text(EditorWords.ADVANCED, fontWeight = FontWeight.SemiBold)
+                                Text(EditorWords.ADVANCED_HELP, color = editorMuted, fontSize = 12.sp)
+                                Text("MTU ${saved.tunMtu} ${SettingsWords.BYTES} · ${SettingsWords.XHTTP_TITLE}: " +
+                                    (if (saved.xmuxChannels == app.lernet.engine.compile.XhttpMode.SINGLE_CHANNEL) SettingsWords.XHTTP_SINGLE.lowercase()
+                                    else saved.xmuxChannels.toString()) + " · ${SettingsWords.LOG_LEVEL.lowercase()}: " + when (saved.logLevel) {
+                                        "info" -> SettingsWords.LOG_INFO
+                                        "debug" -> SettingsWords.LOG_DEBUG
+                                        else -> SettingsWords.LOG_WARN
+                                    }.lowercase(),
                                     color = editorMuted,
                                     fontSize = 12.sp,
                                 )
                             }
                             EditorPage.REMOTE -> {
-                                Text("Эти поля должны совпадать с настройками принимающего сервера.", color = editorWarning, fontSize = 12.sp)
-                                OutlinedTextField(server, { server = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Адрес сервера") }, isError = server.isBlank(), singleLine = true)
-                                OutlinedTextField(port, { port = it }, modifier = Modifier.width(210.dp), label = { Text("Порт") }, isError = parsedPort == null, singleLine = true)
-                                OutlinedTextField(sni, { sni = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Имя сайта для маскировки (SNI)") }, singleLine = true)
+                                Text(EditorWords.REMOTE_HELP, color = editorWarning, fontSize = 12.sp)
+                                Text(EditorWords.NODE, fontWeight = FontWeight.SemiBold)
+                                Text(EditorWords.NODE_WHY, color = editorMuted, fontSize = 12.sp)
+                                OutlinedTextField(server, { server = it }, modifier = Modifier.fillMaxWidth(), label = { Text(EditorWords.SERVER) }, isError = server.isBlank(), singleLine = true,
+                                    supportingText = { if (server.isBlank()) Text(EditorWords.SERVER_ERROR) })
+                                OutlinedTextField(port, { port = it }, modifier = Modifier.width(210.dp), label = { Text(EditorWords.PORT) }, isError = parsedPort == null, singleLine = true,
+                                    supportingText = { if (parsedPort == null) Text(EditorWords.PORT_ERROR) })
+                                Text(EditorWords.DISGUISE, fontWeight = FontWeight.SemiBold)
+                                OutlinedTextField(sni, { sni = it }, modifier = Modifier.fillMaxWidth(), label = { Text(EditorWords.SNI) }, singleLine = true)
                                 if (original.hasTls) FingerprintChoice(fingerprint) { fingerprint = it }
-                                Text("Транспорт: ${original.transportType.ifBlank { "не указан" }}", color = editorMuted)
                                 if (original.hasTransport) {
-                                    OutlinedTextField(path, { path = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Путь транспорта") }, singleLine = true)
+                                    OutlinedTextField(path, { path = it }, modifier = Modifier.fillMaxWidth(), label = { Text(EditorWords.PATH) }, singleLine = true)
                                     if (original.transportType in listOf("xhttp", "splithttp")) {
                                         Box {
-                                            OutlinedButton(onClick = { xhttpModeOpen = true }) { Text("Режим XHTTP: ${transportMode.ifBlank { "определено ядром" }}") }
+                                            OutlinedButton(onClick = { xhttpModeOpen = true }) { Text("${EditorWords.MODE}: ${transportMode.ifBlank { EditorWords.SYSTEM_DEFINED }}") }
                                             DropdownMenu(xhttpModeOpen, onDismissRequest = { xhttpModeOpen = false }) {
                                                 (listOf("", "auto", "packet-up", "stream-up", "stream-one") + transportMode).distinct().forEach { value ->
-                                                    DropdownMenuItem(text = { Text(value.ifBlank { "Определено ядром" }) }, onClick = { transportMode = value; xhttpModeOpen = false })
+                                                    DropdownMenuItem(text = { Text(value.ifBlank { EditorWords.SYSTEM_DEFINED }) }, onClick = { transportMode = value; xhttpModeOpen = false })
                                                 }
                                             }
                                         }
-                                        Text("Режим меняет способ обмена данными с сервером. Выбирайте только режим, который он поддерживает.", color = editorMuted, fontSize = 12.sp)
+                                        Text(EditorWords.MODE_HELP, color = editorMuted, fontSize = 12.sp)
                                     }
                                 }
                             }
                             EditorPage.JSON -> {
                                 Row {
-                                    Text("Итоговый sing-box JSON", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                    Text(EditorWords.ENGINE, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                                     TextButton(onClick = {
                                         preview?.json?.let { Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(it), null) }
-                                    }, enabled = preview?.isValid == true) { Text("Копировать") }
+                                    }, enabled = preview?.isValid == true) { Text(EditorWords.COPY_JSON) }
                                 }
+                                Text(EditorWords.JSON_SECRET, color = editorMuted, fontSize = 12.sp)
                                 if (preview?.isValid == true) {
                                     SelectionContainer { Text(preview.json, fontFamily = FontFamily.Monospace, color = editorMuted, fontSize = 12.sp) }
                                 } else Text(preview?.errors?.joinToString("; ") ?: "Заполните адрес и порт сервера", color = desktopColors.error)
@@ -185,7 +211,7 @@ internal fun DesktopProfileEditor(
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         TextButton(onClick = onClose) { Text("Отмена") }
                         Spacer(Modifier.width(8.dp))
-                        Button(onClick = { controller.updateProfile(candidate); onClose() }, enabled = valid && preview?.isValid == true) { Text("Сохранить") }
+                        Button(onClick = { controller.updateProfile(candidate); onClose() }, enabled = valid && preview?.isValid == true) { Text(EditorWords.SAVE) }
                     }
                 }
             }
@@ -205,9 +231,9 @@ internal fun DesktopProfileEditor(
 @Composable
 private fun FingerprintChoice(value: String, onSelect: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    val defaultLabel = "По умолчанию LerNET · ${TlsHandshake.DEFAULT_FINGERPRINT}"
+    val defaultLabel = EditorWords.fingerprintDefault(TlsHandshake.DEFAULT_FINGERPRINT)
     Box {
-        OutlinedButton(onClick = { open = true }) { Text("Отпечаток TLS: ${value.ifBlank { defaultLabel }}") }
+        OutlinedButton(onClick = { open = true }) { Text("${EditorWords.FINGERPRINT}: ${value.ifBlank { defaultLabel }}") }
         DropdownMenu(open, onDismissRequest = { open = false }) {
             (TlsHandshake.CHOICES + value).distinct().forEach { choice ->
                 DropdownMenuItem(
@@ -221,7 +247,7 @@ private fun FingerprintChoice(value: String, onSelect: (String) -> Unit) {
         }
     }
     Text(
-        "Каким браузером представляется подключение. Если сервер не отвечает, попробуйте другой; «По умолчанию» подойдёт почти всегда.",
+        EditorWords.FINGERPRINT_HELP,
         color = editorMuted,
         fontSize = 12.sp,
     )

@@ -268,7 +268,7 @@
     <string name="cfg_title">Конфиг</string>
     <string name="cfg_missing">Конфиг не найден</string>
     <string name="cfg_node">Узел</string>
-    <string name="cfg_node_why">Адрес и порт, куда откроется VLESS. Сохранение не поднимает туннель.</string>
+    <string name="cfg_node_why">Адрес и порт сервера. Сохранение не подключает VPN.</string>
     <string name="cfg_disguise">Маскировка</string>
     <string name="cfg_disguise_why">Как подключение выглядит для сети: имя сайта для маскировки (SNI) и маскировка Reality. Ключ целиком не показывается.</string>
     <string name="cfg_dns">DNS</string>
@@ -303,8 +303,8 @@
     <string name="cfg_reason_detour">Лишний промежуточный выход убран — он ломал подключение. %1$s</string>
     <string name="cfg_reason_xmux">В конфиге не было своих настроек соединений к серверу (xmux), LerNET подставил общие. %1$s</string>
     <string name="cfg_reason_log">При подключении журнал становится подробнее, чтобы в нём были строки DNS.</string>
-    <string name="cfg_mode">Режим транспорта</string>
-    <string name="cfg_xmux">Соединения к серверу (xmux)</string>
+    <string name="cfg_mode">Режим XHTTP</string>
+    <string name="cfg_xmux">Соединения с сервером (XHTTP)</string>
     <string name="cfg_tun_stack">Сетевой стек</string>
     <string name="cfg_tun_mtu">MTU</string>
     <string name="cfg_log">Журнал</string>
@@ -324,7 +324,7 @@
     <string name="cfg_remote_section">Удалённый сервер</string>
     <string name="cfg_remote_help">Адрес, порт, имя для маскировки (SNI) и транспорт должны совпадать с настройками сервера.</string>
     <string name="cfg_local_defaults_help">Параметры из общих настроек. Они применяются, если конфиг не задаёт своё значение.</string>
-    <string name="cfg_mode_help">Режим xHTTP (оставьте пустым, если не знаете)</string>
+    <string name="cfg_mode_help">Способ обмена данными с сервером. Оставьте «Определено системой», если не знаете.</string>
     <string name="cfg_dns_type_help">Протокол запроса к DNS-серверу. Изменение может потребовать другой порт или адрес.</string>
     <string name="cfg_copy_json">Копировать полный JSON</string>
     <string name="cfg_json_secret_hint">Полный JSON содержит ключи доступа. Буфер обмена доступен другим приложениям.</string>
