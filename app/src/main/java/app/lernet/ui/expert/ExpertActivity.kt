@@ -163,7 +163,7 @@ internal fun ExpertActivity(
             }
             item(key = "traffic") {
                 ActivityTrafficPanel(stringResource(R.string.expert_events_title), connections,
-                    Modifier.fillMaxWidth().height(panelHeight), runtime.tun) { connection ->
+                    Modifier.fillMaxWidth().height(panelHeight), runtime.tun, anyRecorded = runtime.connections.isNotEmpty()) { connection ->
                     ActivityTrafficRow(connection, runtime, rates, now) { detail = connection }
                 }
             }
@@ -339,6 +339,7 @@ private fun ActivityTrafficPanel(
     flows: List<ExpertConnectionObservation>,
     modifier: Modifier,
     identity: Any?,
+    anyRecorded: Boolean = flows.isNotEmpty(),
     row: @Composable (ExpertConnectionObservation) -> Unit,
 ) {
     val list = rememberLazyListState()
@@ -367,20 +368,20 @@ private fun ActivityTrafficPanel(
                         live = true
                     }
                 }
-            }, label = { Text(if (live) "● Обновляется" else "↑ К новым") })
+            }, label = { Text(if (live) app.lernet.engine.text.ExpertWords.FOLLOW_ON_CHIP else app.lernet.engine.text.ExpertWords.FOLLOW_OFF_CHIP) })
         }
         Row(Modifier.weight(1f).fillMaxWidth()) {
             LazyColumn(
                 Modifier.weight(1f).fillMaxHeight(), state = list,
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                if (flows.isEmpty()) item { Text(stringResource(R.string.expert_activity_empty)) }
+                if (flows.isEmpty()) item { Text(if (anyRecorded) app.lernet.engine.text.ExpertWords.ACTIVITY_NO_MATCH else stringResource(R.string.expert_activity_empty)) }
                 items(flows, key = { "${it.identity}:${it.id}" }) { row(it) }
             }
             ActivityScrollRail(list)
         }
         Text(
-            if (live) "Новые соединения сверху · слежение включено" else "Слежение приостановлено",
+            if (live) app.lernet.engine.text.ExpertWords.FOLLOW_ON else app.lernet.engine.text.ExpertWords.FOLLOW_OFF,
             style = MaterialTheme.typography.labelSmall
         )
     }

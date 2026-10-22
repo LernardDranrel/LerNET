@@ -15,6 +15,11 @@ object ExpertWords {
     const val FILTER_ACTIVE = "Активные"
     const val FILTER_LONG = "Длительные"
     const val FILTER_CLOSED = "Завершённые"
+    const val ACTIVITY_NO_MATCH = "Подходящих соединений нет. Измени поиск или фильтр."
+    const val FOLLOW_ON_CHIP = "● Обновляется"
+    const val FOLLOW_OFF_CHIP = "↑ К новым"
+    const val FOLLOW_ON = "Новые соединения сверху · слежение включено"
+    const val FOLLOW_OFF = "Слежение приостановлено · «К новым» вернёт к свежим"
     const val ACTIVITY_EMPTY = "Соединений пока нет. Когда Эксперт включён, здесь появятся приложение, адрес и почему выбран такой путь."
 
     /** «ещё нет», «2 из 3» — the same short value on the phone tile and the Windows one. */

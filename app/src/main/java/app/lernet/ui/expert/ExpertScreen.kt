@@ -761,8 +761,18 @@ private fun ExpertTile(title: String, value: String, modifier: Modifier, warn: B
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
-        Text("$value ›", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
-            color = if (warn) scheme.tertiary else scheme.onSurface, maxLines = 1)
+        // A narrow phone cut «0 активных ›» to «0 активных»: the value now shrinks a little to keep its arrow on one line.
+        androidx.compose.foundation.text.BasicText(
+            "$value ›",
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                color = if (warn) scheme.tertiary else scheme.onSurface,
+            ),
+            maxLines = 1,
+            autoSize = androidx.compose.foundation.text.TextAutoSize.StepBased(
+                minFontSize = androidx.compose.ui.unit.TextUnit(12f, androidx.compose.ui.unit.TextUnitType.Sp), maxFontSize = MaterialTheme.typography.titleMedium.fontSize,
+            ),
+        )
     }
 }
 

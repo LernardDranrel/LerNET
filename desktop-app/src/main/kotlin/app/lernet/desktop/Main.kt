@@ -966,11 +966,11 @@ internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boole
                     Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) { Text("L", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold) }
                 }
                 Spacer(Modifier.height(20.dp))
-                Text("Конфигов пока нет", style = MaterialTheme.typography.headlineSmall, color = desktopColors.onBackground)
+                Text(app.lernet.engine.text.HomeWords.NO_CONFIGS_TITLE, style = MaterialTheme.typography.headlineSmall, color = desktopColors.onBackground)
                 Spacer(Modifier.height(8.dp))
-                Text("Добавьте ссылку на сервер, файл конфига или подписку от вашего VPN-сервиса. После этого здесь появится кнопка подключения.", color = muted, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Text(app.lernet.engine.text.HomeWords.NO_CONFIGS_BODY, color = muted, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 Spacer(Modifier.height(20.dp))
-                Button(onClick = { onImport(null) }) { Text("+ Добавить конфиг") }
+                Button(onClick = { onImport(null) }) { Text(app.lernet.engine.text.HomeWords.ADD_CONFIG) }
             }
         }
         return
@@ -1706,7 +1706,8 @@ internal fun Diagnostics(
     }
     Column {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(Modifier.width(320.dp)) {
+            // 320 dp broke «Технический журнал» onto two lines inside its segment.
+            Box(Modifier.width(400.dp)) {
                 SegmentedChoice(listOf("requests" to "Запросы", "log" to "Технический журнал"), display) { display = it }
             }
             Spacer(Modifier.weight(1f))

@@ -321,6 +321,8 @@ class PlatformTextParityTest {
     fun configListWordsMatchWindows() {
         val w = app.lernet.engine.text.ConfigListWords
         same("drawer_title", w.TITLE)
+        same("empty_profiles", app.lernet.engine.text.HomeWords.NO_CONFIGS_TITLE)
+        same("expert_activity_empty", app.lernet.engine.text.ExpertWords.ACTIVITY_EMPTY)
         assertEquals(strings.getValue("drawer_folder_probe").replace("%1\$d", "1").replace("%2\$d", "2"), w.folderAnswer(1, 2))
         assertEquals(strings.getValue("drawer_folder_checking").replace("%1\$d", "1").replace("%2\$d", "2"), w.folderChecking(1, 2))
         assertEquals("1 конфиг", w.configCount(1))

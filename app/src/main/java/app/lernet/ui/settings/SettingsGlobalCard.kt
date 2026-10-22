@@ -212,7 +212,9 @@ internal fun TlsHandshakeCard(state: SettingsUiState, onIntent: (SettingsIntent)
         }
         SettingHelp(stringResource(R.string.settings_tls_fragment_help))
         Text(stringResource(R.string.settings_reality_key_share), style = MaterialTheme.typography.labelLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Three chips do not fit a 390 dp phone in one row: «Короткий» broke into «Коро/ткий». They wrap instead.
+        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(
                 app.lernet.engine.compile.RealityKeyShare.AUTO to R.string.settings_key_share_auto,
                 app.lernet.engine.compile.RealityKeyShare.HYBRID to R.string.settings_key_share_hybrid,

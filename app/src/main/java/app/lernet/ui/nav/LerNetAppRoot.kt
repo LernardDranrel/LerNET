@@ -233,6 +233,10 @@ fun LerNetAppRoot() {
                     pendingImportGroupId = null
                 },
                 showCrashBanner = homeState.offerLastLogs && !crashDialogOpen,
+                onAddConfig = {
+                    pendingImportGroupId = null
+                    navController.navigate(Dest.Import.route)
+                },
             )
             }
             // Audit G6: one snackbar queue for the whole app. Expert shows it above its bottom menu itself.
@@ -413,6 +417,7 @@ private fun AppNavHost(
     onShareLogs: () -> Unit,
     onImported: (List<String>) -> Unit,
     showCrashBanner: Boolean,
+    onAddConfig: () -> Unit = {},
     expertSection: ExpertSection,
     onExpertSection: (ExpertSection) -> Unit,
     isExpert: () -> Boolean = { false },
@@ -459,6 +464,7 @@ private fun AppNavHost(
                 onOpenExpert = { navController.navigate(Dest.Expert.route) { launchSingleTop = true } },
                 expertActive = expertActive,
                 showCrashBanner = showCrashBanner,
+                onAddConfig = onAddConfig,
             )
         }
         composable(Dest.Expert.route) {

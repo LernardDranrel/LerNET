@@ -6,6 +6,12 @@ package app.lernet.engine.text
  * the value here, so the phone and Windows cannot drift apart again.
  */
 object HomeWords {
+    /** The home page without a single config: the same title, text and button on both platforms. */
+    const val NO_CONFIGS_TITLE = "Конфигов пока нет"
+    const val NO_CONFIGS_BODY = "Добавьте ссылку на сервер, файл конфига или подписку от вашего VPN-сервиса. " +
+        "После этого здесь появится кнопка подключения."
+    const val ADD_CONFIG = "+ Добавить конфиг"
+
     const val TAP_CONNECT = "Нажмите, чтобы подключить"
     const val TAP_DISCONNECT = "Нажмите, чтобы отключить"
 

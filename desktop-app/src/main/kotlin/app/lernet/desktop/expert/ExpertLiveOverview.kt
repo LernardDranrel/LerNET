@@ -332,7 +332,7 @@ private fun TrafficColumn(
                             live = true
                         }
                     }
-                }, label = { Text(if (live) "● Обновляется" else "↑ К новым") })
+                }, label = { Text(if (live) app.lernet.engine.text.ExpertWords.FOLLOW_ON_CHIP else app.lernet.engine.text.ExpertWords.FOLLOW_OFF_CHIP) })
             }
             HorizontalDivider(color = ExpertColors.border)
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -345,7 +345,7 @@ private fun TrafficColumn(
                             Text(
                                 when {
                                     state.connections.isEmpty() -> app.lernet.engine.text.ExpertWords.ACTIVITY_EMPTY
-                                    else -> "Подходящих соединений нет. Измени поиск или фильтр."
+                                    else -> app.lernet.engine.text.ExpertWords.ACTIVITY_NO_MATCH
                                 },
                                 color = ExpertColors.muted, fontSize = 13.sp
                             )
@@ -358,7 +358,7 @@ private fun TrafficColumn(
                 VerticalScrollbar(rememberScrollbarAdapter(list), Modifier.align(Alignment.CenterEnd).fillMaxHeight())
             }
             Text(
-                if (live) "Новые соединения сверху · слежение включено" else "Слежение приостановлено · «К новым» вернёт к свежим",
+                if (live) app.lernet.engine.text.ExpertWords.FOLLOW_ON else app.lernet.engine.text.ExpertWords.FOLLOW_OFF,
                 color = ExpertColors.muted, fontSize = 12.sp
             )
         }

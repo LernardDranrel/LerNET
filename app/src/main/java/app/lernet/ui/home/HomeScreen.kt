@@ -105,6 +105,7 @@ fun HomeScreen(
     expertActive: Boolean = false,
     showCrashBanner: Boolean = true,
     modifier: Modifier = Modifier,
+    onAddConfig: () -> Unit = onOpenDrawer,
 ) {
     val snapshot = state.snapshot
     var confirmExit by remember { mutableStateOf(false) }
@@ -147,6 +148,7 @@ fun HomeScreen(
             onOpenDiag = onOpenDiag,
             showCrashBanner = showCrashBanner,
             modifier = Modifier.padding(padding),
+            onAddConfig = onAddConfig,
         )
     }
 }
@@ -161,8 +163,14 @@ private fun HomeBody(
     onOpenDiag: () -> Unit,
     showCrashBanner: Boolean,
     modifier: Modifier = Modifier,
+    onAddConfig: () -> Unit = onOpenDrawer,
 ) {
     val snapshot = state.snapshot
+    // As on Windows: no configs — no power button and no link card, only what to add and the button that adds it.
+    if (state.profiles.isEmpty() && !isSessionActive(snapshot.state)) {
+        NoConfigsHome(onAddConfig, modifier)
+        return
+    }
     val context = LocalContext.current
     val shareFailed = stringResource(R.string.logs_share_failed)
     val metrics = rememberCompactMetrics()
@@ -813,4 +821,18 @@ private fun ProxyModeNote() {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.testTag("home_proxy_note"),
     )
+}
+
+@Composable
+private fun NoConfigsHome(onAddConfig: () -> Unit, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.layout.Box(modifier.fillMaxSize().padding(24.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
+        Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            app.lernet.ui.components.LerNetLogo(size = 72.dp)
+            Text(app.lernet.engine.text.HomeWords.NO_CONFIGS_TITLE, style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.testTag("home_no_configs"))
+            Text(app.lernet.engine.text.HomeWords.NO_CONFIGS_BODY, style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            androidx.compose.material3.Button(onClick = onAddConfig, modifier = Modifier.heightIn(min = 48.dp)) { Text(app.lernet.engine.text.HomeWords.ADD_CONFIG) }
+        }
+    }
 }
