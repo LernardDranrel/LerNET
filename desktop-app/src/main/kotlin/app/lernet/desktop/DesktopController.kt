@@ -128,11 +128,13 @@ class DesktopController(
         }
     }
     private val loaded = runCatching { store.load() }
+    internal val sessionMarks = DesktopSessionMarks(store.workDirectory())
     private val mutable = MutableStateFlow(
         DesktopUiState(
             saved = loaded.getOrDefault(StoredState()),
             message = loaded.exceptionOrNull()?.let { app.lernet.engine.text.UserText.withReason("Не удалось прочитать профили", it) }
-                ?: if (store.recoveredFromBackup) "Профили восстановлены из резервной копии" else "",
+                ?: if (store.recoveredFromBackup) "Профили восстановлены из резервной копии"
+                else if (sessionMarks.previousSessionCrashed) DesktopSessionMarks.CRASH_NOTICE else "",
         ),
     )
     val state: StateFlow<DesktopUiState> = mutable
@@ -747,6 +749,23 @@ class DesktopController(
         return change { it.copy(proxyUsername = user, proxyPassword = password) }
     }
     fun setCrashGuard(enabled: Boolean) = change { it.copy(crashGuard = enabled) }
+
+    /** «Запускать при входе в систему»; Windows' task follows the setting, a refusal is said on screen. */
+    fun setAutostart(enabled: Boolean) = setAutostartForTest(enabled) { WindowsAutostart.sync(it) }
+
+    internal fun setAutostartForTest(enabled: Boolean, sync: (Boolean) -> WindowsAutostart.Outcome) {
+        if (!change { it.copy(autostart = enabled) }) return
+        syncAutostart(sync)
+    }
+
+    /** At start and after the setting changes: make the Task Scheduler entry match. */
+    fun syncAutostart(sync: (Boolean) -> WindowsAutostart.Outcome = { WindowsAutostart.sync(it) }) {
+        val enabled = state.value.saved.autostart
+        thread(name = "lernet-windows-autostart", isDaemon = true) {
+            val outcome = sync(enabled)
+            if (outcome is WindowsAutostart.Outcome.Failed) mutable.update { it.copy(message = outcome.message) }
+        }
+    }
     fun setDefaultDnsPolicy(policy: DnsPolicy) = change { it.copy(defaultDnsPolicy = policy.name) }
     fun setTlsHandshake(recordFragment: Boolean, keyShare: app.lernet.engine.compile.RealityKeyShare) =
         change { it.copy(tlsRecordFragment = recordFragment, realityKeyShare = keyShare.storage) }
@@ -912,6 +931,7 @@ class DesktopController(
     }
 
     fun connect() {
+        sessionMarks.vpnWanted()
         synchronized(connectLock) {
             if (expertReserved.get()) connectGeneration.incrementAndGet()
         }
@@ -1180,6 +1200,7 @@ class DesktopController(
     }
 
     fun disconnect() {
+        sessionMarks.vpnStopped()
         synchronized(connectLock) {
             desiredConnection = false
             connectGeneration.incrementAndGet()
@@ -1296,8 +1317,10 @@ class DesktopController(
             tunnel.stop(waitForExit = true)
             releaseGuard()
         }
+        sessionMarks.closedCleanly()
         monitorOpen = false
         monitorThread.interrupt()
+        subscriptionSchedule?.interrupt()
         tracer.close()
         probePool.shutdownNow()
     }

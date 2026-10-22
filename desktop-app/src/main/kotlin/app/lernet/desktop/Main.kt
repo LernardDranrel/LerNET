@@ -133,24 +133,32 @@ internal val desktopTypography = Typography(
 
 fun main(args: Array<String>) {
     val startupCheck = args.firstOrNull { it.startsWith("--verify-startup=") }?.substringAfter('=')
+    // Started by «Запускать при входе в систему»: open in the tray and bring back a VPN that was left on.
+    val autostart = WindowsAutostart.ARGUMENT in args
     var startupFallbackMessage: String? = null
     if (startupCheck == null && System.getProperty("os.name").startsWith("Windows")) {
         val saved = runCatching { DesktopStore().load() }.getOrDefault(StoredState())
+        if (autostart && !saved.autostart) return
         if (DesktopStartup.needsElevation(saved, WindowsElevation.isElevated)) {
-            val elevation = WindowsElevation.relaunchAsAdministrator()
+            val elevation = WindowsElevation.relaunchAsAdministrator(if (autostart) WindowsAutostart.ARGUMENT else null)
             if (elevation.isSuccess) return
             startupFallbackMessage = "Не удалось запустить VPN от имени администратора. Доступен локальный прокси: " +
                 (elevation.exceptionOrNull()?.let { app.lernet.engine.text.UserText.of(it, "запрос прав отменён") } ?: "запрос прав отменён")
         }
     }
-    desktopApplication(startupCheck, startupFallbackMessage)
+    desktopApplication(startupCheck, startupFallbackMessage, autostart)
 }
 
-private fun desktopApplication(startupCheck: String?, startupFallbackMessage: String?) = application {
+private fun desktopApplication(startupCheck: String?, startupFallbackMessage: String?, autostart: Boolean = false) = application {
     val controller = remember {
         DesktopController().also {
             startupFallbackMessage?.let(it::showMessage)
-            if (startupCheck == null) it.startSubscriptionSchedule()
+            if (startupCheck == null) {
+                it.startSubscriptionSchedule()
+                it.syncAutostart()
+                // The VPN comes back only if the user left it on; «Отключить» clears that.
+                if (autostart && it.sessionMarks.resumeWanted) it.connect()
+            }
         }
     }
     val expert = remember { if (startupCheck == null) DesktopExpertController(controller) else null }
@@ -168,7 +176,7 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
             closeController()
         }
     }
-    var visible by remember { mutableStateOf(true) }
+    var visible by remember { mutableStateOf(!autostart) }
     var networkWindowOpen by remember { mutableStateOf(false) }
     val windowState = rememberWindowState(size = DpSize(1180.dp, 760.dp))
     val tunnel by controller.tunnel.state.collectAsState()
@@ -2003,6 +2011,12 @@ internal fun Settings(saved: StoredState, controller: DesktopController, onReque
                 Button(onClick = { controller.setJournalMaxMb(journalMb.toInt()) },
                     enabled = journalMb.toIntOrNull()?.let { it in 1..500 && it != saved.journalMaxMb } == true) { Text("Сохранить") }
             }
+        }
+        Panel {
+            SettingHeading("ЗАПУСК", "Автозапуск", "LerNET сам возвращает VPN после перезагрузки компьютера, как и на телефоне.")
+            SecurityToggle("Запускать при входе в систему",
+                "LerNET запустится в трее и, если VPN был включён, сам подключит его снова. Кнопка «Отключить» отменяет это до следующего подключения.",
+                saved.autostart, controller::setAutostart)
         }
         if (advanced) Panel {
             // Only the bundled, hash-checked core runs: the leak guard lets exactly this file through Windows.

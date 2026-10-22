@@ -109,6 +109,9 @@
     <string name="hint_subscription">https://…/sub</string>
     <string name="import_action">Сохранить</string>
     <string name="importing">Импорт…</string>
+    <string name="settings_startup">Запуск</string>
+    <string name="settings_boot_restore">Включать VPN после перезагрузки</string>
+    <string name="settings_boot_restore_help">Если VPN был включён, LerNET сам подключит его снова после перезагрузки телефона. Кнопка «Отключить» отменяет это до следующего подключения. Надёжнее включить в настройках Android «Постоянный VPN» для LerNET: тогда система сама запустит VPN и не пустит трафик мимо него, пока LerNET не подключится.</string>
     <string name="cfg_subscription">Подписка</string>
     <string name="cfg_subscription_why">Конфиг пришёл из подписки. При обновлении ваш выбор, переименование и правки сохраняются.</string>
     <string name="cfg_subscription_refresh">Обновить подписку</string>

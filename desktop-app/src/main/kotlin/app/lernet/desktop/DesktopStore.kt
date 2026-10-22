@@ -98,6 +98,8 @@ data class StoredState(
     val journalMaxMb: Int = 100,
     /** VPN mode: Windows keeps traffic closed outside LerNET while the core restarts. */
     val crashGuard: Boolean = true,
+    /** «Запускать при входе в систему»: start in the tray at sign-in and bring back a VPN left on. */
+    val autostart: Boolean = true,
     /** VPN mode: Windows may not ask DNS or use IPv6 past the VPN adapter. */
     val strictRoute: Boolean = true,
     /** Own login/password for the local proxy; empty means a new random pair for every connection. */

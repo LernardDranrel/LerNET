@@ -16,13 +16,14 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 object SimpleServiceRestorer {
-    @Volatile private var restore: (() -> Unit)? = null
+    @Volatile private var restore: ((Boolean) -> Unit)? = null
     @Volatile private var clear: (() -> Unit)? = null
     @Volatile private var clearForExpert: (() -> Unit)? = null
-    fun register(restore: () -> Unit, clear: () -> Unit, clearForExpert: () -> Unit) {
+    fun register(restore: (Boolean) -> Unit, clear: () -> Unit, clearForExpert: () -> Unit) {
         this.restore = restore; this.clear = clear; this.clearForExpert = clearForExpert
     }
-    fun restore() { restore?.invoke() }
+    /** [offerIfEmpty]: Android started LerNET as always-on VPN; with nothing saved, offer to connect. */
+    fun restore(offerIfEmpty: Boolean = true) { restore?.invoke(offerIfEmpty) }
     fun clear() { clear?.invoke() }
     fun clearForExpert() { clearForExpert?.invoke() }
 }
@@ -39,7 +40,7 @@ class SimpleSessionCoordinator @Inject constructor(
         SimpleServiceRestorer.register(restore = ::restore, clear = { store.write(null) }, clearForExpert = store::clearForExpert)
     }
 
-    @Synchronized private fun restore() {
+    @Synchronized private fun restore(offerIfEmpty: Boolean) {
         if (restoreJob?.isActive == true) return
         restoreJob = scope.launch(Dispatchers.IO) {
             try {
@@ -52,7 +53,7 @@ class SimpleSessionCoordinator @Inject constructor(
                 }
                 if (saved == null || outdated) {
                     // Started as always-on VPN with nothing to restore: offer to connect instead of staying silent.
-                    if (!ExpertServiceRestorer.shouldRestore() && !ExpertVpnSession.isOwned) AlwaysOnOffer.show(context)
+                    if (offerIfEmpty && !ExpertServiceRestorer.shouldRestore() && !ExpertVpnSession.isOwned) AlwaysOnOffer.show(context)
                     return@launch
                 }
                 if (VpnService.prepare(context) != null || ExpertServiceRestorer.shouldRestore() || ExpertVpnSession.isOwned) return@launch

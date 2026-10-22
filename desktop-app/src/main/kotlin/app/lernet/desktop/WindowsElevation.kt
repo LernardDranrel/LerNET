@@ -32,14 +32,15 @@ object WindowsElevation {
         runCatching { readTokenElevation() }.getOrDefault(false)
     }
 
-    fun relaunchAsAdministrator(): Result<Unit> = runCatching {
+    /** [arguments] go to the new copy too: an autostart relaunch must stay an autostart. */
+    fun relaunchAsAdministrator(arguments: String? = null): Result<Unit> = runCatching {
         check(!isElevated) { "LerNET уже запущен от имени администратора" }
         val command = ProcessHandle.current().info().command().orElse("")
         val executable = Path.of(command).toAbsolutePath().normalize()
         check(executable.fileName.toString().equals("LerNET.exe", ignoreCase = true) && Files.isRegularFile(executable)) {
             "Запрос прав доступен в собранном LerNET.exe"
         }
-        val result = Shell32.INSTANCE.ShellExecute(null, "runas", executable.toString(), null,
+        val result = Shell32.INSTANCE.ShellExecute(null, "runas", executable.toString(), arguments,
             executable.parent.toString(), 1).toLong()
         check(result > 32) {
             if (result == 5L) "Запрос прав администратора отклонён. Продолжаем в режиме локального прокси."
