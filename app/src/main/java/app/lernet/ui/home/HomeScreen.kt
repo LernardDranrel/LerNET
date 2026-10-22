@@ -815,12 +815,18 @@ private fun SkippedConditionsCard(rules: List<String>) {
 
 @Composable
 private fun ProxyModeNote() {
-    Text(
-        stringResource(R.string.home_proxy_mode_note),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.testTag("home_proxy_note"),
-    )
+    // In a quiet card, as on Windows: a bare line under the config looked like part of the config line.
+    androidx.compose.material3.Surface(
+        shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(
+            stringResource(R.string.home_proxy_mode_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp).testTag("home_proxy_note"),
+        )
+    }
 }
 
 @Composable

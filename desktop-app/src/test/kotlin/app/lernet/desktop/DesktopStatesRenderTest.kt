@@ -162,6 +162,8 @@ class DesktopStatesRenderTest {
     @Test fun holdingNarrow() = render("win-holding-1024", 1024, 720, preview = holding())
     @Test fun failedWide() = render("win-error-wide", 1440, 900, preview = failed)
     @Test fun failedNarrow() = render("win-error-1024", 1024, 720, preview = failed)
+    /** The pair of the phone's proxy-connected-full: the same note under the config line. */
+    @Test fun proxyConnected() = render("win-proxy-connected-wide", 1440, 900, sample().copy(mode = "PROXY"), connected)
     @Test fun noConfigs() = render("win-no-configs", 1280, 800, StoredState(), off)
     @Test fun rules() = render("win-rules", 1440, 900, preview = off.copy(page = "ROUTES"))
     @Test fun journal() = render("win-journal", 1440, 900, preview = connected.copy(page = "DIAGNOSTICS"))

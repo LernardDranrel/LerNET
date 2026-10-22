@@ -78,7 +78,7 @@ internal fun ProfileLine(
                     ).joinToString(" · ")
                 }
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = if (empty) 4 else 1, overflow = TextOverflow.Ellipsis)
+                    maxLines = if (empty) 4 else 3, overflow = TextOverflow.Ellipsis) // «…· автосмена · режим прокси» was cut to «папка «Работа» · …»
             }
             if (onRules != null) {
                 TextButton(onRules, Modifier.heightIn(min = 48.dp).testTag("home_profile_rules")) {
