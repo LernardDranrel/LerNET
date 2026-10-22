@@ -1898,9 +1898,9 @@ internal fun Settings(saved: StoredState, controller: DesktopController, onReque
                 color = muted, style = MaterialTheme.typography.bodyMedium)
             HorizontalDivider(color = desktopColors.outlineVariant)
             SettingHeading("DNS", "Кто определяет адреса сайтов",
-                "DNS переводит имя сайта в IP-адрес. Выберите источник настройки рядом с адресом сервера.")
+                "DNS переводит имя сайта в IP-адрес. Выбор здесь получают новые конфиги; у уже добавленных DNS меняется в настройках конфига.")
             Box(Modifier.fillMaxWidth()) {
-                SegmentedChoice(listOf("TUNNEL" to "Через VPN", "UNDERLAY" to "Напрямую", "PROFILE" to "Из конфига"), dnsPolicy) { dnsPolicy = it }
+                SegmentedChoice(listOf("TUNNEL" to "Через VPN", "UNDERLAY" to "DNS сети", "PROFILE" to "Из конфига"), dnsPolicy) { dnsPolicy = it }
             }
             OutlinedTextField(directDns, { directDns = it }, modifier = Modifier.fillMaxWidth(),
                 label = { Text(if (dnsPolicy == "PROFILE") "Резервный DNS · IPv4" else "DNS-сервер · IPv4") },
@@ -1971,13 +1971,14 @@ internal fun Settings(saved: StoredState, controller: DesktopController, onReque
             HorizontalDivider(Modifier.padding(vertical = 5.dp), color = desktopColors.outlineVariant)
             Text("Подробность журнала", fontWeight = FontWeight.SemiBold)
             Box(Modifier.fillMaxWidth()) {
-                SegmentedChoice(listOf("debug" to "debug", "info" to "info", "warn" to "warn", "error" to "error"), logLevel) { logLevel = it }
+                // Same three levels and words as on Android; «Предупреждения» by default on both.
+                SegmentedChoice(listOf("warn" to "Предупреждения", "info" to "Инфо", "debug" to "Отладка"), logLevel) { logLevel = it }
             }
             Text(when (logLevel) {
                 "debug" -> "Подробная диагностика для поиска ошибки. Создаёт больше записей."
-                "warn" -> "Только предупреждения и ошибки; меньше подробностей о подключении."
-                "error" -> "Только ошибки; успешные события подключения не записываются."
-                else -> "Основные события, предупреждения и ошибки. Подходит для повседневной работы."
+                "info" -> "Основные события, предупреждения и ошибки. В журнале больше подробностей о ваших подключениях."
+                "error" -> "Сейчас записываются только ошибки (настройка из прошлой версии). Выберите уровень, чтобы сменить."
+                else -> "По умолчанию. Только предупреждения и ошибки: в журнале меньше сведений о том, куда вы подключаетесь."
             }, color = muted, fontSize = 12.sp)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Button(onClick = {

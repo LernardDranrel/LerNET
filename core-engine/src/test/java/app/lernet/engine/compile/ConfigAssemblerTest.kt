@@ -20,6 +20,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Test
+import app.lernet.engine.compile.EnginePlatform
 
 class ConfigAssemblerTest {
     private val json = Json { ignoreUnknownKeys = true }
@@ -42,6 +43,18 @@ class ConfigAssemblerTest {
     }
 
     @Test
+    fun vpnTunCarriesIpv6TheSameWayOnBothPlatforms() {
+        val addresses = EnginePlatform.entries.map { platform ->
+            val assembled = ConfigAssembler.assemble(sampleOutbound(), catchAllProxy(), RunMode.FULL_VPN, "warn", platform = platform)
+            assertThat(assembled.isValid).isTrue()
+            json.parseToJsonElement(assembled.json).jsonObject["inbounds"]!!.jsonArray.first()
+                .jsonObject["address"]!!.jsonArray.map { it.jsonPrimitive.content }
+        }
+        assertThat(addresses.distinct()).hasSize(1)
+        assertThat(addresses.first()).contains(ConfigAssembler.TUN_ADDRESS_V6)
+    }
+
+    @Test
     fun vpnConfigHasTunDnsAndSingleProxyOutbound() {
         val assembled = ConfigAssembler.assemble(sampleOutbound(), catchAllProxy(), RunMode.FULL_VPN, "warn")
         assertThat(assembled.isValid).isTrue()
@@ -60,7 +73,8 @@ class ConfigAssemblerTest {
         assertThat(inbound.containsKey("interface_name")).isFalse()
         assertThat(inbound["mtu"]?.jsonPrimitive?.content).isEqualTo(ConfigAssembler.TUN_MTU.toString())
         val tunAddrs = inbound["address"]!!.jsonArray.map { it.jsonPrimitive.content }
-        assertThat(tunAddrs).containsExactly(ConfigAssembler.TUN_ADDRESS)
+        // IPv6 goes into the VPN on Android too, as on Windows and in Expert mode.
+        assertThat(tunAddrs).containsExactly(ConfigAssembler.TUN_ADDRESS, ConfigAssembler.TUN_ADDRESS_V6).inOrder()
     }
 
     @Test
@@ -407,7 +421,7 @@ class ConfigAssemblerTest {
         val tunAddrs = root["inbounds"]!!.jsonArray.first().jsonObject["address"]!!.jsonArray.map {
             it.jsonPrimitive.content
         }
-        assertThat(tunAddrs).containsExactly("172.19.0.1/30")
+        assertThat(tunAddrs).containsExactly("172.19.0.1/30", "fdfe:dcba:9876::1/126").inOrder()
         assertNoLegacyDns(assembled.json)
         File("build/lernet-assembled-dns-remote.json").writeText(dns.toString())
     }

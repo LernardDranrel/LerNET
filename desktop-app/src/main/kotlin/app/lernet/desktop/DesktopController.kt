@@ -131,7 +131,7 @@ class DesktopController(
     internal val sessionMarks = DesktopSessionMarks(store.workDirectory())
     private val mutable = MutableStateFlow(
         DesktopUiState(
-            saved = loaded.getOrDefault(StoredState()),
+            saved = loaded.getOrDefault(StoredState()).withExplicitDns(),
             message = loaded.exceptionOrNull()?.let { app.lernet.engine.text.UserText.withReason("Не удалось прочитать профили", it) }
                 ?: if (store.recoveredFromBackup) "Профили восстановлены из резервной копии"
                 else if (sessionMarks.previousSessionCrashed) DesktopSessionMarks.CRASH_NOTICE else "",
@@ -1323,7 +1323,7 @@ class DesktopController(
                 mutable.update { it.copy(message = "Файл профилей повреждён. Изменения не сохранены.") }
                 return false
             }
-            val next = block(mutable.value.saved)
+            val next = block(mutable.value.saved).withExplicitDns()
             runCatching { store.save(next) }.onFailure { error ->
                 mutable.update { it.copy(message = app.lernet.engine.text.UserText.withReason("Не удалось сохранить", error)) }
                 return false
@@ -1360,6 +1360,15 @@ internal fun guardProblemText(status: SimpleGuardStatus): String? = when (status
         if (status.networkClosed) SecurityTexts.GUARD_NETWORK_CLOSED else SecurityTexts.GUARD_PROBLEM
     else -> null
 }
+
+/**
+ * Every config carries its own DNS choice, as on Android. Older Windows builds stored «SYSTEM» (follow the global
+ * setting): it becomes the global value once, so changing the global setting later cannot silently move every
+ * config's DNS outside the VPN, and an archive taken to Android keeps the same DNS.
+ */
+internal fun StoredState.withExplicitDns(): StoredState =
+    if (profiles.none { it.dnsPolicy == "SYSTEM" }) this
+    else copy(profiles = profiles.map { if (it.dnsPolicy == "SYSTEM") it.copy(dnsPolicy = defaultDnsPolicy) else it })
 
 /** Import result line; unused parts of the config are named on screen, not only in the journal. */
 internal fun importMessage(added: Int, unusedParts: List<String>, skipped: String? = null): String = listOfNotNull(

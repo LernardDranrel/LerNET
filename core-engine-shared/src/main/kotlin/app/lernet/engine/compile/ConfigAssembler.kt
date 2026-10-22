@@ -47,6 +47,7 @@ object ConfigAssembler {
     /** Internal listener for LerNET's own requests (updates, subscriptions, checks). Never without a password. */
     const val APP_PROXY_PORT = 2081
     const val ANDROID_PROBE_URL = "https://cp.cloudflare.com/generate_204"
+    const val TUN_ADDRESS_V6 = "fdfe:dcba:9876::1/126"
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -261,7 +262,9 @@ object ConfigAssembler {
                     "address",
                     buildJsonArray {
                         add(JsonPrimitive(TUN_ADDRESS))
-                        if (platform == EnginePlatform.WINDOWS) add(JsonPrimitive("fdfe:dcba:9876::1/126"))
+                        // IPv6 goes into the VPN on both platforms (Android used to drop it, Windows tunnelled it).
+                        // DNS stays ipv4_only, so sites are still reached over IPv4; nothing leaks either way.
+                        add(JsonPrimitive(TUN_ADDRESS_V6))
                     },
                 )
                 put("mtu", defaults.tunMtu.coerceIn(1280, 9000))
