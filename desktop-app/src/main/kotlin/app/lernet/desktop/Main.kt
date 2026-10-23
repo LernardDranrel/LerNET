@@ -651,7 +651,8 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
                     TextButton(onClick = controller::dismissDeleted) { Text("Закрыть") }
                 }
             }
-            Spacer(Modifier.height(18.dp))
+            // Secondary pages: no page title — tight gap under the buttons (journal had a large empty band).
+            Spacer(Modifier.height(if (tab == Tab.PROFILES) 18.dp else 8.dp))
             when (tab) {
                 Tab.PROFILES -> ProfileHome(ui.saved, tunnel, ui.busy, ui.probes, ui.tunnelLatencyMs, trace, controller,
                     detail = homeDetail(ui, tunnel, holding),
@@ -1745,8 +1746,9 @@ internal fun Diagnostics(
     val rows = remember(history, diagnostics.connections) {
         (diagnostics.connections + history).distinctBy { it.id }.sortedByDescending { it.lastSeenAt.takeIf { t -> t > 0 } ?: Long.MAX_VALUE }
     }
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    // Pack content under the nav buttons: fill the page, list takes the rest (no fillMaxSize gap at the top).
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             // 320 dp broke «Технический журнал» onto two lines inside its segment.
             Box(Modifier.width(400.dp)) {
                 SegmentedChoice(listOf("requests" to "Запросы", "log" to "Технический журнал"), display) { display = it }
@@ -1773,7 +1775,7 @@ internal fun Diagnostics(
             Text(diagnostics.error, color = desktopColors.error, fontSize = 12.sp)
         }
         if (display == "log") {
-            Card(colors = CardDefaults.cardColors(containerColor = panel)) {
+            Card(Modifier.weight(1f).fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = panel)) {
                 SelectionContainer {
                     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         items(tunnel.logs.reversed()) { line -> Text(line, color = muted, fontSize = 12.sp) }
@@ -1793,7 +1795,7 @@ internal fun Diagnostics(
         Spacer(Modifier.height(8.dp))
         val labels = remember(rows) { rows.associate { it.id to WindowsProcessIdentity.resolve(it.process) } }
         val visible = rows.filter { journalMatches(it, labels[it.id]?.label.orEmpty(), query, kind) }
-        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             LazyColumn(Modifier.weight(1f).fillMaxHeight().testTag("journal_list"), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 if (visible.isEmpty()) item {
                     Text(when {
