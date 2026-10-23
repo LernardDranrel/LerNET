@@ -1042,8 +1042,9 @@ class ConnectionController(
      */
     /**
      * While connected, check one folder backup at a time at a random 45 s – 5 min pace, also on
-     * mobile data. Through the running tunnel when possible, so the local network does not see
-     * connections to backup servers. Failover then tries verified backups first.
+     * mobile data. Dials that backup directly (outside the live tunnel): a CONNECT through the
+     * active path would say nothing about it. Uses the *candidate*'s handshake budget, never the
+     * active tunnel's. Failover then tries verified backups first.
      */
     private fun armBackupWatch() {
         backupJob?.cancel()
@@ -1063,20 +1064,35 @@ class ConnectionController(
                 } ?: continue
                 val endpoint = profile.selectedOutbound()?.singBoxJson?.let(OutboundEndpoint::parse) ?: continue
                 val access = (AppTraffic.route as? AppTraffic.Route.Through)?.access
-                // Through the tunnel the check is one more connection via the active server; without
-                // the tunnel it is a new connection straight to the backup server. Either way it counts.
-                val budgetFree = if (access != null) {
-                    takeActiveBudget()
-                } else {
-                    val key = HandshakeKey.fromOutboundJson(profile.selectedOutbound()?.singBoxJson)
-                    key == null || handshakeBudget.tryTake(key, clock())
-                }
-                if (!budgetFree) {
-                    LerNetLog.i(TAG, "backup check ${endpoint.label()} skipped: handshake budget is used up")
-                    continue
+                val route = app.lernet.engine.policy.BackupReach.route(
+                    tunnelUp = access != null,
+                    tcp = endpoint.transport == app.lernet.engine.net.ProbeTransport.TCP,
+                    userAsked = false,
+                )
+                // Decide the route *before* taking budget: SKIP must not burn the active tunnel's slot.
+                when (route) {
+                    app.lernet.engine.policy.ReachRoute.SKIP -> {
+                        LerNetLog.i(TAG, "backup check ${endpoint.label()} skipped: BackupReach.SKIP")
+                        continue
+                    }
+                    app.lernet.engine.policy.ReachRoute.TUNNEL -> {
+                        // Legacy: BackupReach no longer returns TUNNEL. Kept so a wrong call cannot NPE.
+                        if (!takeActiveBudget()) {
+                            LerNetLog.i(TAG, "backup check ${endpoint.label()} skipped: handshake budget is used up")
+                            continue
+                        }
+                    }
+                    app.lernet.engine.policy.ReachRoute.DIRECT -> {
+                        val key = HandshakeKey.fromOutboundJson(profile.selectedOutbound()?.singBoxJson)
+                        if (key != null && !handshakeBudget.tryTake(key, clock())) {
+                            LerNetLog.i(TAG, "backup check ${endpoint.label()} skipped: handshake budget is used up")
+                            continue
+                        }
+                    }
                 }
                 val result = try {
-                    probe.check(endpoint, access, userAsked = false)
+                    // Pass access only for a TUNNEL route; DIRECT dials outside even when the tunnel is up.
+                    probe.check(endpoint, if (route == app.lernet.engine.policy.ReachRoute.TUNNEL) access else null, userAsked = false)
                 } catch (error: Exception) {
                     if (error is CancellationException) throw error
                     null

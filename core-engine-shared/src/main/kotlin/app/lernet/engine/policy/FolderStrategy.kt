@@ -105,17 +105,15 @@ enum class ReachRoute { TUNNEL, DIRECT, SKIP }
  * How to check a backup server.
  *
  * A CONNECT through the *live* tunnel to another config's host only proves the active path still
- * works — it says nothing about that backup. So when the tunnel is up we do not use it for
- * candidate/«Проверить» checks: background skips, a user press dials the host directly (outside
- * the tunnel). «Через VPN» for a non-active config is a conscious full check of that config
- * (LinkCheck.DIAGNOSTIC), not a ride on the current tunnel. Failover still dials the chosen
- * backup directly before switching.
+ * works — it says nothing about that backup. So we never use [ReachRoute.TUNNEL] for backups:
+ * background and «Проверить» both dial the host directly (outside the tunnel). Call sites must
+ * take that *candidate*'s handshake budget, never [takeActiveBudget] of the live tunnel.
+ * [ReachRoute.SKIP] is kept for defense: if a caller still asks and gets SKIP, it must not burn
+ * budget. «Через VPN» for a non-active config is a conscious full check (LinkCheck.DIAGNOSTIC).
+ * Failover still dials the chosen backup directly before switching.
  */
 object BackupReach {
-    /** @param tcp kept for shared call sites; UDP cannot CONNECT-preflight either way. */
+    /** @param tunnelUp / tcp / userAsked kept so Android and Windows call sites stay identical. */
     @Suppress("UNUSED_PARAMETER")
-    fun route(tunnelUp: Boolean, tcp: Boolean, userAsked: Boolean): ReachRoute = when {
-        tunnelUp && !userAsked -> ReachRoute.SKIP
-        else -> ReachRoute.DIRECT
-    }
+    fun route(tunnelUp: Boolean, tcp: Boolean, userAsked: Boolean): ReachRoute = ReachRoute.DIRECT
 }

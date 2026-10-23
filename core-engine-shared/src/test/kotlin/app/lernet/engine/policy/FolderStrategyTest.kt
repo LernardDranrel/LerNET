@@ -56,11 +56,24 @@ class FolderStrategyTest {
     }
 
     @Test fun `backups are not checked through the live tunnel`() {
-        // Through the active tunnel says nothing about the backup; background skips, the button dials direct.
-        assertEquals(ReachRoute.SKIP, BackupReach.route(tunnelUp = true, tcp = true, userAsked = false))
-        assertEquals(ReachRoute.SKIP, BackupReach.route(tunnelUp = true, tcp = false, userAsked = false))
+        // Through the active tunnel says nothing about the backup — dial the host directly,
+        // background and button alike. Never TUNNEL (lie) and never SKIP that leaves health empty.
+        assertEquals(ReachRoute.DIRECT, BackupReach.route(tunnelUp = true, tcp = true, userAsked = false))
+        assertEquals(ReachRoute.DIRECT, BackupReach.route(tunnelUp = true, tcp = false, userAsked = false))
         assertEquals(ReachRoute.DIRECT, BackupReach.route(tunnelUp = true, tcp = true, userAsked = true))
         assertEquals(ReachRoute.DIRECT, BackupReach.route(tunnelUp = true, tcp = false, userAsked = true))
         assertEquals(ReachRoute.DIRECT, BackupReach.route(tunnelUp = false, tcp = true, userAsked = true))
+        assertEquals(ReachRoute.DIRECT, BackupReach.route(tunnelUp = false, tcp = false, userAsked = false))
+    }
+
+    @Test fun `live-tunnel route is never chosen for a backup`() {
+        // Call sites that still branch on TUNNEL / SKIP must treat them as "do not use active budget".
+        val routes = listOf(
+            BackupReach.route(true, true, false),
+            BackupReach.route(true, true, true),
+            BackupReach.route(false, true, false),
+        )
+        assertTrue(routes.none { it == ReachRoute.TUNNEL })
+        assertTrue(routes.all { it == ReachRoute.DIRECT })
     }
 }

@@ -1413,8 +1413,9 @@ class DesktopController(
     }
 
     /**
-     * One folder backup per random 45 s – 5 min, also on mobile data. Through the running tunnel,
-     * so this network does not see connections to backup servers; UDP servers are skipped here.
+     * One folder backup per random 45 s – 5 min. Dials that backup directly (outside the live
+     * tunnel): a CONNECT through the active path would say nothing about it. Uses the candidate's
+     * handshake budget, never the active tunnel's.
      */
     private fun checkOneBackup() {
         if (tunnel.state.value.status != TunnelStatus.RUNNING) return
@@ -1425,11 +1426,22 @@ class DesktopController(
         val id = backupRotation.next(members, current.id) ?: return
         val profile = saved.profiles.firstOrNull { it.id == id } ?: return
         val access = (AppTraffic.route as? AppTraffic.Route.Through)?.access
-        if (BackupReach.route(access != null, EndpointProbe.isTcp(profile), userAsked = false) != ReachRoute.TUNNEL) return
-        // Through the tunnel the check is one more connection via the active server.
-        if (!takeActiveBudget()) return
-        val result = EndpointProbe.checkThroughTunnel(profile, access!!, timeoutMs = 8_000)
-        backupHealth[id] = BackupHealth(result.latencyMs != null, result.latencyMs, System.currentTimeMillis(), throughTunnel = true)
+        val route = BackupReach.route(access != null, EndpointProbe.isTcp(profile), userAsked = false)
+        when (route) {
+            ReachRoute.SKIP -> return // Must not takeActiveBudget() on a no-op.
+            ReachRoute.TUNNEL -> {
+                // Legacy: BackupReach no longer returns TUNNEL. Kept so a wrong call cannot NPE.
+                if (access == null || !takeActiveBudget()) return
+                val result = EndpointProbe.checkThroughTunnel(profile, access, timeoutMs = 8_000)
+                backupHealth[id] = BackupHealth(result.latencyMs != null, result.latencyMs, System.currentTimeMillis(), throughTunnel = true)
+            }
+            ReachRoute.DIRECT -> {
+                if (!takeCandidateBudget(profile)) return
+                // Plain TCP reachability (same gentle «До сервера» as LinkCheck), not a live-tunnel CONNECT.
+                val result = EndpointProbe.check(profile, timeoutMs = 8_000, tlsHandshake = false)
+                backupHealth[id] = BackupHealth(result.latencyMs != null, result.latencyMs, System.currentTimeMillis(), throughTunnel = false)
+            }
+        }
     }
 
     /**
