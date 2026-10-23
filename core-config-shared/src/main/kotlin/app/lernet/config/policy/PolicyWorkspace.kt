@@ -32,6 +32,8 @@ object PolicyWorkspaceCodec {
     private val json = Json {
         prettyPrint = true
         encodeDefaults = true
+        // Older Windows/Android files may still carry groups[].connection / folderPolicies.connection.
+        ignoreUnknownKeys = true
     }
 
     fun decode(raw: String): PolicyWorkspace {

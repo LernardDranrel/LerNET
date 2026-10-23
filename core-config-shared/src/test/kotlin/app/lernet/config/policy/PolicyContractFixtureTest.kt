@@ -42,4 +42,18 @@ class PolicyContractFixtureTest {
             assertEquals(workspace.saved, workspace.draft)
         }
     }
+
+    @Test
+    fun `workspace with legacy group connection key still loads`() {
+        // Live Windows AppData: older builds wrote groups[].connection and folderPolicies.connection.
+        // PolicyWorkspaceCodec must ignore unknown keys (TransferCodec already does) or Expert never opens.
+        val base = fixture("workspace-1.1")
+        val raw = base.replace(
+            """{"id": "europe", "name": "Europe", "profileIds": ["de", "nl"], "autoSwap": true}""",
+            """{"id": "europe", "name": "Europe", "profileIds": ["de", "nl"], "autoSwap": true, "connection": {"selection": "PREFERRED", "failedChecks": 2}}""",
+        )
+        val workspace = PolicyWorkspaceCodec.decode(raw)
+        assertTrue(workspace.legacy.groups.isNotEmpty())
+        assertEquals(workspace, PolicyWorkspaceCodec.decode(PolicyWorkspaceCodec.encode(workspace)))
+    }
 }
