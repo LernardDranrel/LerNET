@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -25,7 +26,7 @@ import androidx.compose.ui.unit.dp
 
 /**
  * Expert background frame (mockups v2, sheet 11): a chamfered rectangle in graphite with recessed
- * amber lamps in the four chamfers. It is drawn behind the content and never takes layout space.
+ * amber lamps in the four chamfers. Drawn behind content; content is padded by [contentInset].
  */
 enum class ExpertFrameStyle {
     /** Phone, variant A: thin line + round lamp. */
@@ -43,11 +44,16 @@ data class ExpertFrameSpec(
     /** On windows at least [wideFrom] wide the cuts grow to [wideChamfer] (mockup 11 B on big screens). */
     val wideChamfer: Dp? = null,
     val wideFrom: Dp = 1000.dp,
+    /**
+     * Layout padding for content so it clears chamfer cuts/lamps.
+     * Null = use [chamfer]. Windows keeps 0: the desktop shell already pads its column.
+     */
+    val contentInset: Dp? = null,
 ) {
     companion object {
-        // Same small inset as before (no layout space), but deeper 45° cuts and bigger recessed lamps.
+        // Same small decorative inset, deeper 45° cuts; phone content clears the cuts via [contentInset].
         val Phone = ExpertFrameSpec(ExpertFrameStyle.LINE_ROUND, inset = 4.dp, chamfer = 24.dp, lampRadius = 3.6.dp, glowLength = 120.dp)
-        val Windows = ExpertFrameSpec(ExpertFrameStyle.DOUBLE_SLOT, inset = 6.dp, chamfer = 26.dp, lampRadius = 3.0.dp, glowLength = 160.dp, wideChamfer = 34.dp)
+        val Windows = ExpertFrameSpec(ExpertFrameStyle.DOUBLE_SLOT, inset = 6.dp, chamfer = 26.dp, lampRadius = 3.0.dp, glowLength = 160.dp, wideChamfer = 34.dp, contentInset = 0.dp)
     }
 }
 
@@ -87,9 +93,13 @@ fun chamferLampCentres(size: Size, i: Float, c: Float): List<Offset> {
     )
 }
 
+/** Resolved content padding: explicit [ExpertFrameSpec.contentInset] or [chamfer]. */
+val ExpertFrameSpec.resolvedContentInset: Dp get() = contentInset ?: chamfer
+
 /**
  * Draws the frame behind [content]. [lit] 0..1 is the lamp brightness; with [animateIn] the
  * chamfers and lamps fade in (ordinary Expert entry), otherwise they are drawn at once.
+ * Content is inset by [resolvedContentInset] so cards do not overlap the corner cuts.
  */
 @Composable
 fun ExpertFramedBox(
@@ -105,7 +115,7 @@ fun ExpertFramedBox(
     }
     Box(modifier) {
         Canvas(Modifier.matchParentSize().testTag("expert_frame")) { drawExpertFrame(spec, glow.value) }
-        content()
+        Box(Modifier.matchParentSize().padding(spec.resolvedContentInset), content = content)
     }
 }
 
