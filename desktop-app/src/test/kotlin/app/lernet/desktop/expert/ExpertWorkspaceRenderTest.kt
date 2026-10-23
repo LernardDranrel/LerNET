@@ -111,6 +111,38 @@ class ExpertWorkspaceRenderTest {
     }
 
     @Test
+    fun workspaceFailShowsOneBannerNotDualGap() {
+        // Live beta6 bug: refreshInventory catch set both error and workspaceError → two red banners
+        // and a huge empty Box(weight(1f), Center) between them.
+        val scene = ImageComposeScene(1040, 720, Density(1f)) {
+            MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
+                DesktopExpert(
+                    ExpertUiState(
+                        NetworkPolicy(), administrator = true, reducedMotion = true,
+                        workspaceReady = false,
+                        workspaceError = "Не удалось прочитать рабочую область.",
+                        error = "Не удалось прочитать рабочую область.",
+                    ),
+                    {},
+                )
+            }
+        }
+        try {
+            screenshot(scene, "workspace-fail-one-banner")
+            val all = nodes(scene).flatMap { texts(it) }
+            val joined = all.joinToString("\n")
+            assertThat(joined).contains("Повторить")
+            assertThat(joined).contains("Не удалось прочитать рабочую область")
+            val operationBanners = all.count { it == "Операция не завершена" }
+            val workspaceBanners = all.count { it == "Рабочая область не загрузилась" }
+            assertThat(operationBanners + workspaceBanners).isEqualTo(1)
+            assertThat(joined).doesNotContain("ещё загружается")
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
     fun workspaceErrorOffersRetryInsteadOfStillLoading() {
         val scene = ImageComposeScene(1040, 720, Density(1f)) {
             MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {

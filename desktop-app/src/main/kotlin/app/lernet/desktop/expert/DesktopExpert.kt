@@ -139,7 +139,11 @@ fun DesktopExpert(
                 }
                 ExpertWorkspaceMenu(state, onIntent)
             }
-            state.error?.let { ExpertMessage("Операция не завершена", it, error = true) }
+            // One banner only: while the workspace gate is up, workspaceError owns the message
+            // (bbda1d1 wrote the same failure into both error and workspaceError → dual banners + empty gap).
+            if (state.workspaceReady) {
+                state.error?.let { ExpertMessage("Операция не завершена", it, error = true) }
+            }
             state.notice?.let { ExpertMessage("Состояние сети", it) }
             if (state.busy) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -148,8 +152,10 @@ fun DesktopExpert(
                 }
             }
             if (!state.workspaceReady) {
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                // Top-aligned: Center + weight(1f) left a huge empty hole above the only banner (live screenshot).
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                     Column(
+                        Modifier.fillMaxWidth().padding(top = 8.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {

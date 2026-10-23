@@ -245,13 +245,16 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
         } catch (failure: Exception) {
             val message = app.lernet.engine.text.UserText.withReason("Не удалось прочитать рабочую область", failure)
             mutable.update {
-                it.copy(
-                    workspaceError = message,
-                    // Keep workspaceReady if we had a previous successful open; otherwise stay false.
-                    error = message,
-                )
+                if (it.workspaceReady && runtime != null) {
+                    // Already open: one operation banner, keep the pages.
+                    it.copy(error = message, workspaceError = null)
+                } else {
+                    // First open failed: gate UI only (never also set error — dual banners + weight gap).
+                    it.copy(workspaceError = message, error = null, workspaceReady = false)
+                }
             }
-            externalError = message
+            // Do not stash in externalError on first-open fail: present() would re-publish it as state.error.
+            if (runtime != null) externalError = message else externalError = null
             writeLog(message)
         }
     }
@@ -280,6 +283,16 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
         }
         scope.launch {
             try {
+                // Повторить / Refresh must re-read the file even after a failed open. ensureRuntime()
+                // treats workspaceError as terminal and would never reach refreshInventory.
+                if (intent is UiIntent.Refresh) {
+                    externalError = null
+                    mutable.update { it.copy(workspaceError = null, error = null) }
+                    mutex.withLock { refreshInventory() }
+                    refreshApplications()
+                    refreshProtection()
+                    return@launch
+                }
                 val controller = ensureRuntime()
                 when (intent) {
                     is UiIntent.SelectScope -> mutable.update { it.copy(selectedScope = intent.scope) }
@@ -318,11 +331,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                         controller.handle(RuntimeIntent.Stop)
                         refreshProtection()
                     }
-                    UiIntent.Refresh -> {
-                        mutex.withLock { refreshInventory() }
-                        refreshApplications()
-                        refreshProtection()
-                    }
+                    UiIntent.Refresh -> Unit // handled before ensureRuntime
                     UiIntent.RefreshInterfaces -> refreshInterfaces()
                     UiIntent.ClearConnectionHistory -> controller.handle(RuntimeIntent.ClearConnectionHistory)
                     is UiIntent.SaveExternalExit -> saveExternalExit(intent)
@@ -353,7 +362,11 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
             mutable.update { it.copy(externalSavePending = null) }
             return@withLock
         }
-        val active = ensureRuntime()
+        // Already holding mutex — do not call ensureRuntime() (its refreshOnce takes the same mutex).
+        if (runtime == null) refreshInventory(allowLiveApply = false)
+        val active = requireNotNull(runtime) {
+            mutable.value.workspaceError ?: "Рабочая область не загрузилась. Нажми «Повторить»."
+        }
         check(
             !active.state.value.applying &&
                 active.state.value.phase !in setOf(ExpertSessionPhase.STARTING, ExpertSessionPhase.STOPPING)

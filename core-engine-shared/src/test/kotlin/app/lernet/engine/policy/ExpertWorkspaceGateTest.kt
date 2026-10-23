@@ -67,4 +67,31 @@ class ExpertWorkspaceGateTest {
         assertNull(result)
         assertTrue(failed)
     }
+
+    @Test fun `retry after clearing failed loads via refresh`() = runBlocking {
+        // Mirrors Повторить: sticky workspaceError must be cleared, otherwise Gate never calls refreshOnce.
+        var value: String? = null
+        var failed = true
+        var refreshes = 0
+        val stuck = ExpertWorkspaceGate.await(
+            get = { value },
+            refreshOnce = { refreshes++; value = "loaded" },
+            failed = { failed },
+            timeoutMs = 500,
+            stepMs = 50,
+        )
+        assertNull(stuck)
+        assertEquals(0, refreshes)
+
+        failed = false
+        val ready = ExpertWorkspaceGate.await(
+            get = { value },
+            refreshOnce = { refreshes++; value = "loaded" },
+            failed = { failed },
+            timeoutMs = 2_000,
+            stepMs = 50,
+        )
+        assertEquals("loaded", ready)
+        assertEquals(1, refreshes)
+    }
 }
