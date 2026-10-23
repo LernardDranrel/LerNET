@@ -105,7 +105,9 @@ internal fun DesktopWorkspaceSidebar(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
-        Modifier.width(width).fillMaxHeight().background(MaterialTheme.colorScheme.surface).padding(horizontal = 14.dp, vertical = 24.dp),
+        // Top padding is tighter: the VPN tab strip now sits above this column (was a dark hole beside the tabs).
+        Modifier.width(width).fillMaxHeight().background(MaterialTheme.colorScheme.surface)
+            .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 24.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(

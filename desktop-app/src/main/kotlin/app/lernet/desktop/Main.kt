@@ -577,96 +577,104 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
     BoxWithConstraints(Modifier.fillMaxSize()) {
     // Windows up to about 1100 px get a narrower config column with one-line rows.
     val compact = maxWidth < 1100.dp
-    Row(Modifier.fillMaxSize().background(background)) {
-        // Mockup 03: the sidebar is not a menu any more; rules, journal and settings open from the top-right buttons.
-        // Mockup 03: folders and configs live in a permanent left column (the desktop twin of the phone drawer).
-        DesktopWorkspaceSidebar(onOpenNetwork, width = if (compact) 248.dp else 316.dp) {
-            ConfigList(ui.saved, tunnel, ui.busy, ui.probes, controller, compact = compact,
-                onImport = { groupId -> importGroupId = groupId; importOpen = true },
-                onGroupRoutes = { groupId -> routeOwnerId = "grp_$groupId"; tab = Tab.ROUTES },
-                onExportGroup = { group -> exportRequest = ExportSelection(group.id, "LerNET-${group.name.take(30)}.lernet.json") },
-                onSelect = { id -> controller.select(id); tab = Tab.PROFILES },
-                onProfileRoutes = { id -> routeOwnerId = id; tab = Tab.ROUTES },
-            ) {
-                Box {
-                    GroupActionButton("Добавить конфиг или папку", onClick = { createMenu = true }) { color ->
-                        Text("+", color = color, fontSize = 20.sp, lineHeight = 20.sp)
-                    }
-                    DropdownMenu(createMenu, onDismissRequest = { createMenu = false }) {
-                        DropdownMenuItem(text = { Text("Импортировать конфиг") }, onClick = { importGroupId = null; importOpen = true; createMenu = false })
-                        DropdownMenuItem(text = { Text("Импорт архива LerNET") }, onClick = {
-                            createMenu = false
-                            chooseTransferFile(false)?.let(controller::importFrom)
-                        })
-                        DropdownMenuItem(text = { Text("Создать папку") }, onClick = { newGroupOpen = true; createMenu = false })
-                        DropdownMenuItem(text = { Text("Экспортировать всё") }, onClick = {
-                            createMenu = false
-                            exportRequest = ExportSelection(null, "LerNET-all.lernet.json")
-                        })
-                    }
+    val sidebarWidth = if (compact) 248.dp else 316.dp
+    // Tabs used to sit only in the right column next to the sidebar — that left a dark hole
+    // above «Конфиги» and left of «Главная / Правила / …». Full-width strip above the body.
+    Column(Modifier.fillMaxSize().background(background)) {
+        Row(
+            Modifier.fillMaxWidth().background(desktopColors.surface)
+                .padding(horizontal = 22.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Audit N10/G5: ordinary navigation; the open page is not a toggle and «Правила» keeps the chosen owner.
+            Tab.entries.forEach { item ->
+                val chosen = tab == item
+                OutlinedButton(
+                    onClick = { if (!chosen) tab = item },
+                    colors = if (chosen) ButtonDefaults.outlinedButtonColors(containerColor = desktopColors.secondaryContainer)
+                        else ButtonDefaults.outlinedButtonColors(),
+                    modifier = Modifier.testTag("top_${item.name.lowercase()}"),
+                ) {
+                    NavSymbol(item, chosen)
+                    Spacer(Modifier.width(6.dp))
+                    Text(item.label)
                 }
             }
         }
-        Column(Modifier.weight(1f).fillMaxHeight().padding(22.dp)) {
-            val holding = ui.tried != null && tunnel.status != TunnelStatus.STOPPED
-            val statusLine = if (holding) "Нет связи · VPN держим" else (if (tunnel.status == TunnelStatus.RUNNING) ui.healthMessage else tunnel.message)
-                .ifBlank { "Готово к подключению" }
-            // Audit G1/H: the open page is named once, by its highlighted button (no page title repeating it);
-            // the connection state is the strip on top, as on the phone's secondary screens.
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    // Audit N10/G5: ordinary navigation; the open page is not a toggle and «Правила» keeps the chosen owner.
-                    Tab.entries.forEach { item ->
-                        val chosen = tab == item
-                        OutlinedButton(
-                            onClick = { if (!chosen) tab = item },
-                            colors = if (chosen) ButtonDefaults.outlinedButtonColors(containerColor = desktopColors.secondaryContainer)
-                                else ButtonDefaults.outlinedButtonColors(),
-                            modifier = Modifier.testTag("top_${item.name.lowercase()}"),
-                        ) {
-                            NavSymbol(item, chosen)
-                            Spacer(Modifier.width(6.dp))
-                            Text(item.label)
+        Row(Modifier.weight(1f).fillMaxWidth()) {
+            // Mockup 03: the sidebar is not a menu any more; rules, journal and settings open from the top buttons.
+            // Mockup 03: folders and configs live in a permanent left column (the desktop twin of the phone drawer).
+            DesktopWorkspaceSidebar(onOpenNetwork, width = sidebarWidth) {
+                ConfigList(ui.saved, tunnel, ui.busy, ui.probes, controller, compact = compact,
+                    onImport = { groupId -> importGroupId = groupId; importOpen = true },
+                    onGroupRoutes = { groupId -> routeOwnerId = "grp_$groupId"; tab = Tab.ROUTES },
+                    onExportGroup = { group -> exportRequest = ExportSelection(group.id, "LerNET-${group.name.take(30)}.lernet.json") },
+                    onSelect = { id -> controller.select(id); tab = Tab.PROFILES },
+                    onProfileRoutes = { id -> routeOwnerId = id; tab = Tab.ROUTES },
+                ) {
+                    Box {
+                        GroupActionButton("Добавить конфиг или папку", onClick = { createMenu = true }) { color ->
+                            Text("+", color = color, fontSize = 20.sp, lineHeight = 20.sp)
+                        }
+                        DropdownMenu(createMenu, onDismissRequest = { createMenu = false }) {
+                            DropdownMenuItem(text = { Text("Импортировать конфиг") }, onClick = { importGroupId = null; importOpen = true; createMenu = false })
+                            DropdownMenuItem(text = { Text("Импорт архива LerNET") }, onClick = {
+                                createMenu = false
+                                chooseTransferFile(false)?.let(controller::importFrom)
+                            })
+                            DropdownMenuItem(text = { Text("Создать папку") }, onClick = { newGroupOpen = true; createMenu = false })
+                            DropdownMenuItem(text = { Text("Экспортировать всё") }, onClick = {
+                                createMenu = false
+                                exportRequest = ExportSelection(null, "LerNET-all.lernet.json")
+                            })
                         }
                     }
                 }
             }
-            val progress = ui.busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RECONNECTING)
-            // A connection error is told once, in the InfoBar below; the line here is for other news.
-            if (ui.message.isNotBlank() && ui.message != statusLine && ui.message !in plainStates && !(tab == Tab.PROFILES && progress) &&
-                ui.connectionError == null
+            Column(
+                Modifier.weight(1f).fillMaxHeight()
+                    .padding(start = 22.dp, end = 22.dp, bottom = 22.dp,
+                        top = if (tab == Tab.PROFILES) 18.dp else 8.dp),
             ) {
-                Text(ui.message, color = muted, maxLines = 2)
-            }
-                if (ui.networkWarning.isNotBlank()) Text(ui.networkWarning, color = Color(0xFFF1CC80), fontSize = 12.sp, maxLines = 3)
-            ui.guardProblem?.let { Text(it, color = desktopColors.error, fontSize = 12.sp, maxLines = 3) }
-            // Audit N15: a failure is the same card as on the phone, in the home's attention zone (ProfileHome).
-            // Audit N14: deleting a config can be undone, as on the phone.
-            val deleted by controller.deleted.collectAsState()
-            deleted?.let { item ->
-                LaunchedEffect(item) { delay(10_000); controller.dismissDeleted() }
-                Spacer(Modifier.height(10.dp))
-                InfoBar("Конфиг «${item.profile.name}» удалён", null, muted, Modifier.testTag("deleted_bar")) {
-                    TextButton(onClick = controller::undoDelete, modifier = Modifier.testTag("undo_delete")) { Text("Отменить") }
-                    TextButton(onClick = controller::dismissDeleted) { Text("Закрыть") }
+                val holding = ui.tried != null && tunnel.status != TunnelStatus.STOPPED
+                val statusLine = if (holding) "Нет связи · VPN держим" else (if (tunnel.status == TunnelStatus.RUNNING) ui.healthMessage else tunnel.message)
+                    .ifBlank { "Готово к подключению" }
+                val progress = ui.busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RECONNECTING)
+                // A connection error is told once, in the InfoBar below; the line here is for other news.
+                if (ui.message.isNotBlank() && ui.message != statusLine && ui.message !in plainStates && !(tab == Tab.PROFILES && progress) &&
+                    ui.connectionError == null
+                ) {
+                    Text(ui.message, color = muted, maxLines = 2)
                 }
-            }
-            // Secondary pages: no page title — tight gap under the buttons (journal had a large empty band).
-            Spacer(Modifier.height(if (tab == Tab.PROFILES) 18.dp else 8.dp))
-            when (tab) {
-                Tab.PROFILES -> ProfileHome(ui.saved, tunnel, ui.busy, ui.probes, ui.tunnelLatencyMs, trace, controller,
-                    detail = homeDetail(ui, tunnel, holding),
-                    linkHold = ui.hold.takeIf { tunnel.status == TunnelStatus.RUNNING && !holding },
-                    onImport = { groupId -> importGroupId = groupId; importOpen = true },
-                    localProxy = ui.localProxy.takeIf { tunnel.status == TunnelStatus.RUNNING },
-                    tried = ui.tried.takeIf { holding }, diagnostics = diagnostics,
-                    onOpenRules = { owner -> routeOwnerId = owner; tab = Tab.ROUTES },
-                    onOpenJournal = { tab = Tab.DIAGNOSTICS }, connectionError = ui.connectionError)
-                Tab.ROUTES -> DesktopRoutes(ui.saved, controller, routeOwnerId)
-                Tab.DIAGNOSTICS -> Diagnostics(tunnel, diagnostics, connectionHistory, controller)
-                Tab.SETTINGS -> Settings(ui.saved, controller, onRequestElevation, onOpenNetwork = onOpenNetwork,
-                    localProxy = ui.localProxy.takeIf { tunnel.status == TunnelStatus.RUNNING },
-                    locked = ui.busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RECONNECTING))
+                if (ui.networkWarning.isNotBlank()) Text(ui.networkWarning, color = Color(0xFFF1CC80), fontSize = 12.sp, maxLines = 3)
+                ui.guardProblem?.let { Text(it, color = desktopColors.error, fontSize = 12.sp, maxLines = 3) }
+                // Audit N15: a failure is the same card as on the phone, in the home's attention zone (ProfileHome).
+                // Audit N14: deleting a config can be undone, as on the phone.
+                val deleted by controller.deleted.collectAsState()
+                deleted?.let { item ->
+                    LaunchedEffect(item) { delay(10_000); controller.dismissDeleted() }
+                    Spacer(Modifier.height(10.dp))
+                    InfoBar("Конфиг «${item.profile.name}» удалён", null, muted, Modifier.testTag("deleted_bar")) {
+                        TextButton(onClick = controller::undoDelete, modifier = Modifier.testTag("undo_delete")) { Text("Отменить") }
+                        TextButton(onClick = controller::dismissDeleted) { Text("Закрыть") }
+                    }
+                }
+                when (tab) {
+                    Tab.PROFILES -> ProfileHome(ui.saved, tunnel, ui.busy, ui.probes, ui.tunnelLatencyMs, trace, controller,
+                        detail = homeDetail(ui, tunnel, holding),
+                        linkHold = ui.hold.takeIf { tunnel.status == TunnelStatus.RUNNING && !holding },
+                        onImport = { groupId -> importGroupId = groupId; importOpen = true },
+                        localProxy = ui.localProxy.takeIf { tunnel.status == TunnelStatus.RUNNING },
+                        tried = ui.tried.takeIf { holding }, diagnostics = diagnostics,
+                        onOpenRules = { owner -> routeOwnerId = owner; tab = Tab.ROUTES },
+                        onOpenJournal = { tab = Tab.DIAGNOSTICS }, connectionError = ui.connectionError)
+                    Tab.ROUTES -> DesktopRoutes(ui.saved, controller, routeOwnerId)
+                    Tab.DIAGNOSTICS -> Diagnostics(tunnel, diagnostics, connectionHistory, controller)
+                    Tab.SETTINGS -> Settings(ui.saved, controller, onRequestElevation, onOpenNetwork = onOpenNetwork,
+                        localProxy = ui.localProxy.takeIf { tunnel.status == TunnelStatus.RUNNING },
+                        locked = ui.busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RECONNECTING))
+                }
             }
         }
     }
