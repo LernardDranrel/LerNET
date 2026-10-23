@@ -76,10 +76,35 @@ class ExpertChromeTest {
         rule.onNodeWithTag("expert_tab_journal").performClick()
         rule.runOnIdle { assertThat(section).isEqualTo(ExpertSection.JOURNAL) }
         capture("android-expert-v2-events.png")
-        // N5: Expert settings («Защита и DNS») and app settings live in ⋮, not behind a ⚙ in the bar.
-        rule.onNodeWithTag("expert_more").performClick()
-        rule.onNodeWithTag("expert_menu_settings").performClick()
+        // Journal + ⚙ always in Expert top bar (same as VPN); settings are not ⋮-only.
+        rule.onNodeWithTag("expert_diag").assertIsDisplayed()
+        rule.onNodeWithTag("expert_settings").assertIsDisplayed()
+        rule.onNodeWithTag("expert_settings").performClick()
         rule.runOnIdle { assertThat(settings).isEqualTo(1) }
+        rule.onNodeWithTag("expert_more").performClick()
+        rule.onNodeWithTag("expert_menu_safety").assertIsDisplayed()
+    }
+
+    @Test
+    fun expertTopBarOpensDiagAndSettings() {
+        var settings = 0
+        var diag = 0
+        rule.setContent {
+            LerNetTheme {
+                ExpertScreen(
+                    ExpertUiState(ExpertRuntimeState(saved = NetworkPolicy(), phase = ExpertSessionPhase.RUNNING, desiredEnabled = true, runningSinceEpochMs = System.currentTimeMillis(), tun = app.lernet.engine.policy.TunIdentity("tun"), appliedRevision = 0), bundle),
+                    remember { SnackbarHostState() }, {}, {}, {}, {}, {}, false,
+                    onSettings = { settings++ },
+                    onOpenDiag = { diag++ },
+                )
+            }
+        }
+        rule.onNodeWithTag("expert_diag").performClick()
+        rule.onNodeWithTag("expert_settings").performClick()
+        rule.runOnIdle {
+            assertThat(diag).isEqualTo(1)
+            assertThat(settings).isEqualTo(1)
+        }
     }
 
     @Test

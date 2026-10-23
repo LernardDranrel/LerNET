@@ -183,6 +183,7 @@ fun LerNetAppRoot() {
                 activeProfileId = homeState.activeProfile?.id,
                 probes = homeState.probes,
                 onDragActiveChange = { drawerDragActive = it },
+                onNetworkAnalysis = { openAppPage(Dest.Network.route) },
                 actions = drawerActions(
                     homeViewModel,
                     navController,
@@ -474,6 +475,7 @@ private fun AppNavHost(
             ExpertRoute(
                 section = expertSection, onSectionChange = onExpertSection, onOpenDrawer = onOpenDrawer,
                 onSettings = { navController.navigate(Dest.Settings.route) { launchSingleTop = true } },
+                onOpenDiag = { navController.navigate(Dest.Diag.route) { launchSingleTop = true } },
                 onNetwork = { navController.navigate(Dest.Network.route) { launchSingleTop = true } },
                 onVpn = { navController.navigate(Dest.Home.route) { popUpTo(Dest.Home.route) { inclusive = true }; launchSingleTop = true } },
                 simpleActive = homeState.snapshot.state in setOf(ConnectionState.CONNECTED, ConnectionState.CONNECTING, ConnectionState.RECONNECTING),

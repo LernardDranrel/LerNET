@@ -112,6 +112,7 @@ internal fun ExpertRoute(
     section: ExpertSection, onSectionChange: (ExpertSection) -> Unit,
     onOpenDrawer: () -> Unit,
     onSettings: () -> Unit = {},
+    onOpenDiag: () -> Unit = {},
     onNetwork: () -> Unit = {},
 ) {
     val viewModel: ExpertViewModel = hiltViewModel()
@@ -271,6 +272,7 @@ internal fun ExpertRoute(
         formMemory = viewModel.formMemory,
         selectedSection = section, onSectionChange = onSectionChange, onOpenDrawer = onOpenDrawer,
         onSettings = onSettings,
+        onOpenDiag = onOpenDiag,
         onNetwork = onNetwork,
         frameAnimateIn = !splash.firstEntry,
     )
@@ -298,6 +300,7 @@ internal fun ExpertScreen(
     onSectionChange: ((ExpertSection) -> Unit)? = null,
     onOpenDrawer: () -> Unit = {},
     onSettings: () -> Unit = {},
+    onOpenDiag: () -> Unit = {},
     onNetwork: () -> Unit = {},
     frameAnimateIn: Boolean = false,
 ) {
@@ -321,7 +324,7 @@ internal fun ExpertScreen(
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
             Column {
-                // Audit N2–N5 (mockup m4): ☰ = configs and folders, the mode switch sits in the title, everything else in ⋮.
+                // ☰ configs · mode tabs · journal + ⚙ always (как VPN) · ⋮ Expert extras.
                 TopAppBar(
                     navigationIcon = {
                         IconButton(onOpenDrawer) {
@@ -333,6 +336,12 @@ internal fun ExpertScreen(
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                     actions = {
+                        IconButton(onClick = onOpenDiag, Modifier.testTag("expert_diag")) {
+                            Icon(LerNetSymbols.journal(), contentDescription = stringResource(R.string.cd_diag))
+                        }
+                        IconButton(onClick = onSettings, Modifier.testTag("expert_settings")) {
+                            Icon(LerNetSymbols.settings(), contentDescription = stringResource(R.string.cd_settings))
+                        }
                         IconButton(onClick = { archiveMenu = true }, Modifier.testTag("expert_more")) {
                             Icon(LerNetSymbols.more(), contentDescription = stringResource(R.string.expert_more))
                         }
@@ -343,13 +352,9 @@ internal fun ExpertScreen(
                                 modifier = Modifier.testTag("expert_menu_safety"),
                             )
                             DropdownMenuItem(
-                                text = { Text(stringResource(R.string.expert_menu_app_settings)) },
-                                onClick = { archiveMenu = false; onSettings() },
-                                modifier = Modifier.testTag("expert_menu_settings"),
-                            )
-                            DropdownMenuItem(
                                 text = { Text(stringResource(R.string.expert_menu_network)) },
                                 onClick = { archiveMenu = false; onNetwork() },
+                                modifier = Modifier.testTag("expert_menu_network"),
                             )
                             HorizontalDivider()
                             DropdownMenuItem(
@@ -406,9 +411,9 @@ internal fun ExpertScreen(
                         ExpertSchema(runtime, bundle, onIntent, Modifier.weight(1f), onSaveDraft)
                     }
                 } else if (visible == ExpertSection.OVERVIEW) {
-                    // The pult keeps the lever and a short summary; connections live in «События».
+                    // Пульт: рычаг, плитки, блок настроек Эксперта (защита/DNS/схема) — без лишних коробок.
                     Column(
-                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         state.storageError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -417,6 +422,16 @@ internal fun ExpertScreen(
                         }
                         ExpertStatus(state, onIntent, onStart, reduced)
                         ExpertTiles(runtime, state, ::selectSection)
+                        ExpertPultSettings(
+                            inventoryReady = state.inventory != null,
+                            onOpenSafety = { selectSection(ExpertSection.SAFETY) },
+                            onOpenDns = { dnsEditor = runtime.draft.dns },
+                            onOpenHealth = { healthEditor = runtime.draft.health },
+                            dnsEnabled = onSaveDns != null,
+                            healthEnabled = onSaveHealth != null,
+                            onImport = onImport,
+                            onExport = onExport,
+                        )
                     }
                 } else if (visible == ExpertSection.JOURNAL) {
                     // Audit X2 (mockup m6): one switch «Соединения · N | Действия LerNET · N», each list in full.
@@ -438,8 +453,8 @@ internal fun ExpertScreen(
                 } else {
                     LazyColumn(
                         Modifier.fillMaxSize(),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         if (state.storageError != null) {
                             item {
@@ -727,6 +742,58 @@ internal fun ExpertUptimeLine(runtime: app.lernet.engine.policy.ExpertRuntimeSta
             color = MaterialTheme.colorScheme.tertiary,
         )
         Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary)
+    }
+}
+
+/** Пульт: аккуратный блок настроек Эксперта — защита, DNS, импорт/экспорт схемы (не только в ⋮). */
+@Composable
+private fun ExpertPultSettings(
+    inventoryReady: Boolean,
+    onOpenSafety: () -> Unit,
+    onOpenDns: () -> Unit,
+    onOpenHealth: () -> Unit,
+    dnsEnabled: Boolean,
+    healthEnabled: Boolean,
+    onImport: () -> Unit,
+    onExport: () -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth().testTag("expert_pult_settings"),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(stringResource(R.string.expert_pult_settings_title), style = MaterialTheme.typography.titleMedium)
+        ExpertLinkRow(
+            stringResource(R.string.expert_section_safety),
+            stringResource(R.string.expert_pult_safety_hint),
+            tag = "expert_pult_safety",
+            onClick = onOpenSafety,
+        )
+        ExpertLinkRow(
+            stringResource(R.string.expert_dns_row),
+            stringResource(R.string.expert_dns_row_hint),
+            enabled = dnsEnabled,
+            tag = "expert_pult_dns",
+            onClick = onOpenDns,
+        )
+        ExpertLinkRow(
+            stringResource(R.string.expert_health_row),
+            stringResource(R.string.expert_health_row_hint),
+            enabled = healthEnabled,
+            tag = "expert_pult_health",
+            onClick = onOpenHealth,
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = onImport,
+                enabled = inventoryReady,
+                modifier = Modifier.weight(1f).testTag("expert_pult_import"),
+            ) { Text(stringResource(R.string.expert_import_short)) }
+            OutlinedButton(
+                onClick = onExport,
+                enabled = inventoryReady,
+                modifier = Modifier.weight(1f).testTag("expert_pult_export"),
+            ) { Text(stringResource(R.string.expert_export_short)) }
+        }
     }
 }
 

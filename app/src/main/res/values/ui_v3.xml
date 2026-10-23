@@ -22,6 +22,17 @@
     <string name="expert_dns_row_hint">Через какой выход и какие серверы спрашивать адреса сайтов</string>
     <string name="expert_health_row">Проверки связи</string>
     <string name="expert_health_row_hint">Как часто и куда Эксперт проверяет выходы</string>
+    <string name="expert_pult_settings_title">Настройки Эксперта</string>
+    <string name="expert_pult_safety_hint">Защита правил, DNS и проверки связи</string>
+    <string name="expert_import_short">Импорт схемы</string>
+    <string name="expert_export_short">Экспорт схемы</string>
+    <string name="expert_folder_strategy_preferred">Предпочтительный</string>
+    <string name="expert_folder_preferred_none">Первый доступный</string>
+    <string name="expert_channels_heading">Каналы</string>
+    <string name="expert_configs_heading">Конфиги</string>
+    <string name="expert_external_advanced">Дополнительно · внешний выход</string>
+    <string name="expert_exit_card_latency">Отклик: %1$s</string>
+    <string name="expert_exit_card_idle">Нет живого выхода</string>
     <string name="settings_from_expert">Это общие настройки приложения. Они действуют и в режиме VPN, и в Эксперте.</string>
     <!-- Mode switch (N19) -->
     <string name="mode_switch">Режим</string>

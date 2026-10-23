@@ -59,6 +59,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.focus.FocusRequester
@@ -110,6 +111,7 @@ fun ConfigDrawer(
     probes: Map<String, ProfileProbe>,
     actions: DrawerActions,
     onDragActiveChange: (Boolean) -> Unit = {},
+    onNetworkAnalysis: (() -> Unit)? = null,
     header: @Composable () -> Unit = {},
 ) {
     var editingId by remember { mutableStateOf<String?>(null) }
@@ -553,10 +555,21 @@ fun ConfigDrawer(
                     }
                 }
             }
+            // Анализ сети слева (как на Windows), затем проверить и добавить — выравнивание влево.
             Row(
                 Modifier.fillMaxWidth().padding(LerNetDimens.screenPadding),
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = Arrangement.Start,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (onNetworkAnalysis != null) {
+                    IconButton(onClick = onNetworkAnalysis, modifier = Modifier.testTag("drawer_network_analysis")) {
+                        Icon(
+                            LerNetSymbols.analytics(),
+                            contentDescription = stringResource(R.string.expert_menu_network),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
                 IconButton(onClick = { actions.onProbe(profiles.map { it.id }) }, enabled = profiles.isNotEmpty()) {
                     Icon(
                         LerNetSymbols.probe(), contentDescription = "Проверить все конфиги",
