@@ -79,28 +79,12 @@ internal fun ExpertExits(
     val policy = runtime.draft
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         if (bundle.profiles.isEmpty()) {
-            // An empty tab opens with plain words, not with service text and a disabled button.
             PanelCard(Modifier.testTag("expert_exits_empty")) {
                 Text(stringResource(R.string.expert_exits_empty_title), style = MaterialTheme.typography.titleMedium)
                 Text(stringResource(R.string.expert_exits_empty_body), style = MaterialTheme.typography.bodyMedium)
-                if (onSaveExternal != null) {
-                    Text(stringResource(R.string.expert_exits_empty_external), style = MaterialTheme.typography.bodySmall)
-                }
             }
         }
         ExpertDraftActions(runtime, onIntent)
-        if (onSaveExternal != null) {
-            Button(onClick = {
-                externalProfile = null
-                formMemory.externalProfile = null
-                externalProfileId = null
-                externalFingerprint = null
-                formMemory.passwords.clear()
-                externalEditor = true
-            }, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.expert_external_add))
-            }
-        }
         if (bundle.profiles.isNotEmpty()) ExpertHint(R.string.expert_folder_hint)
         // Решения 23.10 п.4: отдельный блок «Задействованные в схеме» (как на Windows).
         if (bundle.groups.isNotEmpty()) {
@@ -119,14 +103,14 @@ internal fun ExpertExits(
             }
             PanelCard {
                 Text(folder.name, style = MaterialTheme.typography.titleMedium)
-                // «Самый быстрый» removed; old LOWEST_LATENCY shows as «Самый стабильный».
+                // Strategy chip ≠ preferred-profile picker (Windows ExpertEditors).
                 val current = settings.selection.normalized()
                 listOf(FolderSelection.PREFERRED, FolderSelection.STABLE).forEach { mode ->
                     OutlinedButton(onClick = { update(settings.copy(selection = mode)) }, modifier = Modifier.fillMaxWidth()) {
                         Text(
                             stringResource(
                                 when (mode) {
-                                    FolderSelection.PREFERRED -> R.string.expert_folder_preferred
+                                    FolderSelection.PREFERRED -> R.string.expert_folder_strategy_preferred
                                     FolderSelection.STABLE, FolderSelection.LOWEST_LATENCY -> R.string.expert_folder_stable
                                 },
                             )
@@ -143,10 +127,11 @@ internal fun ExpertExits(
                     ),
                     style = MaterialTheme.typography.bodySmall,
                 )
-                OutlinedButton({ preferredOpen = true }, Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.expert_folder_preferred), style = MaterialTheme.typography.labelLarge)
+                OutlinedButton({ preferredOpen = true }, Modifier.fillMaxWidth().testTag("expert_folder_preferred_pick")) {
                     Text(
                         bundle.profiles.firstOrNull { it.id == settings.preferredProfileId }?.name
-                            ?: stringResource(R.string.expert_folder_preferred),
+                            ?: stringResource(R.string.expert_folder_preferred_none),
                     )
                 }
                 ExpertCheckRow(R.string.expert_folder_swap, settings.autoSwap) { update(settings.copy(autoSwap = it)) }
@@ -157,9 +142,13 @@ internal fun ExpertExits(
             }
             if (preferredOpen) {
                 AlertDialog(
-                    onDismissRequest = { preferredOpen = false }, title = { Text(folder.name) },
+                    onDismissRequest = { preferredOpen = false }, title = { Text(stringResource(R.string.expert_folder_preferred)) },
                     text = {
                         Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                            TextButton({
+                                update(settings.copy(preferredProfileId = null))
+                                preferredOpen = false
+                            }, Modifier.fillMaxWidth()) { Text(stringResource(R.string.expert_folder_preferred_none)) }
                             bundle.profiles.filter { it.id in folder.profileIds }.forEach { profile ->
                                 TextButton({
                                     update(settings.copy(preferredProfileId = profile.id))
@@ -179,11 +168,15 @@ internal fun ExpertExits(
         val shownProfiles = bundle.profiles.filter { profile ->
             !sleepingOnly || runtime.exits.any { it.key.profileId == profile.id && it.phase == ExitPhase.SLEEPING }
         }
+        if (bundle.profiles.isNotEmpty()) {
+            Text(stringResource(R.string.expert_configs_heading), style = MaterialTheme.typography.titleMedium)
+        }
         if (sleepingOnly && shownProfiles.isEmpty()) ExpertHint(R.string.expert_sleeping_none)
         shownProfiles.forEach { profile ->
             val settings = policy.profilePolicies.firstOrNull { it.profileId == profile.id } ?: ProfileExitPolicy(profile.id)
             val external = remember(profile) { ExternalExitProfiles.describe(profile) }
             val windowsOnly = profile.id in unsupportedProfiles
+            val liveExits = runtime.exits.filter { it.key.profileId == profile.id && it.key.channelId == null }
             PanelCard {
                 Text(
                     profile.name,
@@ -216,13 +209,20 @@ internal fun ExpertExits(
                     }
                 }
                 LifecycleSummary(settings.lifecycle) { lifecycleOwner = PolicyScope.Profile(profile.id) }
-                runtime.exits.filter { it.key.profileId == profile.id && it.key.channelId == null }.forEach { exit ->
-                    Text(stringResource(exit.phase.titleResource()), style = MaterialTheme.typography.titleSmall)
-                    exit.reason?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                if (liveExits.isEmpty()) {
+                    Text(stringResource(R.string.expert_exit_card_idle), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                liveExits.forEach { exit ->
+                    ExpertExitStatusLine(exit)
                     TextButton({ liveDetails = exit }) { Text(stringResource(R.string.expert_live_exit_details)) }
                     ExpertExitControls(exit, runtime.phase == ExpertSessionPhase.RUNNING, onIntent, windowsOnly)
                 }
             }
+        }
+        // Channels — own section, not mixed into the config pile.
+        if (policy.channels.isNotEmpty() || bundle.profiles.isNotEmpty()) {
+            Text(stringResource(R.string.expert_channels_heading), style = MaterialTheme.typography.titleMedium)
         }
         policy.channels.forEach { channel ->
             PanelCard {
@@ -232,8 +232,7 @@ internal fun ExpertExits(
                 val live = runtime.exits.filter { it.key.channelId == channel.id }
                 if (live.isEmpty()) ExpertHint(R.string.expert_exit_no_live)
                 live.forEach { exit ->
-                    Text(stringResource(exit.phase.titleResource()), style = MaterialTheme.typography.titleSmall)
-                    exit.reason?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    ExpertExitStatusLine(exit)
                     TextButton({ liveDetails = exit }) { Text(stringResource(R.string.expert_live_exit_details)) }
                     ExpertExitControls(
                         exit,
@@ -245,9 +244,24 @@ internal fun ExpertExits(
                 OutlinedButton({ editingChannel = channel }, Modifier.fillMaxWidth()) { Text(stringResource(R.string.expert_rule_editor)) }
             }
         }
-        // A shared channel needs configs to pick from; with none the button only leads to an empty list.
         if (bundle.profiles.isNotEmpty()) {
             Button({ chooseOwner = true }, Modifier.fillMaxWidth()) { Text(stringResource(R.string.expert_channel_add)) }
+        }
+        // SOCKS/HTTP external exit — advanced, not the primary action.
+        if (onSaveExternal != null) {
+            TextButton(
+                onClick = {
+                    externalProfile = null
+                    formMemory.externalProfile = null
+                    externalProfileId = null
+                    externalFingerprint = null
+                    formMemory.passwords.clear()
+                    externalEditor = true
+                },
+                modifier = Modifier.fillMaxWidth().testTag("expert_external_advanced"),
+            ) {
+                Text(stringResource(R.string.expert_external_advanced))
+            }
         }
     }
     liveDetails?.let { initial ->
@@ -441,6 +455,25 @@ internal fun ExpertExits(
     }
 }
 
+
+@Composable
+private fun ExpertExitStatusLine(exit: ExpertExitState) {
+    Text(stringResource(exit.phase.titleResource()), style = MaterialTheme.typography.titleSmall)
+    exit.reason?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+    Text(
+        stringResource(
+            R.string.expert_exit_card_latency,
+            exit.latencyMs?.let { stringResource(R.string.expert_latency_ms, it) }
+                ?: stringResource(R.string.expert_value_unknown),
+        ),
+        style = MaterialTheme.typography.bodySmall,
+    )
+    Text(
+        stringResource(R.string.expert_observation_connections, exit.activeFlows, exit.pendingFlows),
+        style = MaterialTheme.typography.labelSmall,
+    )
+}
+
 @Composable
 private fun ExpertExitControls(
     exit: ExpertExitState,
@@ -462,10 +495,6 @@ private fun ExpertExitControls(
     ) {
         Text(stringResource(if (awake) R.string.expert_sleep_exit else R.string.expert_wake_exit))
     }
-    Text(
-        stringResource(R.string.expert_observation_connections, exit.activeFlows, exit.pendingFlows),
-        style = MaterialTheme.typography.labelSmall,
-    )
 }
 
 @Composable
