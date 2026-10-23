@@ -35,6 +35,7 @@ import app.lernet.engine.policy.ExpertPolicyPersistence
 import app.lernet.engine.policy.ExpertRuntimeController
 import app.lernet.engine.policy.ExpertRuntimeState
 import app.lernet.engine.policy.ExpertSessionPhase
+import app.lernet.engine.policy.ExpertWorkspaceGate
 import app.lernet.engine.policy.PolicyConfigAssembler
 import app.lernet.engine.policy.tunnelHealth
 import app.lernet.routing.GeoRuleSets
@@ -74,7 +75,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
     private val startGate = DesktopExpertStartGate(mutex)
     private val root = simple.workspaceDirectory()
     private val repository = PolicyWorkspaceRepository(PolicyWorkspaceStore(root.resolve("network-workspace.json")))
-    private val mutable = MutableStateFlow(ExpertUiState(NetworkPolicy(), administrator = WindowsElevation.isElevated))
+    private val mutable = MutableStateFlow(ExpertUiState(NetworkPolicy(), administrator = WindowsElevation.isElevated, workspaceReady = false))
     val state = mutable
     private val closed = AtomicBoolean()
     private val epochOffsetMs = System.currentTimeMillis() - System.nanoTime() / 1_000_000
@@ -224,6 +225,8 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
             adoptedInventory = bundle
             mutable.update {
                 it.copy(
+                    workspaceReady = true,
+                    workspaceError = null,
                     profiles = workspace.legacy.profiles.map { profile ->
                         ExpertProfile(
                             profile.id, profile.name, workspace.legacy.groups.firstOrNull { profile.id in it.profileIds }?.id,
@@ -240,7 +243,16 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                 )
             }
         } catch (failure: Exception) {
-            showFailure("Не удалось прочитать рабочую область", failure)
+            val message = app.lernet.engine.text.UserText.withReason("Не удалось прочитать рабочую область", failure)
+            mutable.update {
+                it.copy(
+                    workspaceError = message,
+                    // Keep workspaceReady if we had a previous successful open; otherwise stay false.
+                    error = message,
+                )
+            }
+            externalError = message
+            writeLog(message)
         }
     }
 
@@ -268,7 +280,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
         }
         scope.launch {
             try {
-                val controller = requireNotNull(runtime) { "Рабочая область ещё загружается" }
+                val controller = ensureRuntime()
                 when (intent) {
                     is UiIntent.SelectScope -> mutable.update { it.copy(selectedScope = intent.scope) }
                     is UiIntent.EditPolicy -> mutex.withLock { controller.handle(RuntimeIntent.Edit(intent.policy)) }
@@ -341,7 +353,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
             mutable.update { it.copy(externalSavePending = null) }
             return@withLock
         }
-        val active = requireNotNull(runtime)
+        val active = ensureRuntime()
         check(
             !active.state.value.applying &&
                 active.state.value.phase !in setOf(ExpertSessionPhase.STARTING, ExpertSessionPhase.STOPPING)
@@ -633,15 +645,29 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
      */
     fun resumeAtSignIn() {
         scope.launch {
-            repeat(60) {
-                if (runtime != null) {
-                    dispatch(UiIntent.Start)
-                    return@launch
-                }
-                delay(500)
+            try {
+                ensureRuntime()
+                dispatch(UiIntent.Start)
+            } catch (failure: Exception) {
+                showFailure("Эксперт не включился при входе в систему", failure)
             }
-            showFailure("Эксперт не включился при входе в систему: рабочая область не загрузилась", null)
         }
+    }
+
+    /**
+     * Waits for the workspace runtime (up to 30 s), forcing one [refreshInventory] if still null.
+     * Throws with an honest message — never the perpetual «ещё загружается» after a failed open.
+     */
+    private suspend fun ensureRuntime(): ExpertRuntimeController {
+        val ready = ExpertWorkspaceGate.await(
+            get = { runtime },
+            refreshOnce = { mutex.withLock { refreshInventory() } },
+            failed = { mutable.value.workspaceError != null && runtime == null },
+        )
+        if (ready != null) return ready
+        val fatal = mutable.value.workspaceError
+        if (fatal != null) error(fatal)
+        error("Рабочая область не загрузилась за 30 с. Нажми «Обновить» в меню Эксперта и повтори.")
     }
 
     private fun present(snapshot: ExpertRuntimeState) {
@@ -655,6 +681,8 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
         val paths = snapshot.inactiveNodeIds
         mutable.update { previous ->
             previous.copy(
+                workspaceReady = true,
+                workspaceError = null,
                 saved = snapshot.saved, draft = snapshot.draft,
                 applied = snapshot.appliedPolicy, appliedRevision = snapshot.appliedRevision,
                 tunnelIdentity = snapshot.tun?.let { "${it.instanceId} · ${it.interfaceId}" },

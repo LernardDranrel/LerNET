@@ -32,6 +32,10 @@ data class ExpertUiState(
     val administrator: Boolean = false,
     val reducedMotion: Boolean = false,
     val busy: Boolean = false,
+    /** False until the first successful workspace open; schema edits must wait. */
+    val workspaceReady: Boolean = true,
+    /** Set when open/decode failed — honest error with retry, not «ещё загружается». */
+    val workspaceError: String? = null,
     val error: String? = null,
     val notice: String? = null,
     val inactiveReasons: Map<String, String> = emptyMap(),

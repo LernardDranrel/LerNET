@@ -89,6 +89,52 @@ class ExpertWorkspaceRenderTest {
         }
     }
 
+
+    @Test
+    fun workspaceLoadingHidesSchemaUntilReady() {
+        val scene = ImageComposeScene(1040, 720, Density(1f)) {
+            MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
+                DesktopExpert(
+                    ExpertUiState(NetworkPolicy(), administrator = true, reducedMotion = true, workspaceReady = false),
+                    {},
+                )
+            }
+        }
+        try {
+            repeat(2) { scene.render(0).close() }
+            val all = nodes(scene).flatMap { texts(it) }
+            assertThat(all).contains("Читаем настройки и конфиги…")
+            assertThat(all.any { "Добавить правило" in it }).isFalse()
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
+    fun workspaceErrorOffersRetryInsteadOfStillLoading() {
+        val scene = ImageComposeScene(1040, 720, Density(1f)) {
+            MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
+                DesktopExpert(
+                    ExpertUiState(
+                        NetworkPolicy(), administrator = true, reducedMotion = true,
+                        workspaceReady = false, workspaceError = "Файл схемы повреждён",
+                    ),
+                    {},
+                )
+            }
+        }
+        try {
+            repeat(2) { scene.render(0).close() }
+            val all = nodes(scene).flatMap { texts(it) }.joinToString("\n")
+            assertThat(all).contains("Рабочая область не загрузилась")
+            assertThat(all).contains("Файл схемы повреждён")
+            assertThat(all).contains("Повторить")
+            assertThat(all).doesNotContain("ещё загружается")
+        } finally {
+            scene.close()
+        }
+    }
+
     private fun screenshot(scene: ImageComposeScene, name: String) {
         repeat(3) { scene.render(0).close() }
         scene.render(0).use { image ->

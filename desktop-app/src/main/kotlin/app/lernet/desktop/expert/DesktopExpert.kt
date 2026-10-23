@@ -147,7 +147,22 @@ fun DesktopExpert(
                     Text("Ждём ответа ядра…", color = ExpertColors.muted)
                 }
             }
-            pageStates.SaveableStateProvider(page.name) {
+            if (!state.workspaceReady) {
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        if (state.workspaceError == null) {
+                            CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
+                            Text("Читаем настройки и конфиги…", color = ExpertColors.muted)
+                        } else {
+                            ExpertMessage("Рабочая область не загрузилась", state.workspaceError, error = true)
+                            OutlinedButton(onClick = { onIntent(ExpertIntent.Refresh) }) { Text("Повторить") }
+                        }
+                    }
+                }
+            } else pageStates.SaveableStateProvider(page.name) {
                 when (page) {
                     ExpertPage.OVERVIEW -> ExpertLiveOverview(
                         state, onIntent, Modifier.weight(1f), { confirmation = it }, openPage = openPage,
