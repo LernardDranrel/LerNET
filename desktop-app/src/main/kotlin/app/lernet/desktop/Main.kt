@@ -629,20 +629,41 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
                     .ifBlank { "Готово к подключению" }
                 // Audit G1/H: the open page is named once, by its highlighted button (no page title repeating it);
                 // the connection state is the strip on top, as on the phone's secondary screens.
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                // Centered segmented tabs (same chrome as VPN|Эксперт), not left-aligned loose OutlinedButtons.
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    ) {
                         // Audit N10/G5: ordinary navigation; the open page is not a toggle and «Правила» keeps the chosen owner.
-                        Tab.entries.forEach { item ->
-                            val chosen = tab == item
-                            OutlinedButton(
-                                onClick = { if (!chosen) tab = item },
-                                colors = if (chosen) ButtonDefaults.outlinedButtonColors(containerColor = desktopColors.secondaryContainer)
-                                    else ButtonDefaults.outlinedButtonColors(),
-                                modifier = Modifier.testTag("top_${item.name.lowercase()}"),
-                            ) {
-                                NavSymbol(item, chosen)
-                                Spacer(Modifier.width(6.dp))
-                                Text(item.label)
+                        Row(
+                            Modifier.selectableGroup().padding(3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Tab.entries.forEach { item ->
+                                val chosen = tab == item
+                                val fill by animateColorAsState(
+                                    if (chosen) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                                    tween(160),
+                                )
+                                Row(
+                                    Modifier.height(34.dp).clip(RoundedCornerShape(9.dp)).background(fill)
+                                        .selectable(chosen, role = Role.Tab, onClick = { if (!chosen) tab = item })
+                                        .testTag("top_${item.name.lowercase()}")
+                                        .padding(horizontal = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    NavSymbol(item, chosen)
+                                    Text(
+                                        item.label,
+                                        fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (chosen) MaterialTheme.colorScheme.onPrimaryContainer
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
                         }
                     }
@@ -711,7 +732,7 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
 
 @Composable
 private fun NavSymbol(tab: Tab, selected: Boolean) {
-    val color = if (selected) desktopColors.primary else muted
+    val color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
     Canvas(Modifier.size(19.dp)) {
         val stroke = 1.8.dp.toPx()
         when (tab) {
