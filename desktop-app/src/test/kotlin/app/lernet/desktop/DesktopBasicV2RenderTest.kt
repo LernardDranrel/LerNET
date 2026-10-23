@@ -28,10 +28,9 @@ class DesktopBasicV2RenderTest {
         val scene = ImageComposeScene(1440, 900, Density(1f)) {
             MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
                 Surface(color = desktopColors.background, contentColor = desktopColors.onBackground) {
-                    Column(Modifier.fillMaxSize()) {
+                    DesktopScreen(controller, {}, {}, topChrome = {
                         DesktopModeTabs(false, {}, reducedMotion = true)
-                        DesktopScreen(controller, {}, {})
-                    }
+                    })
                 }
             }
         }

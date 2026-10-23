@@ -59,10 +59,9 @@ class DesktopHomeV3RenderTest {
         DesktopStore(dir).save(sample())
         val controller = DesktopController(DesktopStore(dir))
         val scene = ImageComposeScene(1440, 900, Density(1f), content = theme {
-            Column(Modifier.fillMaxSize()) {
+            DesktopScreen(controller, {}, {}, topChrome = {
                 DesktopModeTabs(false, {}, reducedMotion = true)
-                DesktopScreen(controller, {}, {})
-            }
+            })
         })
         try {
             shot(scene, "windows-v3-home")

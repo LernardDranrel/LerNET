@@ -293,15 +293,18 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
             Surface(color = background, contentColor = desktopColors.onBackground) {
                 if (startupCheck == null) DesktopUpdatePrompt()
                 Column(Modifier.fillMaxSize()) {
-                    // G1: the connection state is visible on every page of both modes, in one place of constant height.
-                    DesktopModeTabs(expertTab, { expertTab = it },
-                        status = workspaceStatus(expertUi, tunnel, ui).takeUnless { !expertTab && basicHome },
-                        reducedMotion = expertUi?.reducedMotion == true,
-                        onStatusClick = {
-                            val expertOwns = expertUi?.phase in setOf(ExpertPhase.RUNNING, ExpertPhase.STARTING, ExpertPhase.APPLYING, ExpertPhase.FAILED)
-                            expertTab = expertOwns
-                            homeRequest++
-                        })
+                    // G1: Expert keeps the mode strip above its own chrome. VPN puts the same strip in the
+                    // right column so the config sidebar can rise to the window top (no dark hole beside VPN|Эксперт).
+                    if (expertTab) {
+                        DesktopModeTabs(expertTab, { expertTab = it },
+                            status = workspaceStatus(expertUi, tunnel, ui),
+                            reducedMotion = expertUi?.reducedMotion == true,
+                            onStatusClick = {
+                                val expertOwns = expertUi?.phase in setOf(ExpertPhase.RUNNING, ExpertPhase.STARTING, ExpertPhase.APPLYING, ExpertPhase.FAILED)
+                                expertTab = expertOwns
+                                homeRequest++
+                            })
+                    }
                     Crossfade(expertTab, Modifier.weight(1f).fillMaxWidth(),
                         animationSpec = tween(if (expertUi?.reducedMotion == true) 0 else 180), label = "workspace") { showExpert ->
                         modeStates.SaveableStateProvider(showExpert) {
@@ -357,6 +360,15 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
                                 WindowsElevation.relaunchAsAdministrator()
                                     .onSuccess { expert?.close(); controller.close(); exitApplication() }
                                     .onFailure { controller.showMessage(app.lernet.engine.text.UserText.of(it, "Не удалось запросить права администратора")) }
+                            }, topChrome = {
+                                DesktopModeTabs(false, { expertTab = it },
+                                    status = workspaceStatus(expertUi, tunnel, ui).takeUnless { basicHome },
+                                    reducedMotion = expertUi?.reducedMotion == true,
+                                    onStatusClick = {
+                                        val expertOwns = expertUi?.phase in setOf(ExpertPhase.RUNNING, ExpertPhase.STARTING, ExpertPhase.APPLYING, ExpertPhase.FAILED)
+                                        expertTab = expertOwns
+                                        homeRequest++
+                                    })
                             })
                         }
                     }
@@ -554,7 +566,8 @@ private data class ExportSelection(val groupId: String?, val suggestedName: Stri
 
 @Composable
 internal fun DesktopScreen(controller: DesktopController, onRequestElevation: () -> Unit, onOpenNetwork: () -> Unit,
-    preview: DesktopScreenPreview? = null, homeRequest: Int = 0, onHomeShown: (Boolean) -> Unit = {}) {
+    preview: DesktopScreenPreview? = null, homeRequest: Int = 0, onHomeShown: (Boolean) -> Unit = {},
+    topChrome: @Composable () -> Unit = {}) {
     val liveUi by controller.state.collectAsState()
     val liveTunnel by controller.tunnel.state.collectAsState()
     // Screenshot tests show every state without starting a real core; the app itself never passes a preview.
@@ -577,69 +590,63 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
     BoxWithConstraints(Modifier.fillMaxSize()) {
     // Windows up to about 1100 px get a narrower config column with one-line rows.
     val compact = maxWidth < 1100.dp
-    val sidebarWidth = if (compact) 248.dp else 316.dp
-    // Tabs used to sit only in the right column next to the sidebar — that left a dark hole
-    // above «Конфиги» and left of «Главная / Правила / …». Full-width strip above the body.
-    Column(Modifier.fillMaxSize().background(background)) {
-        Row(
-            Modifier.fillMaxWidth().background(desktopColors.surface)
-                .padding(horizontal = 22.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // Audit N10/G5: ordinary navigation; the open page is not a toggle and «Правила» keeps the chosen owner.
-            Tab.entries.forEach { item ->
-                val chosen = tab == item
-                OutlinedButton(
-                    onClick = { if (!chosen) tab = item },
-                    colors = if (chosen) ButtonDefaults.outlinedButtonColors(containerColor = desktopColors.secondaryContainer)
-                        else ButtonDefaults.outlinedButtonColors(),
-                    modifier = Modifier.testTag("top_${item.name.lowercase()}"),
-                ) {
-                    NavSymbol(item, chosen)
-                    Spacer(Modifier.width(6.dp))
-                    Text(item.label)
-                }
-            }
-        }
-        Row(Modifier.weight(1f).fillMaxWidth()) {
-            // Mockup 03: the sidebar is not a menu any more; rules, journal and settings open from the top buttons.
-            // Mockup 03: folders and configs live in a permanent left column (the desktop twin of the phone drawer).
-            DesktopWorkspaceSidebar(onOpenNetwork, width = sidebarWidth) {
-                ConfigList(ui.saved, tunnel, ui.busy, ui.probes, controller, compact = compact,
-                    onImport = { groupId -> importGroupId = groupId; importOpen = true },
-                    onGroupRoutes = { groupId -> routeOwnerId = "grp_$groupId"; tab = Tab.ROUTES },
-                    onExportGroup = { group -> exportRequest = ExportSelection(group.id, "LerNET-${group.name.take(30)}.lernet.json") },
-                    onSelect = { id -> controller.select(id); tab = Tab.PROFILES },
-                    onProfileRoutes = { id -> routeOwnerId = id; tab = Tab.ROUTES },
-                ) {
-                    Box {
-                        GroupActionButton("Добавить конфиг или папку", onClick = { createMenu = true }) { color ->
-                            Text("+", color = color, fontSize = 20.sp, lineHeight = 20.sp)
-                        }
-                        DropdownMenu(createMenu, onDismissRequest = { createMenu = false }) {
-                            DropdownMenuItem(text = { Text("Импортировать конфиг") }, onClick = { importGroupId = null; importOpen = true; createMenu = false })
-                            DropdownMenuItem(text = { Text("Импорт архива LerNET") }, onClick = {
-                                createMenu = false
-                                chooseTransferFile(false)?.let(controller::importFrom)
-                            })
-                            DropdownMenuItem(text = { Text("Создать папку") }, onClick = { newGroupOpen = true; createMenu = false })
-                            DropdownMenuItem(text = { Text("Экспортировать всё") }, onClick = {
-                                createMenu = false
-                                exportRequest = ExportSelection(null, "LerNET-all.lernet.json")
-                            })
-                        }
+    // Sidebar to the window top; VPN|Эксперт + page tabs only in the right column (full-width tabs was wrong).
+    Row(Modifier.fillMaxSize().background(background)) {
+        // Mockup 03: the sidebar is not a menu any more; rules, journal and settings open from the top-right buttons.
+        // Mockup 03: folders and configs live in a permanent left column (the desktop twin of the phone drawer).
+        DesktopWorkspaceSidebar(onOpenNetwork, width = if (compact) 248.dp else 316.dp) {
+            ConfigList(ui.saved, tunnel, ui.busy, ui.probes, controller, compact = compact,
+                onImport = { groupId -> importGroupId = groupId; importOpen = true },
+                onGroupRoutes = { groupId -> routeOwnerId = "grp_$groupId"; tab = Tab.ROUTES },
+                onExportGroup = { group -> exportRequest = ExportSelection(group.id, "LerNET-${group.name.take(30)}.lernet.json") },
+                onSelect = { id -> controller.select(id); tab = Tab.PROFILES },
+                onProfileRoutes = { id -> routeOwnerId = id; tab = Tab.ROUTES },
+            ) {
+                Box {
+                    GroupActionButton("Добавить конфиг или папку", onClick = { createMenu = true }) { color ->
+                        Text("+", color = color, fontSize = 20.sp, lineHeight = 20.sp)
+                    }
+                    DropdownMenu(createMenu, onDismissRequest = { createMenu = false }) {
+                        DropdownMenuItem(text = { Text("Импортировать конфиг") }, onClick = { importGroupId = null; importOpen = true; createMenu = false })
+                        DropdownMenuItem(text = { Text("Импорт архива LerNET") }, onClick = {
+                            createMenu = false
+                            chooseTransferFile(false)?.let(controller::importFrom)
+                        })
+                        DropdownMenuItem(text = { Text("Создать папку") }, onClick = { newGroupOpen = true; createMenu = false })
+                        DropdownMenuItem(text = { Text("Экспортировать всё") }, onClick = {
+                            createMenu = false
+                            exportRequest = ExportSelection(null, "LerNET-all.lernet.json")
+                        })
                     }
                 }
             }
-            Column(
-                Modifier.weight(1f).fillMaxHeight()
-                    .padding(start = 22.dp, end = 22.dp, bottom = 22.dp,
-                        top = if (tab == Tab.PROFILES) 18.dp else 8.dp),
-            ) {
+        }
+        Column(Modifier.weight(1f).fillMaxHeight()) {
+            topChrome()
+            Column(Modifier.weight(1f).fillMaxWidth().padding(22.dp)) {
                 val holding = ui.tried != null && tunnel.status != TunnelStatus.STOPPED
                 val statusLine = if (holding) "Нет связи · VPN держим" else (if (tunnel.status == TunnelStatus.RUNNING) ui.healthMessage else tunnel.message)
                     .ifBlank { "Готово к подключению" }
+                // Audit G1/H: the open page is named once, by its highlighted button (no page title repeating it);
+                // the connection state is the strip on top, as on the phone's secondary screens.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        // Audit N10/G5: ordinary navigation; the open page is not a toggle and «Правила» keeps the chosen owner.
+                        Tab.entries.forEach { item ->
+                            val chosen = tab == item
+                            OutlinedButton(
+                                onClick = { if (!chosen) tab = item },
+                                colors = if (chosen) ButtonDefaults.outlinedButtonColors(containerColor = desktopColors.secondaryContainer)
+                                    else ButtonDefaults.outlinedButtonColors(),
+                                modifier = Modifier.testTag("top_${item.name.lowercase()}"),
+                            ) {
+                                NavSymbol(item, chosen)
+                                Spacer(Modifier.width(6.dp))
+                                Text(item.label)
+                            }
+                        }
+                    }
+                }
                 val progress = ui.busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RECONNECTING)
                 // A connection error is told once, in the InfoBar below; the line here is for other news.
                 if (ui.message.isNotBlank() && ui.message != statusLine && ui.message !in plainStates && !(tab == Tab.PROFILES && progress) &&
@@ -660,6 +667,8 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
                         TextButton(onClick = controller::dismissDeleted) { Text("Закрыть") }
                     }
                 }
+                // Secondary pages: no page title — tight gap under the buttons (journal had a large empty band).
+                Spacer(Modifier.height(if (tab == Tab.PROFILES) 18.dp else 8.dp))
                 when (tab) {
                     Tab.PROFILES -> ProfileHome(ui.saved, tunnel, ui.busy, ui.probes, ui.tunnelLatencyMs, trace, controller,
                         detail = homeDetail(ui, tunnel, holding),

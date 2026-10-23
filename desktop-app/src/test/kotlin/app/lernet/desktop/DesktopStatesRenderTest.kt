@@ -75,11 +75,10 @@ class DesktopStatesRenderTest {
         val stripUi = preview.ui?.invoke(controller.state.value) ?: controller.state.value
         val status = workspaceStatus(null, preview.tunnel ?: TunnelSnapshot(TunnelStatus.STOPPED), stripUi)
         val scene = ImageComposeScene(width, height, Density(1f), content = theme {
-            Column(Modifier.fillMaxSize()) {
-                // As the app: no strip over the basic home (its state is under the button), the strip on other pages.
+            // As the app: mode strip in the right column; no strip status over the basic home.
+            DesktopScreen(controller, {}, {}, preview = preview, topChrome = {
                 DesktopModeTabs(false, {}, status = status.takeIf { preview.page != null && preview.page != "PROFILES" }, reducedMotion = true)
-                DesktopScreen(controller, {}, {}, preview = preview)
-            }
+            })
         })
         try {
             var t = 0L
