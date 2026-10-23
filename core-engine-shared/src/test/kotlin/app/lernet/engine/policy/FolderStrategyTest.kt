@@ -55,9 +55,11 @@ class FolderStrategyTest {
         }
     }
 
-    @Test fun `backups are checked through the tunnel when it is up`() {
-        assertEquals(ReachRoute.TUNNEL, BackupReach.route(tunnelUp = true, tcp = true, userAsked = false))
+    @Test fun `backups are not checked through the live tunnel`() {
+        // Through the active tunnel says nothing about the backup; background skips, the button dials direct.
+        assertEquals(ReachRoute.SKIP, BackupReach.route(tunnelUp = true, tcp = true, userAsked = false))
         assertEquals(ReachRoute.SKIP, BackupReach.route(tunnelUp = true, tcp = false, userAsked = false))
+        assertEquals(ReachRoute.DIRECT, BackupReach.route(tunnelUp = true, tcp = true, userAsked = true))
         assertEquals(ReachRoute.DIRECT, BackupReach.route(tunnelUp = true, tcp = false, userAsked = true))
         assertEquals(ReachRoute.DIRECT, BackupReach.route(tunnelUp = false, tcp = true, userAsked = true))
     }

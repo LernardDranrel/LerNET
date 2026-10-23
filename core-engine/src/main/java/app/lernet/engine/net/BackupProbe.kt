@@ -14,7 +14,7 @@ fun interface BackupProbe {
 
 data class BackupProbeResult(val ok: Boolean, val latencyMs: Long?, val throughTunnel: Boolean)
 
-/** Tunnel first (VPN on, TCP server), otherwise the protected direct dial. */
+/** Follows [BackupReach]: direct dial when the user asked; skip meaningless through-tunnel candidate pings. */
 class TunnelFirstBackupProbe(private val direct: OutboundDialer, private val timeoutMs: Int = 8_000) : BackupProbe {
     override suspend fun check(endpoint: OutboundEndpoint, tunnel: LocalProxyAccess?, userAsked: Boolean): BackupProbeResult? {
         val route = BackupReach.route(tunnel != null, endpoint.transport == ProbeTransport.TCP, userAsked)

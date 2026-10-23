@@ -489,8 +489,8 @@ class HomeViewModel @Inject constructor(
     }
 
     /**
-     * «Проверить» for a config that is not the running one. Through the tunnel the check is one more
-     * connection via the active server; without it, one more connection straight to that server.
+     * «Проверить» for a config that is not the running one. Always dials that server directly
+     * (outside the live tunnel): a ride on the active tunnel would not say anything about the backup.
      * Null when a newer check replaced this one while it waited for the budget.
      */
     private suspend fun checkServer(
@@ -518,7 +518,7 @@ class HomeViewModel @Inject constructor(
             old.copy(probes = old.probes + unique.associateWith { ProfileProbe(running = true, requestId = requestId) })
         }
         // One by one with a random pause, not a burst of parallel handshakes to every server.
-        // With the VPN on, servers are reached through it, so this network sees no new connections.
+        // Non-active: direct dial outside the tunnel; FULL = conscious separate path (LinkCheck.DIAGNOSTIC).
         val probe = app.lernet.engine.net.TunnelFirstBackupProbe(AndroidProtectedDialer(), timeoutMs = app.lernet.engine.policy.LinkCheck.TIMEOUT_MS)
         try {
             for ((index, id) in unique.withIndex()) {

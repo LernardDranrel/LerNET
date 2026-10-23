@@ -102,17 +102,19 @@ data class BackupHealth(val ok: Boolean, val latencyMs: Long?, val checkedAtMs: 
 enum class ReachRoute { TUNNEL, DIRECT, SKIP }
 
 /**
- * How to check a backup server. With the VPN on, a TCP server is reached through the running
- * tunnel (CONNECT on LerNET's internal listener), so the local network sees no connection to the
- * backup. A UDP server cannot pass that listener: the background check skips it, the button
- * checks it directly because the user asked for it. With the VPN off there is no tunnel.
+ * How to check a backup server.
  *
- * Note: a check through the tunnel proves the server is alive, not that the local network lets
- * it through; failover still dials the chosen backup directly before switching.
+ * A CONNECT through the *live* tunnel to another config's host only proves the active path still
+ * works — it says nothing about that backup. So when the tunnel is up we do not use it for
+ * candidate/«Проверить» checks: background skips, a user press dials the host directly (outside
+ * the tunnel). «Через VPN» for a non-active config is a conscious full check of that config
+ * (LinkCheck.DIAGNOSTIC), not a ride on the current tunnel. Failover still dials the chosen
+ * backup directly before switching.
  */
 object BackupReach {
+    /** @param tcp kept for shared call sites; UDP cannot CONNECT-preflight either way. */
+    @Suppress("UNUSED_PARAMETER")
     fun route(tunnelUp: Boolean, tcp: Boolean, userAsked: Boolean): ReachRoute = when {
-        tunnelUp && tcp -> ReachRoute.TUNNEL
         tunnelUp && !userAsked -> ReachRoute.SKIP
         else -> ReachRoute.DIRECT
     }

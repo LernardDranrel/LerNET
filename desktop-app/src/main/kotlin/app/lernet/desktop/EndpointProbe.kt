@@ -100,9 +100,8 @@ object EndpointProbe {
     }
 
     /**
-     * With the VPN on: reach the server through the running tunnel (CONNECT on LerNET's internal
-     * listener), so this network sees no connection to it. Proves the server is alive, not that
-     * this network lets it through.
+     * Legacy CONNECT through the running tunnel. Not used for non-active «Проверить» any more
+     * (that only proved the active path). Kept for any remaining call site that still needs it.
      */
     fun checkThroughTunnel(profile: StoredProfile, access: app.lernet.config.net.LocalProxyAccess, timeoutMs: Int = 15_000): ProbeResult {
         val protocol = protocol(profile)

@@ -443,7 +443,7 @@ class DesktopController(
             profile.id to ticket
         }
         // One by one with a random pause, not a burst of parallel handshakes to every server.
-        // With the VPN on, TCP servers are reached through it, so this network sees nothing new.
+        // Non-active configs: «До сервера» is a direct dial (outside the tunnel); «Через VPN» only via FULL.
         probePool.submit {
             profiles.forEachIndexed { index, profile ->
                 val ticket = tickets.getValue(profile.id)
@@ -456,9 +456,9 @@ class DesktopController(
                     message = "Проверяем…", checking = true,
                     tunnelMessage = ProbeResult.WAITING, serverProtocol = EndpointProbe.protocol(profile),
                 ))) }
-                // One algorithm with Android (LinkCheck): budget first, one by one, never a second core.
-                // Another config goes through the VPN only when LerNET's internal listener is there to carry it.
-                val plan = LinkCheck.plan(active, running && (active || access != null), EndpointProbe.isTcp(profile), intensity)
+                // One algorithm with Android (LinkCheck): budget first, one by one; FULL may open a temp core.
+                // vpnRunning for plan = tunnel is up (active uses LIVE; others dial direct / DIAGNOSTIC).
+                val plan = LinkCheck.plan(active, running, EndpointProbe.isTcp(profile), intensity)
                 when (plan.server) {
                     LinkCheck.Server.LIVE -> {
                         // The running config: one fresh request through the VPN, budgeted like any connection.
@@ -473,9 +473,13 @@ class DesktopController(
                         ))) }
                     }
                     LinkCheck.Server.THROUGH_VPN -> {
-                        // Through the tunnel every check is one more connection via the active server.
+                        // Legacy path (no longer chosen by LinkCheck.plan). Kept so an old call cannot NPE.
+                        if (access == null) {
+                            probeDirect(profile, ticket, plan)
+                            return@forEachIndexed
+                        }
                         if (!awaitBudgetShowing(profile.id, ticket, null)) return@forEachIndexed
-                        val result = EndpointProbe.checkThroughTunnel(profile, access!!, timeoutMs = LinkCheck.TIMEOUT_MS)
+                        val result = EndpointProbe.checkThroughTunnel(profile, access, timeoutMs = LinkCheck.TIMEOUT_MS)
                         if (probeTickets[profile.id] != ticket) return@forEachIndexed
                         mutable.update { it.copy(probes = it.probes + (profile.id to result.copy(
                             tunnelMessage = LinkCheck.notMeasured(plan.fullPath).orEmpty(),

@@ -5,8 +5,11 @@ package app.lernet.engine.policy
  *
  * Every step that opens a connection takes the budget first (of the active server when it goes through the
  * VPN, of the checked server when it goes straight to it), and checks run one by one with a random pause
- * (BackupRotation.buttonGapMs). No step starts a second core: a full path through another config is checked
- * when the user switches or connects to it, so the button never adds a full handshake from this network.
+ * (BackupRotation.buttonGapMs). No gentle step starts a second core: a full path through another config is
+ * measured only by a conscious «Полная проверка» (DIAGNOSTIC) or when the user switches/connects to it.
+ *
+ * With the VPN on, «До сервера» for a non-active config is always a direct dial (outside the tunnel).
+ * Checking another config through the live tunnel would only prove the *active* path still works.
  */
 object LinkCheck {
     /** One step's limit; the same as the tunnel checks of the monitor. */
@@ -34,10 +37,13 @@ object LinkCheck {
         /** The running config: the value measured by the connection itself; nothing new is opened. */
         LIVE,
 
-        /** A TCP connection to the server through the running VPN; this network sees nothing new. */
+        /**
+         * Legacy: TCP CONNECT through the running VPN to another config's host.
+         * Not chosen by [plan] any more — that path only proved the active tunnel, not the backup.
+         */
         THROUGH_VPN,
 
-        /** A TCP connection straight to the server (VPN off, or a UDP config the VPN cannot CONNECT to). */
+        /** A TCP connection straight to the server (outside the tunnel). */
         DIRECT,
     }
 
@@ -52,19 +58,24 @@ object LinkCheck {
         /** Not measured now: checked when the user connects. */
         ON_CONNECT,
 
-        /** Conscious full check: temporary core / full path even with VPN off (extra handshake). */
+        /** Conscious full check: temporary core / full path for this config (extra handshake). */
         DIAGNOSTIC,
     }
 
     data class Plan(val server: Server, val fullPath: FullPath)
 
+    /**
+     * @param tcp kept so Android and Windows call sites stay identical; UDP still cannot CONNECT-preflight
+     *   and falls through the same DIRECT / ON_SWITCH words.
+     */
+    @Suppress("UNUSED_PARAMETER")
     fun plan(active: Boolean, vpnRunning: Boolean, tcp: Boolean, intensity: Intensity = Intensity.GENTLE): Plan = when {
+        // Active config may use the live tunnel even for a full press — nothing else is more honest.
         active && vpnRunning -> Plan(Server.LIVE, FullPath.RUNNING_VPN)
-        intensity == Intensity.FULL && !vpnRunning -> Plan(Server.DIRECT, FullPath.DIAGNOSTIC)
-        vpnRunning -> Plan(
-            if (BackupReach.route(tunnelUp = true, tcp = tcp, userAsked = true) == ReachRoute.TUNNEL) Server.THROUGH_VPN else Server.DIRECT,
-            FullPath.ON_SWITCH,
-        )
+        // Conscious full check of any other config (VPN on or off): separate path, not the live tunnel.
+        intensity == Intensity.FULL -> Plan(Server.DIRECT, FullPath.DIAGNOSTIC)
+        // VPN on, another config: «До сервера» straight to the host; full path waits for switch / full button.
+        vpnRunning -> Plan(Server.DIRECT, FullPath.ON_SWITCH)
         else -> Plan(Server.DIRECT, FullPath.ON_CONNECT)
     }
 
