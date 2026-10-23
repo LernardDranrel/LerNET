@@ -75,6 +75,8 @@ fun DesktopExpert(
     frameAnimateIn: Boolean = true,
     configLibrary: (@Composable (Modifier) -> Unit)? = null,
     appSettings: (@Composable (Modifier) -> Unit)? = null,
+    /** VPN|Эксперт strip — lives only in the right column so the sidebar reaches the window top. */
+    topChrome: @Composable () -> Unit = {},
 ) {
     // G3: the section is remembered for the session (mode switches included); a new launch opens the pult.
     var pageName by rememberSaveable { mutableStateOf(ExpertPage.OVERVIEW.name) }
@@ -102,8 +104,8 @@ fun DesktopExpert(
             }
         },
     ) {
-        // m3 / N1, N6: the Expert sections live in the left column (NavigationView), not in a strip at the bottom.
-        DesktopWorkspaceSidebar({ onIntent(ExpertIntent.OpenNetworkObservation) }) { // the mode is in the VPN | Эксперт switch above; «LerNET · Эк…» was cut
+        // m3 / N1, N6: sections in the left column; flush to the window top (same nesting as VPN DesktopScreen).
+        DesktopWorkspaceSidebar({ onIntent(ExpertIntent.OpenNetworkObservation) }) {
             Column(Modifier.semantics { contentDescription = "Разделы Эксперта" }) {
                 ExpertNavPages.forEach { item ->
                     WorkspaceNavigationItem(item.title, page == item, { openPage(item) }, badge = navBadge(item, state))
@@ -119,12 +121,14 @@ fun DesktopExpert(
                 WorkspaceNavigationItem(ExpertPage.APP_SETTINGS.title, page == ExpertPage.APP_SETTINGS, { openPage(ExpertPage.APP_SETTINGS) })
             }
         }
-        app.lernet.ui.controls.ExpertFramedBox(
-            app.lernet.ui.controls.ExpertFrameSpec.Windows,
-            Modifier.weight(1f).fillMaxHeight(),
-            lit = if (state.phase == ExpertPhase.RUNNING) 1f else 0.35f,
-            animateIn = frameAnimateIn && !state.reducedMotion,
-        ) {
+        Column(Modifier.weight(1f).fillMaxHeight()) {
+            topChrome()
+            app.lernet.ui.controls.ExpertFramedBox(
+                app.lernet.ui.controls.ExpertFrameSpec.Windows,
+                Modifier.weight(1f).fillMaxWidth(),
+                lit = if (state.phase == ExpertPhase.RUNNING) 1f else 0.35f,
+                animateIn = frameAnimateIn && !state.reducedMotion,
+            ) {
         Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(Modifier.weight(1f)) {
@@ -202,6 +206,7 @@ fun DesktopExpert(
             if (state.hasDraftChanges || (state.phase == ExpertPhase.RUNNING && state.appliedRevision != null && state.hasUnappliedChanges)) {
                 DraftActions(state, validation, onIntent) { confirmation = it }
             }
+        }
         }
         }
     }

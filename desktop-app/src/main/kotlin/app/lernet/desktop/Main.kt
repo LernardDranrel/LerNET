@@ -293,25 +293,23 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
             Surface(color = background, contentColor = desktopColors.onBackground) {
                 if (startupCheck == null) DesktopUpdatePrompt()
                 Column(Modifier.fillMaxSize()) {
-                    // G1: Expert keeps the mode strip above its own chrome. VPN puts the same strip in the
-                    // right column so the config sidebar can rise to the window top (no dark hole beside VPN|Эксперт).
-                    if (expertTab) {
-                        DesktopModeTabs(expertTab, { expertTab = it },
-                            status = workspaceStatus(expertUi, tunnel, ui),
-                            reducedMotion = expertUi?.reducedMotion == true,
-                            onStatusClick = {
-                                val expertOwns = expertUi?.phase in setOf(ExpertPhase.RUNNING, ExpertPhase.STARTING, ExpertPhase.APPLYING, ExpertPhase.FAILED)
-                                expertTab = expertOwns
-                                homeRequest++
-                            })
-                    }
+                    // Both modes: VPN|Эксперт only in the right column so the sidebar reaches the window top.
                     Crossfade(expertTab, Modifier.weight(1f).fillMaxWidth(),
                         animationSpec = tween(if (expertUi?.reducedMotion == true) 0 else 180), label = "workspace") { showExpert ->
                         modeStates.SaveableStateProvider(showExpert) {
                             if (showExpert && expert != null && expertUi != null) {
                                 val splash = rememberDesktopExpertSplash()
                                 Box(Modifier.fillMaxSize()) {
-                                DesktopExpert(expertUi, frameAnimateIn = !splash.firstEntry, onIntent = { intent ->
+                                DesktopExpert(expertUi, frameAnimateIn = !splash.firstEntry, topChrome = {
+                                    DesktopModeTabs(true, { expertTab = it },
+                                        status = workspaceStatus(expertUi, tunnel, ui),
+                                        reducedMotion = expertUi?.reducedMotion == true,
+                                        onStatusClick = {
+                                            val expertOwns = expertUi?.phase in setOf(ExpertPhase.RUNNING, ExpertPhase.STARTING, ExpertPhase.APPLYING, ExpertPhase.FAILED)
+                                            expertTab = expertOwns
+                                            homeRequest++
+                                        })
+                                }, onIntent = { intent ->
                                     when (intent) {
                                         ExpertIntent.OpenNetworkObservation -> networkWindowOpen = true
                                         ExpertIntent.Import -> chooseTransferFile(false)?.let { file ->

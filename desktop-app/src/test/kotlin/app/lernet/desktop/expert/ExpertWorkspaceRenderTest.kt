@@ -1,11 +1,8 @@
 package app.lernet.desktop.expert
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.ImageComposeScene
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -31,15 +28,21 @@ class ExpertWorkspaceRenderTest {
             val scene = ImageComposeScene(width, height, Density(1f)) {
                 MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
                     androidx.compose.material3.Surface(color = desktopColors.background, contentColor = desktopColors.onBackground) {
-                        Column(Modifier.fillMaxSize()) {
-                            DesktopModeTabs(true, modes::add, reducedMotion = true)
-                            DesktopExpert(ExpertUiState(NetworkPolicy(), administrator = true, reducedMotion = true), intents::add)
-                        }
+                        DesktopExpert(
+                            ExpertUiState(NetworkPolicy(), administrator = true, reducedMotion = true),
+                            intents::add,
+                            topChrome = { DesktopModeTabs(true, modes::add, reducedMotion = true) },
+                        )
                     }
                 }
             }
             try {
                 screenshot(scene, "workspace-$width-overview")
+                // Sidebar flush to window top (same nesting as VPN): brand sits above the mode-tab strip height.
+                val brand = nodes(scene).first { "для Windows" in texts(it) }
+                assertThat(brand.boundsInRoot.top).isAtMost(40f)
+                val vpnTab = nodes(scene).first { "VPN" in texts(it) && it.config.getOrNull(SemanticsActions.OnClick) != null }
+                assertThat(vpnTab.boundsInRoot.left).isAtLeast(196f)
                 // The pult content («Своя схема») sits right of the section column (N1: sections live in the left column).
                 val heading = nodes(scene).first { "Своя схема" in texts(it) }
                 assertThat(heading.boundsInRoot.left).isAtLeast(218f)
@@ -54,7 +57,6 @@ class ExpertWorkspaceRenderTest {
                     navigation.config[SemanticsActions.OnClick].action!!.invoke()
                     screenshot(scene, "workspace-$width-${title.hashCode()}")
                 }
-                val vpnTab = nodes(scene).first { "VPN" in texts(it) && it.config.getOrNull(SemanticsActions.OnClick) != null }
                 vpnTab.config[SemanticsActions.OnClick].action!!.invoke()
                 assertThat(modes).containsExactly(false)
                 assertThat(intents).isEmpty()
@@ -171,7 +173,13 @@ class ExpertWorkspaceRenderTest {
         repeat(3) { scene.render(0).close() }
         scene.render(0).use { image ->
             val bytes = requireNotNull(image.encodeToData(EncodedImageFormat.PNG)).use { it.bytes }
-            File("build/expert-ui-review").apply { mkdirs() }.resolve("$name.png").writeBytes(bytes)
+            listOf(
+                File("build/expert-ui-review"),
+                File("/workspace/projects/LerNET-ui3/out/windows-expert-ui"),
+            ).forEach { dir ->
+                dir.mkdirs()
+                dir.resolve("$name.png").writeBytes(bytes)
+            }
         }
     }
 

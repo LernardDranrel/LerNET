@@ -1,7 +1,6 @@
 package app.lernet.desktop.expert
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -64,16 +63,21 @@ class DesktopExpertV2Test {
         val scene = ImageComposeScene(1440, 900, Density(1f)) {
             MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
                 androidx.compose.material3.Surface(color = desktopColors.background, contentColor = desktopColors.onBackground) {
-                    Column(Modifier.fillMaxSize()) {
-                        DesktopModeTabs(true, {}, reducedMotion = true)
-                        DesktopExpert(state, intents::add, frameAnimateIn = false)
-                    }
+                    DesktopExpert(
+                        state, intents::add, frameAnimateIn = false,
+                        topChrome = { DesktopModeTabs(true, {}, reducedMotion = true) },
+                    )
                 }
             }
         }
         try {
             screenshot(scene, "windows-expert-v2-pult")
             assertThat(nodes(scene).any { "14 дн 06 ч" in texts(it) }).isTrue()
+            // Sidebar to the window top: brand above mode tabs; sections stay in the left column.
+            val brand = nodes(scene).first { "для Windows" in texts(it) }
+            assertThat(brand.boundsInRoot.top).isAtMost(40f)
+            val vpnTab = nodes(scene).first { "VPN" in texts(it) && it.config.getOrNull(SemanticsActions.OnClick) != null }
+            assertThat(vpnTab.boundsInRoot.left).isAtLeast(196f)
             // N1: the sections live in the left column (196 dp), not in a strip at the bottom.
             listOf("Схема" to "schema", "Конфиги" to "configs", "Проверка пути" to "rules", "События" to "events").forEach { (title, file) ->
                 val tab = nodes(scene).first { title in texts(it) && it.config.getOrNull(SemanticsActions.OnClick) != null }
@@ -169,7 +173,13 @@ class DesktopExpertV2Test {
         repeat(4) { scene.render(t).close(); t += 500_000_000L }
         scene.render(t).use { image ->
             val bytes = requireNotNull(image.encodeToData(EncodedImageFormat.PNG)).use { it.bytes }
-            File("build/expert-ui-review").apply { mkdirs() }.resolve("$name.png").writeBytes(bytes)
+            listOf(
+                File("build/expert-ui-review"),
+                File("/workspace/projects/LerNET-ui3/out/windows-expert-ui"),
+            ).forEach { dir ->
+                dir.mkdirs()
+                dir.resolve("$name.png").writeBytes(bytes)
+            }
         }
     }
 
