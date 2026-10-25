@@ -136,4 +136,48 @@ class DesktopHomeV3RenderTest {
         return scene.semanticsOwners.flatMap { flatten(it.rootSemanticsNode) }
             .flatMap { it.config.getOrNull(SemanticsProperties.Text).orEmpty().map { t -> t.text } }
     }
+    @Test
+    fun `vpn sidebar keeps config column with subscription folder`() {
+        val subUrl = "https://example.com/sub"
+        fun profile(id: String, name: String, group: String?, subscriptionUrl: String? = null) = StoredProfile(
+            id, name, "VLESS",
+            listOf(StoredOutbound("o-$id", "proxy", "vless",
+                """{"type":"vless","tag":"proxy","server":"$id.example.net","server_port":443,"uuid":"00000000-0000-4000-8000-000000000000"}""")),
+            "o-$id", groupId = group, subscriptionUrl = subscriptionUrl,
+        )
+        val state = StoredState(
+            groups = listOf(
+                StoredGroup("work", "Работа", autoSwap = true),
+                StoredGroup("sub", "Подписка · example.com", autoSwap = true, subscriptionUrl = subUrl),
+            ),
+            profiles = listOf(
+                profile("nl", "Нидерланды", "work"),
+                profile("de", "Германия", "work"),
+                profile("sg", "Сингапур", "sub", subUrl),
+                profile("jp", "Токио", "sub", subUrl),
+            ),
+            selectedProfileId = "nl",
+        )
+        val dir = Files.createTempDirectory("lernet-vpn-sub")
+        DesktopStore(dir).save(state)
+        val controller = DesktopController(DesktopStore(dir))
+        val scene = ImageComposeScene(1440, 900, Density(1f), content = theme {
+            DesktopScreen(controller, {}, {}, topChrome = {
+                DesktopModeTabs(false, {}, reducedMotion = true)
+            })
+        })
+        try {
+            shot(scene, "windows-vpn-sidebar-subscription")
+            File("/workspace/projects/LerNET-ui3/out/vpn-sidebar").mkdirs()
+            File("build/expert-ui-review/windows-vpn-sidebar-subscription.png")
+                .copyTo(File("/workspace/projects/LerNET-ui3/out/vpn-sidebar/windows-vpn-sidebar-subscription.png"), overwrite = true)
+            val all = texts(scene)
+            listOf("Конфиги · 4", "Работа", "Подписка · example.com", "Сингапур", "Токио", "Анализ сети ↗").forEach {
+                assertThat(all).contains(it)
+            }
+        } finally {
+            scene.close()
+            controller.close()
+        }
+    }
 }

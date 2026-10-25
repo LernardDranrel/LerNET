@@ -47,6 +47,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.ShadowDialog
 
 /**
  * Review shots for owner: Expert Пульт / Конфиги / События + drawer «Анализ сети».
@@ -60,17 +61,37 @@ class ExpertReviewShotsTest {
 
     private val outDir = File("/workspace/projects/LerNET-ui3/out/android-expert-ui").also { it.mkdirs() }
 
-    private fun profile(id: String, name: String) = TransferProfile(
+    private val subUrl = "https://example.com/sub"
+
+    private fun profile(id: String, name: String, subscriptionUrl: String? = null) = TransferProfile(
         id, name, "VLESS",
         listOf(TransferOutbound("main", "proxy", "vless", """{"type":"vless","server":"ex.invalid","server_port":443}""")),
         "main",
+        subscriptionUrl = subscriptionUrl,
     )
 
     private val work = TransferGroup("work", "Работа", listOf("nl", "de"), autoSwap = true)
+    private val subscription = TransferGroup(
+        "sub", "Подписка · example.com", listOf("sg", "jp", "us"),
+        autoSwap = true, subscriptionUrl = subUrl,
+    )
     private val bundle = TransferBundle(
         scope = "all",
         groups = listOf(work),
         profiles = listOf(profile("nl", "Нидерланды"), profile("de", "Германия"), profile("fi", "Финляндия")),
+        rules = emptyList(),
+    )
+    private val subscriptionBundle = TransferBundle(
+        scope = "all",
+        groups = listOf(work, subscription),
+        profiles = listOf(
+            profile("nl", "Нидерланды"),
+            profile("de", "Германия"),
+            profile("fi", "Финляндия"),
+            profile("sg", "Сингапур", subUrl),
+            profile("jp", "Токио", subUrl),
+            profile("us", "США", subUrl),
+        ),
         rules = emptyList(),
     )
     private val channel = PolicyChannel("ch1", "Офис", PolicyScope.Device, PolicyTarget.Profile("nl"))
@@ -80,10 +101,22 @@ class ExpertReviewShotsTest {
             FolderPolicy(folderId = "work", selection = FolderSelection.PREFERRED, preferredProfileId = "nl", autoSwap = true),
         ),
     )
+    private val subscriptionPolicy = NetworkPolicy(
+        channels = listOf(channel),
+        folderPolicies = listOf(
+            FolderPolicy(folderId = "work", selection = FolderSelection.PREFERRED, preferredProfileId = "nl", autoSwap = true),
+            FolderPolicy(folderId = "sub", selection = FolderSelection.STABLE, preferredProfileId = "sg", autoSwap = true),
+        ),
+    )
     private val exits = listOf(
         ExpertExitState(ExpertExitKey("nl"), ExitPhase.READY, latencyMs = 38, activeFlows = 12, pendingFlows = 0),
         ExpertExitState(ExpertExitKey("de"), ExitPhase.SLEEPING, latencyMs = 51, activeFlows = 0),
         ExpertExitState(ExpertExitKey("nl", channelId = "ch1"), ExitPhase.READY, latencyMs = 42, activeFlows = 3),
+    )
+    private val subscriptionExits = exits + listOf(
+        ExpertExitState(ExpertExitKey("sg"), ExitPhase.READY, latencyMs = 64, activeFlows = 4, pendingFlows = 0),
+        ExpertExitState(ExpertExitKey("jp"), ExitPhase.READY, latencyMs = 91, activeFlows = 1),
+        ExpertExitState(ExpertExitKey("us"), ExitPhase.SLEEPING, latencyMs = 120, activeFlows = 0),
     )
     private val runtime = ExpertRuntimeState(
         saved = policy, draft = policy,
@@ -92,12 +125,22 @@ class ExpertReviewShotsTest {
         tun = TunIdentity("tun"), appliedRevision = 1, appliedPolicy = policy,
         exits = exits, selectedFolderProfiles = mapOf("work" to "nl"),
     )
+    private val subscriptionRuntime = ExpertRuntimeState(
+        saved = subscriptionPolicy, draft = subscriptionPolicy,
+        phase = ExpertSessionPhase.RUNNING, desiredEnabled = true,
+        runningSinceEpochMs = System.currentTimeMillis() - ((14 * 24 + 6) * 60 + 5) * 60_000L,
+        tun = TunIdentity("tun"), appliedRevision = 1, appliedPolicy = subscriptionPolicy,
+        exits = subscriptionExits,
+        selectedFolderProfiles = mapOf("work" to "nl", "sub" to "sg"),
+    )
 
-    private fun capture(name: String) {
+    private fun capture(name: String, waitIdle: Boolean = true) {
         val file = File(outDir, name)
-        rule.waitForIdle()
+        if (waitIdle) rule.waitForIdle()
         rule.runOnUiThread {
-            val view = rule.activity.window.decorView
+            // AlertDialog lives in its own window; prefer it when open so review shots show menus.
+            val view = ShadowDialog.getLatestDialog()?.takeIf { it.isShowing }?.window?.decorView
+                ?: rule.activity.window.decorView
             val bitmap = Bitmap.createBitmap(view.width.coerceAtLeast(1), view.height.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
             view.draw(Canvas(bitmap))
             file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -105,15 +148,26 @@ class ExpertReviewShotsTest {
         }
     }
 
-    private fun expert(section: ExpertSection) {
+    private fun expert(
+        section: ExpertSection,
+        ui: ExpertUiState = ExpertUiState(runtime, bundle),
+        onCopyProfile: (suspend (String) -> Unit)? = { },
+        onRenameFolder: (suspend (String, String) -> Unit)? = { _, _ -> },
+        onDeleteFolder: (suspend (String) -> Unit)? = { },
+        onRefreshSubscription: (suspend (String) -> String)? = { "Список обновлён" },
+    ) {
         rule.setContent {
             LerNetTheme {
                 ExpertScreen(
-                    ExpertUiState(runtime, bundle),
+                    ui,
                     remember { SnackbarHostState() },
                     {}, {}, {}, {}, {}, false,
                     // Stub so advanced SOCKS/HTTP stays a TextButton, not a primary CTA.
                     onSaveExternal = { _, _ -> null },
+                    onCopyProfile = onCopyProfile,
+                    onRenameFolder = onRenameFolder,
+                    onDeleteFolder = onDeleteFolder,
+                    onRefreshSubscription = onRefreshSubscription,
                     selectedSection = section, onSectionChange = {},
                     onSettings = {}, onOpenDiag = {},
                 )
@@ -201,5 +255,30 @@ class ExpertReviewShotsTest {
     fun events() {
         expert(ExpertSection.JOURNAL)
         capture("04-events.png")
+    }
+
+    @Test
+    @Config(qualifiers = "w390dp-h1800dp-xxhdpi")
+    fun configsSubscription() {
+        expert(ExpertSection.EXITS, ExpertUiState(subscriptionRuntime, subscriptionBundle))
+        rule.onNodeWithTag("expert_exits_configs").assertIsDisplayed()
+        rule.onNodeWithTag("expert_folder_work").assertIsDisplayed()
+        rule.onNodeWithTag("expert_folder_sub").assertIsDisplayed()
+        rule.onNodeWithTag("expert_subscription_icon_sub").assertIsDisplayed()
+        rule.onNodeWithTag("expert_config_row_sg").assertIsDisplayed()
+        rule.onNodeWithTag("expert_config_row_jp").assertIsDisplayed()
+        rule.onNodeWithTag("expert_config_row_us").assertIsDisplayed()
+        capture("05-configs-subscription.png")
+    }
+
+
+    @Test
+    @Config(qualifiers = "w390dp-h1800dp-xxhdpi")
+    fun configsSubscriptionConfigCopy() {
+        expert(ExpertSection.EXITS, ExpertUiState(subscriptionRuntime, subscriptionBundle))
+        rule.onNodeWithTag("expert_config_row_sg").assertIsDisplayed().performClick()
+        rule.onNodeWithTag("expert_subscription_copy").assertIsDisplayed()
+        rule.onNodeWithText("Этот конфиг из подписки", substring = true).assertIsDisplayed()
+        capture("07-subscription-config-copy.png")
     }
 }

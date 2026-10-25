@@ -13,6 +13,8 @@ import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onRoot
 import app.lernet.config.model.Group
 import app.lernet.config.model.Profile
@@ -242,5 +244,48 @@ class HomeStatesScreenshotTest {
         }
         rule.mainClock.advanceTimeBy(2_000)
         save("phone-drawer")
+    }
+
+    @Test
+    fun drawerWithSubscription() {
+        rule.mainClock.autoAdvance = false
+        val subUrl = "https://example.com/sub"
+        val sg = profile("sg", "Сингапур").copy(subscriptionUrl = subUrl)
+        val jp = profile("jp", "Токио").copy(subscriptionUrl = subUrl)
+        val sub = Group("sub", "Подписка · example.com", listOf("sg", "jp"), autoFailover = true, subscriptionUrl = subUrl)
+        rule.setContent {
+            LerNetTheme {
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+                    Box {
+                        ConfigDrawer(
+                            profiles = listOf(nl, de, fi, solo, sg, jp),
+                            groups = listOf(group, home, sub),
+                            activeProfileId = "nl",
+                            probes = mapOf(
+                                "nl" to ProfileProbe(tcpMs = 38, reachable = true, tunnelMs = 142, tunnelChecked = true),
+                                "de" to ProfileProbe(tcpMs = 51, reachable = true),
+                                "fi" to ProfileProbe(tcpMs = null, reachable = false),
+                                "sg" to ProfileProbe(tcpMs = 64, reachable = true),
+                                "jp" to ProfileProbe(tcpMs = 91, reachable = true),
+                            ),
+                            actions = DrawerActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {},
+                                { _, _, _ -> }, { _, _ -> }, {}, { _, _ -> }, { _, _ -> }, { _, _ -> }),
+                            onNetworkAnalysis = {},
+                        )
+                    }
+                }
+            }
+        }
+        rule.mainClock.advanceTimeBy(2_000)
+        // Expand subscription folder so configs show in the VPN drawer shot.
+        rule.onNodeWithText("Подписка · example.com").performClick()
+        rule.mainClock.advanceTimeBy(500)
+        save("phone-drawer-subscription")
+        File("/workspace/projects/LerNET-ui3/out/vpn-sidebar").mkdirs()
+        File("build/reports/ui/states/phone-drawer-subscription.png")
+            .copyTo(File("/workspace/projects/LerNET-ui3/out/vpn-sidebar/android-vpn-drawer-subscription.png"), overwrite = true)
+        File("build/reports/ui/states/phone-drawer.png")
+            .takeIf { it.exists() }
+            ?.copyTo(File("/workspace/projects/LerNET-ui3/out/vpn-sidebar/android-vpn-drawer-before.png"), overwrite = true)
     }
 }

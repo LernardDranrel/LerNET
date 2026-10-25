@@ -14,6 +14,8 @@ import androidx.compose.ui.unit.Density
 import app.lernet.desktop.DesktopModeTabs
 import app.lernet.desktop.desktopColors
 import app.lernet.desktop.desktopTypography
+import app.lernet.routing.policy.FolderPolicy
+import app.lernet.routing.policy.FolderSelection
 import app.lernet.routing.policy.NetworkPolicy
 import com.google.common.truth.Truth.assertThat
 import java.io.File
@@ -101,6 +103,61 @@ class DesktopExpertV2Test {
         try {
             screenshot(scene, "windows-expert-v2-splash")
             assertThat(nodes(scene).any { "Эксперт" in texts(it) }).isTrue()
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
+    fun `configs page shows subscription folder with globe and copy action`() {
+        val subUrl = "https://example.com/sub"
+        val folders = listOf(
+            ExpertFolder("work", "Работа"),
+            ExpertFolder("sub", "Подписка · example.com", subUrl),
+        )
+        val profiles = listOf(
+            ExpertProfile("nl", "Нидерланды", folderId = "work", protocol = "VLESS"),
+            ExpertProfile("de", "Германия", folderId = "work", protocol = "VLESS"),
+            ExpertProfile("sg", "Сингапур", folderId = "sub", protocol = "VLESS", subscriptionUrl = subUrl),
+            ExpertProfile("jp", "Токио", folderId = "sub", protocol = "VLESS", subscriptionUrl = subUrl),
+            ExpertProfile("us", "США", folderId = "sub", protocol = "VLESS", subscriptionUrl = subUrl),
+        )
+        val policy = NetworkPolicy(
+            folderPolicies = listOf(
+                FolderPolicy(folderId = "work", selection = FolderSelection.PREFERRED, preferredProfileId = "nl", autoSwap = true),
+                FolderPolicy(folderId = "sub", selection = FolderSelection.STABLE, preferredProfileId = "sg", autoSwap = true),
+            ),
+        )
+        val exits = listOf(
+            ExpertExit("nl", "Нидерланды", "Работа", app.lernet.engine.policy.ExitPhase.READY, profileId = "nl", folderId = "work", latencyMs = 38, activeFlows = 5),
+            ExpertExit("sg", "Сингапур", "Подписка", app.lernet.engine.policy.ExitPhase.READY, profileId = "sg", folderId = "sub", latencyMs = 64, activeFlows = 2),
+            ExpertExit("jp", "Токио", "Подписка", app.lernet.engine.policy.ExitPhase.READY, profileId = "jp", folderId = "sub", latencyMs = 91),
+        )
+        val state = ExpertUiState(
+            policy, administrator = true, reducedMotion = true, phase = ExpertPhase.RUNNING, desiredEnabled = true,
+            tunnelHealth = app.lernet.engine.policy.ExpertTunnelHealth.HEALTHY, appliedRevision = 0,
+            profiles = profiles, folders = folders, exits = exits,
+        )
+        val scene = ImageComposeScene(1440, 1100, Density(1f)) {
+            MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
+                androidx.compose.material3.Surface(color = desktopColors.background, contentColor = desktopColors.onBackground) {
+                    DesktopExpert(
+                        state, {}, frameAnimateIn = false,
+                        onCopyProfile = {},
+                        onRefreshSubscription = {},
+                    )
+                }
+            }
+        }
+        try {
+            val tab = nodes(scene).first { "Конфиги" in texts(it) && it.config.getOrNull(SemanticsActions.OnClick) != null }
+            tab.config[SemanticsActions.OnClick].action!!.invoke()
+            screenshot(scene, "windows-expert-subscription-configs")
+            assertThat(nodes(scene).any { "Подписка · example.com" in texts(it) }).isTrue()
+            assertThat(nodes(scene).any { "Сингапур" in texts(it) }).isTrue()
+            assertThat(nodes(scene).any { "Обновить список" in texts(it) }).isTrue()
+            assertThat(nodes(scene).any { "Скопировать себе" in texts(it) }).isTrue()
+            assertThat(nodes(scene).any { texts(it).any { t -> "из подписки" in t } }).isTrue()
         } finally {
             scene.close()
         }
