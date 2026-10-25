@@ -953,8 +953,7 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                         ProfileRow(profile, profile.id == saved.selectedProfileId, true, probes[profile.id],
                             onProbe = { controller.probe(listOf(profile.id)) }, onMove = { controller.moveProfile(profile.id, it) },
                             onDuplicate = { controller.duplicateProfile(profile.id) },
-                            onRefreshSubscription = profile.subscriptionUrl?.takeIf(String::isNotBlank)?.let { url -> { controller.refreshSubscription(url) } },
-                            groups = saved.groups, onSetGroup = { destination ->
+                            groups = saved.groups.filter { !SubscriptionFolders.owned(it.subscriptionUrl) }, onSetGroup = { destination ->
                                 if (controller.setGroup(profile.id, destination) && destination != null) expanded = expanded + destination
                             },
                             dragging = draggingId == profile.id, dropTarget = hoveredProfile == profile.id, indent = true, dragOffset = dragDelta,
@@ -973,8 +972,7 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                     ProfileRow(profile, profile.id == saved.selectedProfileId, true, probes[profile.id],
                         onProbe = { controller.probe(listOf(profile.id)) }, onMove = { controller.moveProfile(profile.id, it) },
                         onDuplicate = { controller.duplicateProfile(profile.id) },
-                        onRefreshSubscription = profile.subscriptionUrl?.takeIf(String::isNotBlank)?.let { url -> { controller.refreshSubscription(url) } },
-                        groups = saved.groups, onSetGroup = { destination ->
+                        groups = saved.groups.filter { !SubscriptionFolders.owned(it.subscriptionUrl) }, onSetGroup = { destination ->
                             if (controller.setGroup(profile.id, destination) && destination != null) expanded = expanded + destination
                         },
                         dragging = draggingId == profile.id, dropTarget = hoveredProfile == profile.id, indent = false, dragOffset = dragDelta,
@@ -1652,7 +1650,6 @@ private fun ProfileGlyph() {
 @Composable
 private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boolean, probe: ProbeResult?, onProbe: () -> Unit,
     onMove: (Int) -> Unit, onDuplicate: () -> Unit, groups: List<StoredGroup>, onSetGroup: (String?) -> Unit,
-    onRefreshSubscription: (() -> Unit)? = null,
     dragging: Boolean, dropTarget: Boolean, indent: Boolean, dragOffset: Offset,
     onBounds: (Rect) -> Unit, onDragStart: (Offset) -> Unit, onDrag: (Offset) -> Unit, onDragEnd: () -> Unit,
     onDelete: () -> Unit, compact: Boolean = false, onEdit: () -> Unit = {}, onRules: () -> Unit = {}, onClick: () -> Unit) {
@@ -1718,10 +1715,6 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
                             DropdownMenuItem(text = { Text("Выше") }, onClick = { onMove(-1); menu = false })
                             DropdownMenuItem(text = { Text("Ниже") }, onClick = { onMove(1); menu = false })
                             DropdownMenuItem(text = { Text("Дублировать") }, onClick = { onDuplicate(); menu = false })
-                            // A one-shot import with no folder yet can still be refreshed from the row.
-                            onRefreshSubscription?.let { refresh ->
-                                DropdownMenuItem(text = { Text("Обновить подписку") }, onClick = { refresh(); menu = false })
-                            }
                             HorizontalDivider()
                             DropdownMenuItem(text = { Text("Удалить", color = desktopColors.error) }, onClick = { menu = false; onDelete() })
                         }

@@ -91,6 +91,12 @@ class SubscriptionBook(private val file: Path) {
         if (kept.size != all.size) write(kept)
     }
 
+    /** Drop one subscription after its folder was deleted. */
+    @Synchronized
+    fun forget(url: String) {
+        retain(read().map { it.url }.filter { it != url }.toSet())
+    }
+
     private fun write(entries: List<SubscriptionEntry>) {
         file.parent?.let(Files::createDirectories)
         val temp = file.resolveSibling(file.fileName.toString() + ".tmp")

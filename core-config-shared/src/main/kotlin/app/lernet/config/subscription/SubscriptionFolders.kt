@@ -28,6 +28,19 @@ data class FolderAdoption(
 object SubscriptionFolders {
     fun owned(subscriptionUrl: String?): Boolean = !subscriptionUrl.isNullOrBlank()
 
+    /**
+     * Membership after a user edit. A subscription folder keeps its current list; an ordinary folder
+     * never accepts a config that still carries a subscription address.
+     */
+    fun acceptedMembers(
+        folderSubscriptionUrl: String?,
+        currentMembers: List<String>,
+        requestedMembers: List<String>,
+        profileOwned: (String) -> Boolean,
+    ): List<String> =
+        if (owned(folderSubscriptionUrl)) currentMembers
+        else requestedMembers.filterNot(profileOwned)
+
     /** Visible folder name. Only the host is used: the rest of the address is an access secret. */
     fun folderName(url: String): String {
         val host = runCatching { URI(url.trim()).host }.getOrNull()

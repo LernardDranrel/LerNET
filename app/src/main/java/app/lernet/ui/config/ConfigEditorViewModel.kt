@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import app.lernet.config.model.DnsPolicy
 import app.lernet.config.model.NormalizedOutbound
 import app.lernet.config.repo.ConfigRepository
+import app.lernet.config.subscription.SubscriptionFolders
 import app.lernet.config.repo.RuleNodeRecord
 import app.lernet.engine.ConnectionController
 import app.lernet.engine.RunMode
@@ -170,7 +171,7 @@ class ConfigEditorViewModel @Inject constructor(
         }
     }
 
-    private fun locked(): Boolean = _state.value.subscriptionUrl != null
+    private fun locked(): Boolean = SubscriptionFolders.owned(_state.value.subscriptionUrl)
 
     private fun withField(state: ConfigEditorUiState, intent: ConfigEditorIntent): ConfigEditorUiState = when (intent) {
         is ConfigEditorIntent.Server -> state.copy(server = intent.value)
@@ -235,7 +236,7 @@ class ConfigEditorViewModel @Inject constructor(
     private fun refreshSubscription() {
         val current = _state.value
         val url = current.subscriptionUrl ?: return
-        if (current.subscriptionBusy || current.saving || current.dirty) return
+        if (current.subscriptionBusy || current.saving) return
         _state.update { it.copy(subscriptionBusy = true) }
         viewModelScope.launch {
             val message = subscriptions.refresh(url)
@@ -285,12 +286,14 @@ class ConfigEditorViewModel @Inject constructor(
     }
 
     private fun requestProfileDns() {
+        if (locked()) return
         val current = _state.value
         if (current.dnsPolicy == DnsPolicy.PROFILE) return
         _state.update { it.copy(confirmProfileDns = true) }
     }
 
     private fun confirmProfileDns() {
+        if (locked()) return
         _state.update { current ->
             val seeded = current.dnsServers.ifEmpty {
                 listOf(DnsServerDraft(index = 0, type = "udp", tag = "dns-remote", server = "", detour = ""))
@@ -318,7 +321,7 @@ class ConfigEditorViewModel @Inject constructor(
 
     private fun save() {
         val current = _state.value
-        if (current.saving || current.subscriptionUrl != null) return
+        if (current.saving || locked()) return
         val error = validate(current)
         if (error != null) {
             _state.update { it.copy(fieldError = error) }

@@ -1035,7 +1035,7 @@ class DesktopController(
             }
         }
         if (removed && owned) {
-            subscriptionBook().retain(state.value.saved.profiles.mapNotNull { it.subscriptionUrl?.takeIf(String::isNotBlank) }.toSet())
+            group?.subscriptionUrl?.takeIf(SubscriptionFolders::owned)?.let { subscriptionBook().forget(it) }
         }
     }
 

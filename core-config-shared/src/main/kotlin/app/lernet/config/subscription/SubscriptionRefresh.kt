@@ -28,7 +28,7 @@ data class SubscribedConfig(
 /** New server data for a config that stays (same id, so its rules, folder and selection stay too). */
 data class ConfigUpdate(
     val id: String,
-    /** New name, or null to keep the current one (the user renamed it, or the name did not change). */
+    /** New name, or null when the remote name matches what is already stored. */
     val name: String?,
     val outbounds: List<NormalizedOutbound>,
     val selectedOutboundId: String,
@@ -60,11 +60,9 @@ data class RefreshPlan(
 
 /**
  * Plans a subscription refresh without touching storage, the same way on Android and Windows.
- * The folder mirrors the remote list:
- * - a config is matched by name and server, then by name, then by server, and keeps its id;
- * - a matched config takes the remote name and server data (the user does not own it);
- * - new servers are added; a config gone from the subscription is removed;
- * - removal is skipped as a whole when the answer is much shorter than before (an error page).
+ * The folder mirrors the remote list: match by name+server, then name, then server; keep ids;
+ * take remote name and server data; add new servers; remove gone ones (unless the answer is
+ * much shorter than before — then removal is held as a whole).
  */
 object SubscriptionRefresh {
     private val json = Json { ignoreUnknownKeys = true }
@@ -133,6 +131,13 @@ object SubscriptionRefresh {
             unchanged = unchanged,
         )
     }
+
+    /** Null when this address has no configs yet — the platform should do a first import instead. */
+    fun planIfPresent(
+        existing: List<SubscribedConfig>,
+        fresh: List<ImportedProfileDraft>,
+        origins: Map<String, SubscriptionOrigin>,
+    ): RefreshPlan? = if (existing.isEmpty()) null else plan(existing, fresh, origins)
 
     /** Origin to remember for a config the refresh has just added. */
     fun originOf(draft: ImportedProfileDraft): SubscriptionOrigin = SubscriptionOrigin(draft.name, hashOf(draft.outbounds))

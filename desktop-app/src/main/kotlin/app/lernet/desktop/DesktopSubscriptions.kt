@@ -38,7 +38,8 @@ internal object DesktopSubscriptions {
         origins: Map<String, SubscriptionOrigin>,
     ): Installed {
         val existing = configs(saved, url)
-        if (existing.isEmpty()) {
+        val plan = SubscriptionRefresh.planIfPresent(existing, drafts, origins)
+        if (plan == null) {
             val fresh = drafts.map {
                 StoredProfile.fromDraft(it.copy(subscriptionUrl = url)).copy(dnsPolicy = saved.defaultDnsPolicy)
             }
@@ -48,7 +49,6 @@ internal object DesktopSubscriptions {
             )
             return Installed(place(withProfiles, url), fresh.map { it.id }, refreshed = false, plan = null)
         }
-        val plan = SubscriptionRefresh.plan(existing, drafts, origins)
         val (next, added) = apply(saved, url, plan)
         return Installed(next, added, refreshed = true, plan = plan)
     }

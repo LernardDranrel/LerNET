@@ -43,7 +43,6 @@
     <string name="expert_subscription_delete">Удалить подписку</string>
     <string name="expert_subscription_delete_body">Папка и конфиги из подписки будут удалены. Скопированные себе конфиги останутся.</string>
     <string name="group_delete_subscription_body">Папка «%1$s» — подписка. Она и её конфиги будут удалены. Скопированные себе конфиги останутся.</string>
-    <string name="cfg_subscription_copy">Скопировать себе</string>
     <string name="cfg_subscription_copied">Копия в общем списке</string>
     <string name="expert_external_advanced">Дополнительно · внешний выход</string>
     <string name="expert_exit_card_latency">Отклик: %1$s</string>

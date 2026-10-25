@@ -107,15 +107,14 @@ class SubscriptionAutoRefresh internal constructor(
         val url = result.drafts.firstOrNull()?.subscriptionUrl?.takeIf(String::isNotBlank) ?: return@withContext emptyList()
         lock.withLock {
             val existing = repository.subscribedConfigs(url)
-            if (existing.isEmpty()) {
+            val plan = SubscriptionRefresh.planIfPresent(existing, result.drafts, book.entry(url)?.origins.orEmpty())
+            if (plan == null) {
                 val ids = repository.importDrafts(result.drafts, policy)
                 repository.adoptSubscription(url)
                 runCatching { updater.imported(url, result, ids) }
                     .onFailure { LerNetLog.w(TAG, "subscription book write failed: ${it.message}") }
                 ids
             } else {
-                val origins = book.entry(url)?.origins.orEmpty()
-                val plan = SubscriptionRefresh.plan(existing, result.drafts, origins)
                 val added = repository.applySubscriptionPlan(url, plan, policy)
                 updater.applied(SubscriptionUpdater.Prepared.Ready(url, plan, result), added)
                 val removed = plan.removes.toSet()
@@ -126,7 +125,7 @@ class SubscriptionAutoRefresh internal constructor(
 
     /** Drop the book entry after the subscription folder itself was deleted. */
     fun forget(url: String) {
-        book.retain(book.read().map { it.url }.filter { it != url }.toSet())
+        book.forget(url)
     }
 
     fun entry(url: String): SubscriptionEntry? = book.entry(url)

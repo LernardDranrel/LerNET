@@ -144,4 +144,10 @@ class SubscriptionRefreshTest {
         assertThat(updater.due(setOf("https://old"))).isEmpty()
         assertThat(book.entry("https://old")!!.lastSuccessMs).isEqualTo(5L)
     }
+    @Test fun planIfPresentIsNullOnlyOnFirstImport() {
+        assertThat(SubscriptionRefresh.planIfPresent(emptyList(), listOf(draft("A", "a.example")), emptyMap())).isNull()
+        val keep = config("keep", "A", "a.example")
+        assertThat(SubscriptionRefresh.planIfPresent(listOf(keep), listOf(draft("A", "a.example")), mapOf("keep" to origin(keep)))).isNotNull()
+    }
+
 }

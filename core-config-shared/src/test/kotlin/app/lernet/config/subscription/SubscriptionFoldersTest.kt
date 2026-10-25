@@ -41,4 +41,13 @@ class SubscriptionFoldersTest {
         assertThat(plan.name).isEqualTo("Подписка · sub.example")
         assertThat(plan.memberIds).containsExactly("a")
     }
+
+    @Test fun acceptedMembersLocksSubscriptionFolderAndRejectsOwnedConfigs() {
+        assertThat(
+            SubscriptionFolders.acceptedMembers(url, listOf("a", "b"), listOf("a", "c")) { it == "a" },
+        ).containsExactly("a", "b").inOrder()
+        assertThat(
+            SubscriptionFolders.acceptedMembers(null, listOf("a"), listOf("a", "owned", "mine")) { it == "owned" },
+        ).containsExactly("a", "mine").inOrder()
+    }
 }

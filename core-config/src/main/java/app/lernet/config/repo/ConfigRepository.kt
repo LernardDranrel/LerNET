@@ -622,11 +622,13 @@ class ConfigRepository(
             groupMemberDao.listForGroup(id).sortedBy { it.sortIndex }.map { it.profileId }
         }
         val sanitized = groups.map { group ->
-            if (SubscriptionFolders.owned(stored[group.id]?.subscriptionUrl)) {
-                group.copy(profileIds = current[group.id].orEmpty())
-            } else {
-                group.copy(profileIds = group.profileIds.filter { id -> !SubscriptionFolders.owned(profiles[id]?.subscriptionUrl) })
-            }
+            group.copy(
+                profileIds = SubscriptionFolders.acceptedMembers(
+                    stored[group.id]?.subscriptionUrl,
+                    current[group.id].orEmpty(),
+                    group.profileIds,
+                ) { id -> SubscriptionFolders.owned(profiles[id]?.subscriptionUrl) },
+            )
         }
         val rows = sanitized.flatMap { group ->
             group.profileIds.mapIndexed { index, profileId ->
