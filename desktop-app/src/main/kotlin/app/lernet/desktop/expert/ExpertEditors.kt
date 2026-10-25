@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -48,6 +49,7 @@ import app.lernet.routing.RouteCompiler
 import app.lernet.routing.RuleConditions
 import app.lernet.routing.policy.DestinationRedirect
 import app.lernet.routing.policy.ExitLifecyclePolicy
+import app.lernet.config.subscription.SubscriptionFolders
 import app.lernet.routing.policy.FolderPolicy
 import app.lernet.routing.policy.FolderSelection
 import app.lernet.routing.policy.normalized
@@ -540,13 +542,49 @@ internal fun ExpertFolderEditor(
     state: ExpertUiState,
     onDismiss: () -> Unit,
     pending: Boolean = false,
+    onRename: ((String) -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
+    onRefresh: (() -> Unit)? = null,
     onSave: (FolderPolicy) -> Unit,
 ) {
     var policy by remember { mutableStateOf(state.draft.folderPolicies.firstOrNull { it.folderId == folderId } ?: FolderPolicy(folderId)) }
     var lifecycleValid by remember { mutableStateOf(true) }
+    val folder = state.folders.firstOrNull { it.id == folderId }
+    val subscription = SubscriptionFolders.owned(folder?.subscriptionUrl)
+    var folderName by remember(folderId) { mutableStateOf(folder?.name.orEmpty()) }
+    var confirmDelete by remember(folderId) { mutableStateOf(false) }
     val members = state.profiles.filter { it.folderId == folderId }
     ExpertModal("Политика папки", onDismiss, { onSave(policy) }, !pending && lifecycleValid) {
         EditorPersistenceNotice(state, pending)
+        if (subscription) {
+            OutlinedTextField(
+                folderName,
+                { folderName = it },
+                Modifier.fillMaxWidth(),
+                label = { Text("Название папки") },
+                singleLine = true,
+            )
+            val trimmed = folderName.trim()
+            if (onRename != null && trimmed.isNotEmpty() && trimmed != folder?.name) {
+                val rename = onRename
+                TextButton(onClick = { rename(trimmed) }, enabled = !pending) { Text("Переименовать") }
+            }
+            if (onRefresh != null) {
+                val refresh = onRefresh
+                OutlinedButton(onClick = refresh, enabled = !pending, modifier = Modifier.fillMaxWidth()) {
+                    Text("Обновить список")
+                }
+            }
+            if (onDelete != null) {
+                TextButton(onClick = { confirmDelete = true }, enabled = !pending) {
+                    Text("Удалить подписку", color = ExpertColors.red)
+                }
+            }
+            Text(
+                "Конфиги в этой папке приходят из подписки. Их нельзя менять или выносить. Можно скопировать себе.",
+                color = ExpertColors.muted, fontSize = 13.sp,
+            )
+        }
         ExpertSelect(
             "Как выбирать конфиг",
             listOf(
@@ -591,6 +629,22 @@ internal fun ExpertFolderEditor(
         Text(
             "Эти настройки действуют для выхода папки. Если ветка использует отдельный канал, его настройки имеют приоритет.",
             color = ExpertColors.muted, fontSize = 12.sp
+        )
+    }
+    if (confirmDelete && onDelete != null) {
+        val remove = onDelete
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Удалить подписку") },
+            text = { Text("Папка и конфиги из подписки будут удалены. Скопированные себе конфиги останутся.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    remove()
+                    onDismiss()
+                }) { Text("Удалить подписку") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Отмена") } },
         )
     }
 }

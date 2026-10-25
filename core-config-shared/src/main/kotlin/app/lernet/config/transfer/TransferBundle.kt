@@ -35,6 +35,8 @@ data class TransferGroup(
     val profileIds: List<String>,
     val autoSwap: Boolean = false,
     val canvasLayout: String? = null,
+    /** Set when the folder is a live subscription. Absent in archives written before that. */
+    val subscriptionUrl: String? = null,
 )
 
 @Serializable

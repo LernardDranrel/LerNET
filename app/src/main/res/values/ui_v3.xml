@@ -35,6 +35,16 @@
     <string name="expert_channels_empty">Каналов пока нет. Добавь общий канал кнопкой ниже.</string>
     <string name="expert_configs_heading">Конфиги</string>
     <string name="expert_configs_hint">Статус · отклик · запросы. Нажми строку — подробности.</string>
+    <string name="expert_subscription_folder">Подписка из интернета</string>
+    <string name="expert_subscription_readonly">Этот конфиг из подписки. Его нельзя менять, переименовывать, удалять или выносить из папки. Можно скопировать себе.</string>
+    <string name="expert_subscription_copy">Скопировать себе</string>
+    <string name="expert_subscription_refresh">Обновить список</string>
+    <string name="expert_subscription_rename">Название папки</string>
+    <string name="expert_subscription_delete">Удалить подписку</string>
+    <string name="expert_subscription_delete_body">Папка и конфиги из подписки будут удалены. Скопированные себе конфиги останутся.</string>
+    <string name="group_delete_subscription_body">Папка «%1$s» — подписка. Она и её конфиги будут удалены. Скопированные себе конфиги останутся.</string>
+    <string name="cfg_subscription_copy">Скопировать себе</string>
+    <string name="cfg_subscription_copied">Копия в общем списке</string>
     <string name="expert_external_advanced">Дополнительно · внешний выход</string>
     <string name="expert_exit_card_latency">Отклик: %1$s</string>
     <string name="expert_exit_card_idle">Нет живого выхода</string>

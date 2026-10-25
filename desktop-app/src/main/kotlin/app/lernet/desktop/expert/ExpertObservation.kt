@@ -23,11 +23,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.lernet.config.subscription.SubscriptionFolders
 import app.lernet.engine.policy.ExitPhase
 import app.lernet.routing.policy.NetworkPolicy
 
 @Composable
-internal fun ExpertExits(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, modifier: Modifier, openRoutes: () -> Unit = {}) {
+internal fun ExpertExits(
+    state: ExpertUiState,
+    onIntent: (ExpertIntent) -> Unit,
+    modifier: Modifier,
+    openRoutes: () -> Unit = {},
+    onCopyProfile: ((String) -> Unit)? = null,
+    onRenameFolder: ((String, String) -> Unit)? = null,
+    onDeleteFolder: ((String) -> Unit)? = null,
+    onRefreshSubscription: ((String) -> Unit)? = null,
+) {
     var selected by remember { mutableStateOf<String?>(null) }
     var sleepingOnly by remember { mutableStateOf(false) }
     var editingChannel by remember { mutableStateOf<String?>(null) }
@@ -112,14 +122,23 @@ internal fun ExpertExits(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit,
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
+                        val owned = SubscriptionFolders.owned(profile.subscriptionUrl)
+                        if (owned) SubscriptionGlobe()
                         Column(Modifier.weight(1f)) {
                             Text(profile.name, color = ExpertColors.text)
                             val folder = profile.folderId?.let { id -> state.folders.firstOrNull { it.id == id }?.name }
                             Text(
-                                listOfNotNull(folder?.let { "папка «$it»" }, profile.protocol.takeIf { it.isNotBlank() }).joinToString(" · ")
-                                    .ifBlank { "конфиг VPN" },
+                                listOfNotNull(
+                                    if (owned) "из подписки" else null,
+                                    folder?.let { "папка «$it»" },
+                                    profile.protocol.takeIf { it.isNotBlank() },
+                                ).joinToString(" · ").ifBlank { "конфиг VPN" },
                                 color = ExpertColors.muted, fontSize = 12.sp,
                             )
+                        }
+                        if (owned && onCopyProfile != null) {
+                            val copy = onCopyProfile
+                            TextButton(onClick = { copy(profile.id) }) { Text("Скопировать себе") }
                         }
                         live?.let {
                             ExpertTag(exitDisplayName(it, state), exitDisplayColor(it, state))
@@ -151,20 +170,36 @@ internal fun ExpertExits(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit,
                     Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Text(folder.name, color = ExpertColors.text, fontWeight = FontWeight.Medium)
+                    val subscription = SubscriptionFolders.owned(folder.subscriptionUrl)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (subscription) SubscriptionGlobe()
+                        Text(folder.name, color = ExpertColors.text, fontWeight = FontWeight.Medium)
+                    }
                     Text(
                         "Стратегия: ${folderStrategyTitle(policy.selection)}" +
                             (if (policy.autoSwap) " · автосмена" else ""),
                         color = ExpertColors.muted, fontSize = 12.sp,
                     )
+                    val subscriptionUrl = folder.subscriptionUrl
+                    if (subscription && onRefreshSubscription != null && !subscriptionUrl.isNullOrBlank()) {
+                        val refresh = onRefreshSubscription
+                        OutlinedButton(onClick = { refresh(subscriptionUrl) }, enabled = !state.busy) {
+                            Text("Обновить список")
+                        }
+                    }
                     members.forEach { profile ->
                         val live = state.exits.firstOrNull { it.profileId == profile.id }
+                        val owned = SubscriptionFolders.owned(profile.subscriptionUrl)
                         Row(
                             Modifier.fillMaxWidth().padding(start = 12.dp, top = 2.dp, bottom = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Text(profile.name, color = ExpertColors.text, modifier = Modifier.weight(1f))
+                            if (owned && onCopyProfile != null) {
+                                val copy = onCopyProfile
+                                TextButton(onClick = { copy(profile.id) }) { Text("Скопировать себе") }
+                            }
                             live?.let { ExpertTag(exitDisplayName(it, state), exitDisplayColor(it, state)) }
                                 ?: Text("в схеме", color = ExpertColors.muted, fontSize = 12.sp)
                         }
@@ -275,9 +310,11 @@ internal fun ExpertExits(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit,
                 exit.folderId != null -> OutlinedButton(onClick = { editingFolder = exit.folderId }) {
                     Text("Настроить холодный старт папки")
                 }
-                exit.profileId != null -> OutlinedButton(onClick = { editingProfile = exit.profileId }) {
-                    Text("Настроить холодный старт конфига")
-                }
+                exit.profileId != null &&
+                    !SubscriptionFolders.owned(state.profiles.firstOrNull { it.id == exit.profileId }?.subscriptionUrl) ->
+                    OutlinedButton(onClick = { editingProfile = exit.profileId }) {
+                        Text("Настроить холодный старт конфига")
+                    }
             }
             val nodes = (listOf(state.draft.device) + state.draft.trees).flatMap { it.nodes }.filter { node ->
                 val target = node.target
@@ -309,7 +346,24 @@ internal fun ExpertExits(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit,
         }
     }
     editingFolder?.let { id ->
-        ExpertFolderEditor(id, state, { editingFolder = null }, pendingPolicy != null) { changed ->
+        val folder = state.folders.firstOrNull { it.id == id }
+        val subscriptionUrl = folder?.subscriptionUrl?.takeIf { SubscriptionFolders.owned(it) }
+        ExpertFolderEditor(
+            id, state, { editingFolder = null }, pendingPolicy != null,
+            onRename = onRenameFolder?.let { rename -> { name -> rename(id, name) } },
+            onDelete = onDeleteFolder?.let { remove ->
+                {
+                    remove(id)
+                    editingFolder = null
+                }
+            },
+            onRefresh = if (onRefreshSubscription != null && subscriptionUrl != null) {
+                val refresh = onRefreshSubscription
+                { refresh(subscriptionUrl) }
+            } else {
+                null
+            },
+        ) { changed ->
             commit(state.draft.copy(folderPolicies = state.draft.folderPolicies.filterNot { it.folderId == id } + changed))
         }
     }

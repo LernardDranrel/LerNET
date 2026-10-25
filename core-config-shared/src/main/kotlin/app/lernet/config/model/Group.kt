@@ -7,4 +7,6 @@ data class Group(
     val canvasLayout: String? = null,
     val hasRoutes: Boolean = false,
     val autoFailover: Boolean = false,
+    /** Set when this folder is a live subscription. The remote list owns [profileIds]. */
+    val subscriptionUrl: String? = null,
 )

@@ -7,6 +7,8 @@ import app.lernet.engine.text.ImportWords
 import app.lernet.engine.text.JournalWords
 import app.lernet.engine.text.SettingsWords
 import app.lernet.config.net.LocalProxyAccess
+import app.lernet.config.subscription.SubscriptionFolders
+import app.lernet.desktop.expert.SubscriptionGlobe
 
 import app.lernet.engine.policy.ExpertVpnHandover
 import app.lernet.routing.policy.PolicyTarget
@@ -350,7 +352,10 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
                                                 .onFailure { controller.showMessage(app.lernet.engine.text.UserText.of(it, "Не удалось запросить права администратора")) }
                                         }, onOpenNetwork = { networkWindowOpen = true }, locked = ui.busy)
                                     }
-                                })
+                                }, onCopyProfile = { expert.copyProfile(it) },
+                                    onRenameFolder = { id, name -> expert.renameFolder(id, name) },
+                                    onDeleteFolder = { expert.deleteFolder(it) },
+                                    onRefreshSubscription = { expert.refreshSubscription(it) })
                                 if (splash.visible) DesktopExpertSplash()
                                 }
                             } else DesktopScreen(controller, homeRequest = homeRequest, onHomeShown = { basicHome = it },
@@ -788,15 +793,27 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
     var groupDragStart by remember { mutableStateOf(Offset.Zero) }
     var groupDragDelta by remember { mutableStateOf(Offset.Zero) }
     val hoverPoint = if (draggingId != null) dragStart + dragDelta else null
-    val hoveredProfile = hoverPoint?.let { point -> profileBounds.entries.firstOrNull { it.key != draggingId && it.value.contains(point) }?.key }
-    val hoveredGroup = if (hoveredProfile == null) hoverPoint?.let { point -> groupBounds.entries.firstOrNull { it.value.contains(point) }?.key } else null
+    val hoveredProfile = hoverPoint?.let { point ->
+        profileBounds.entries.firstOrNull { entry ->
+            entry.key != draggingId && entry.value.contains(point) &&
+                !SubscriptionFolders.owned(saved.profiles.firstOrNull { it.id == entry.key }?.subscriptionUrl)
+        }?.key
+    }
+    val hoveredGroup = if (hoveredProfile == null) hoverPoint?.let { point ->
+        groupBounds.entries.firstOrNull { entry ->
+            entry.value.contains(point) &&
+                !SubscriptionFolders.owned(saved.groups.firstOrNull { it.id == entry.key }?.subscriptionUrl)
+        }?.key
+    } else null
     val hoveredRoot = hoveredProfile == null && hoveredGroup == null && hoverPoint?.let { rootBounds?.contains(it) } == true
     val groupHoverPoint = if (draggingGroupId != null) groupDragStart + groupDragDelta else null
     val hoveredGroupOrder = groupHoverPoint?.let { point -> groupBounds.entries.firstOrNull { it.key != draggingGroupId && it.value.contains(point) }?.key }
     val beginDrag: (String, Offset) -> Unit = { id, windowPoint ->
-        draggingId = id
-        dragStart = windowPoint
-        dragDelta = Offset.Zero
+        if (!SubscriptionFolders.owned(saved.profiles.firstOrNull { it.id == id }?.subscriptionUrl)) {
+            draggingId = id
+            dragStart = windowPoint
+            dragDelta = Offset.Zero
+        }
     }
     val finishDrag: () -> Unit = {
         val id = draggingId
@@ -868,8 +885,9 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                             colors = CardDefaults.cardColors(containerColor = if (draggingGroupId == group.id) Color(0xFF323D62)
                                 else if (hoveredGroup == group.id || hoveredGroupOrder == group.id) Color(0xFF243C51) else panel),
                         ) {
+                            val subscription = SubscriptionFolders.owned(group.subscriptionUrl)
                             Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 5.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                FolderGlyph()
+                                if (subscription) SubscriptionGlobe() else FolderGlyph()
                                 Spacer(Modifier.width(10.dp))
                                 Column(Modifier.weight(1f)) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -910,11 +928,21 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                                     DropdownMenu(expanded = groupMenu == group.id, onDismissRequest = { groupMenu = null }) {
                                         DropdownMenuItem(text = { Text(if (group.autoSwap) "Выключить автосмену" else "Включить автосмену") },
                                             onClick = { controller.setGroupSwap(group.id, !group.autoSwap); groupMenu = null })
-                                        DropdownMenuItem(text = { Text("Добавить конфиг сюда") }, onClick = { onImport(group.id); groupMenu = null })
+                                        if (subscription) {
+                                            DropdownMenuItem(text = { Text("Обновить список") }, onClick = {
+                                                group.subscriptionUrl?.let(controller::refreshSubscription)
+                                                groupMenu = null
+                                            })
+                                        } else {
+                                            DropdownMenuItem(text = { Text("Добавить конфиг сюда") }, onClick = { onImport(group.id); groupMenu = null })
+                                        }
                                         DropdownMenuItem(text = { Text("Правила папки") }, onClick = { onGroupRoutes(group.id); groupMenu = null })
                                         DropdownMenuItem(text = { Text("Экспортировать папку") }, onClick = { groupMenu = null; onExportGroup(group) })
                                         DropdownMenuItem(text = { Text("Переименовать") }, onClick = { renameGroup = group; groupMenu = null })
-                                        DropdownMenuItem(text = { Text("Удалить папку") }, onClick = { deleteGroup = group; groupMenu = null })
+                                        DropdownMenuItem(
+                                            text = { Text(if (subscription) "Удалить подписку" else "Удалить папку") },
+                                            onClick = { deleteGroup = group; groupMenu = null },
+                                        )
                                     }
                                 }
                             }
@@ -999,8 +1027,23 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                 }
             },
             onDismissRequest = { deleteGroup = null },
-            title = { Text("Удалить папку «${group.name}»?") },
-            text = { Text("Конфиги останутся в общем списке. Правила папки будут удалены.") },
+            title = {
+                val title = if (SubscriptionFolders.owned(group.subscriptionUrl)) {
+                    "Удалить подписку «${group.name}»?"
+                } else {
+                    "Удалить папку «${group.name}»?"
+                }
+                Text(title)
+            },
+            text = {
+                Text(
+                    if (SubscriptionFolders.owned(group.subscriptionUrl)) {
+                        "Папка и конфиги из подписки будут удалены. Скопированные себе конфиги останутся."
+                    } else {
+                        "Конфиги останутся в общем списке. Правила папки будут удалены."
+                    },
+                )
+            },
             confirmButton = { TextButton(onClick = confirm) { Text("Удалить") } },
             dismissButton = { TextButton(onClick = { deleteGroup = null }) { Text("Отмена") } },
         )
@@ -1616,12 +1659,15 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
     var menu by remember { mutableStateOf(false) }
     var folderMenu by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
+    val owned = SubscriptionFolders.owned(profile.subscriptionUrl)
+    val rowModifier = Modifier.fillMaxWidth().padding(start = if (indent) 14.dp else 0.dp)
+        .onGloballyPositioned { onBounds(it.boundsInWindow()) }
+        .graphicsLayer { translationY = if (dragging) dragOffset.y else 0f; shadowElevation = if (dragging) 20f else 0f }
     Card(
-        modifier = Modifier.fillMaxWidth().padding(start = if (indent) 14.dp else 0.dp).onGloballyPositioned { onBounds(it.boundsInWindow()) }
-            .graphicsLayer { translationY = if (dragging) dragOffset.y else 0f; shadowElevation = if (dragging) 20f else 0f }
-            .wholeCardDrag(profile.id, onDragStart, onDrag, onDragEnd)
+        modifier = (if (owned) rowModifier else rowModifier.wholeCardDrag(profile.id, onDragStart, onDrag, onDragEnd))
             .clip(RoundedCornerShape(13.dp)).focusRequester(focus).focusable()
             .onPreviewKeyEvent { event ->
+                if (owned) return@onPreviewKeyEvent false
                 if (event.type == KeyEventType.KeyDown && event.key in setOf(Key.Delete, Key.Backspace)) {
                     onDelete(); true
                 } else false
@@ -1663,18 +1709,22 @@ private fun ProfileRow(profile: StoredProfile, selected: Boolean, enabled: Boole
                     }
                     // The same items and words as the config's ⋮ in the phone's drawer; delete can be undone (N14).
                     DropdownMenu(menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Изменить") }, onClick = { menu = false; onEdit() })
-                        DropdownMenuItem(text = { Text("Правила") }, onClick = { menu = false; onRules() })
-                        DropdownMenuItem(text = { Text("Переместить…") }, onClick = { menu = false; folderMenu = true })
-                        DropdownMenuItem(text = { Text("Выше") }, onClick = { onMove(-1); menu = false })
-                        DropdownMenuItem(text = { Text("Ниже") }, onClick = { onMove(1); menu = false })
-                        DropdownMenuItem(text = { Text("Дублировать") }, onClick = { onDuplicate(); menu = false })
-                        // Your choice, renames and edits are kept; the change takes effect at the next connect.
-                        onRefreshSubscription?.let { refresh ->
-                            DropdownMenuItem(text = { Text("Обновить подписку") }, onClick = { refresh(); menu = false })
+                        if (owned) {
+                            DropdownMenuItem(text = { Text("Скопировать себе") }, onClick = { onDuplicate(); menu = false })
+                        } else {
+                            DropdownMenuItem(text = { Text("Изменить") }, onClick = { menu = false; onEdit() })
+                            DropdownMenuItem(text = { Text("Правила") }, onClick = { menu = false; onRules() })
+                            DropdownMenuItem(text = { Text("Переместить…") }, onClick = { menu = false; folderMenu = true })
+                            DropdownMenuItem(text = { Text("Выше") }, onClick = { onMove(-1); menu = false })
+                            DropdownMenuItem(text = { Text("Ниже") }, onClick = { onMove(1); menu = false })
+                            DropdownMenuItem(text = { Text("Дублировать") }, onClick = { onDuplicate(); menu = false })
+                            // A one-shot import with no folder yet can still be refreshed from the row.
+                            onRefreshSubscription?.let { refresh ->
+                                DropdownMenuItem(text = { Text("Обновить подписку") }, onClick = { refresh(); menu = false })
+                            }
+                            HorizontalDivider()
+                            DropdownMenuItem(text = { Text("Удалить", color = desktopColors.error) }, onClick = { menu = false; onDelete() })
                         }
-                        HorizontalDivider()
-                        DropdownMenuItem(text = { Text("Удалить", color = desktopColors.error) }, onClick = { menu = false; onDelete() })
                     }
                     DropdownMenu(folderMenu, onDismissRequest = { folderMenu = false }) {
                         DropdownMenuItem(text = { Text("Без папки") }, onClick = { onSetGroup(null); folderMenu = false })

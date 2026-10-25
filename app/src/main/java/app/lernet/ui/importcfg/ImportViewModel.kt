@@ -142,10 +142,18 @@ class ImportViewModel @Inject constructor(
             coordinator.withDisplayName(result, current.displayName) as ImportResult.Success
         }
         val defaultDnsPolicy = settingsStore.settings.first().defaultDnsPolicy
-        val ids = withContext(Dispatchers.IO) { repository.importDrafts(named.drafts, defaultDnsPolicy) }
-        if (ids.isNotEmpty()) settingsStore.setActiveProfile(ids.first())
-        // The provider's own names are remembered, not the display name, so a user rename is kept on refresh.
-        if (ids.size == result.drafts.size) subscriptions.imported(result, ids)
+        val subscriptionUrl = result.drafts.firstOrNull()?.subscriptionUrl?.takeIf(String::isNotBlank)
+        val ids = if (subscriptionUrl != null) {
+            // The remote list owns the names. A display name does not rename subscription configs.
+            subscriptions.install(result, defaultDnsPolicy)
+        } else {
+            withContext(Dispatchers.IO) { repository.importDrafts(named.drafts, defaultDnsPolicy) }
+        }
+        if (ids.isNotEmpty()) {
+            val active = settingsStore.settings.first().activeProfileId
+            val activeGone = active != null && withContext(Dispatchers.IO) { repository.getProfile(active) } == null
+            if (active == null || activeGone || subscriptionUrl == null) settingsStore.setActiveProfile(ids.first())
+        }
         _state.update {
             it.copy(
                 busy = false,

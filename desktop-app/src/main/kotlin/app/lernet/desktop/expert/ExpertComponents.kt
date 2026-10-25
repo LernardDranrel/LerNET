@@ -33,8 +33,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -269,3 +271,22 @@ internal fun DomainRecognitionQualification() {
 }
 
 internal fun formatTraffic(bytes: Long): String = app.lernet.engine.text.TrafficUnits.bytes(bytes)
+
+/** Planet mark: the folder is a list served from the internet, not a folder the user filled. */
+@Composable
+internal fun SubscriptionGlobe(modifier: Modifier = Modifier) {
+    Canvas(
+        modifier.size(18.dp).semantics { contentDescription = "Подписка из интернета" },
+    ) {
+        val color = ExpertColors.blue
+        val stroke = Stroke(1.5.dp.toPx())
+        drawCircle(color, style = stroke)
+        drawOval(
+            color,
+            topLeft = Offset(size.width * 0.28f, 0f),
+            size = Size(size.width * 0.44f, size.height),
+            style = stroke,
+        )
+        drawLine(color, Offset(0f, size.height / 2f), Offset(size.width, size.height / 2f), strokeWidth = 1.5.dp.toPx())
+    }
+}

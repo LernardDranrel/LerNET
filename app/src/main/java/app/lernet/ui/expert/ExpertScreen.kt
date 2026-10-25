@@ -269,6 +269,10 @@ internal fun ExpertRoute(
         onSaveHealth = viewModel::saveHealthSettings,
         onSaveDns = viewModel::saveDnsSettings,
         onSaveDraft = viewModel::saveDraft,
+        onCopyProfile = viewModel::copyProfile,
+        onRenameFolder = viewModel::renameFolder,
+        onDeleteFolder = viewModel::deleteFolder,
+        onRefreshSubscription = viewModel::refreshSubscription,
         formMemory = viewModel.formMemory,
         selectedSection = section, onSectionChange = onSectionChange, onOpenDrawer = onOpenDrawer,
         onSettings = onSettings,
@@ -295,6 +299,10 @@ internal fun ExpertScreen(
     onSaveHealth: (suspend (PolicyHealthSettings, PolicyHealthSettings) -> String?)? = null,
     onSaveDns: (suspend (PolicyDnsSettings, PolicyDnsSettings) -> String?)? = null,
     onSaveDraft: (suspend (NetworkPolicy, NetworkPolicy) -> String?)? = null,
+    onCopyProfile: (suspend (String) -> Unit)? = null,
+    onRenameFolder: (suspend (String, String) -> Unit)? = null,
+    onDeleteFolder: (suspend (String) -> Unit)? = null,
+    onRefreshSubscription: (suspend (String) -> String)? = null,
     formMemory: ExpertFormMemory = remember { ExpertFormMemory() },
     selectedSection: ExpertSection? = null,
     onSectionChange: ((ExpertSection) -> Unit)? = null,
@@ -478,7 +486,12 @@ internal fun ExpertScreen(
                         when (visible) {
                             ExpertSection.OVERVIEW -> Unit
                             ExpertSection.SCHEMA -> Unit
-                            ExpertSection.EXITS -> item { ExpertExits(runtime, bundle, onIntent, onSaveExternal, onSaveDraft, formMemory) }
+                            ExpertSection.EXITS -> item {
+                                ExpertExits(
+                                    runtime, bundle, onIntent, onSaveExternal, onSaveDraft, formMemory,
+                                    onCopyProfile, onRenameFolder, onDeleteFolder, onRefreshSubscription,
+                                )
+                            }
                             ExpertSection.SIMULATION -> item { ExpertSimulation(runtime, bundle, simulationConnection, historicalPath, simulationRequest, formMemory) }
                             ExpertSection.SAFETY -> item {
                                 // Audit X7: one page «Защита и DNS» — rows that open the editors, then the protection facts.

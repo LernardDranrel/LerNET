@@ -34,10 +34,12 @@ class SubscriptionRepositoryTest {
         try {
             val repo = ConfigRepository(db.profileDao(), db.outboundDao(), db.ruleNodeDao(), db.groupDao(), db.groupMemberDao(), database = db)
             val ids = repo.importDrafts(listOf(draft("DE", "de.example"), draft("NL", "nl.example"), draft("SE", "se.example")))
-            val folder = repo.upsertGroup("Подписка")
-            repo.setGroupMembers(folder, ids)
+            val folderId = repo.upsertGroup("Подписка")
+            repo.setGroupMembers(folderId, ids)
             repo.renameProfile(ids[1], "Мой NL")
-            val before = repo.subscribedConfigs(url, activeProfileId = ids[0])
+            assertThat(repo.getProfile(ids[1])!!.name).isEqualTo("NL")
+            assertThat(repo.deleteProfile(ids[1])).isFalse()
+            val before = repo.subscribedConfigs(url)
             val origins = mapOf(
                 ids[0] to SubscriptionOrigin("DE", SubscriptionRefresh.hashOf(before.first { it.id == ids[0] }.outbounds)),
                 ids[1] to SubscriptionOrigin("NL", SubscriptionRefresh.hashOf(before.first { it.id == ids[1] }.outbounds)),
@@ -48,14 +50,15 @@ class SubscriptionRepositoryTest {
 
             val de = repo.getProfile(ids[0])!!
             assertThat(de.selectedOutboundId).isEqualTo(before.first { it.id == ids[0] }.selectedOutboundId)
-            assertThat(before.first { it.id == ids[0] }.selected).isTrue()
             assertThat(de.outbounds.single().singBoxJson).contains("u2")
-            assertThat(repo.getProfile(ids[1])!!.name).isEqualTo("Мой NL")
+            assertThat(repo.getProfile(ids[1])!!.name).isEqualTo("NL")
             assertThat(repo.getProfile(ids[2])).isNull()
             val fi = repo.getProfile(added.single())!!
             assertThat(fi.subscriptionUrl).isEqualTo(url)
             assertThat(fi.dnsPolicy).isEqualTo(DnsPolicy.UNDERLAY)
-            assertThat(repo.groups.first().single().profileIds).containsExactly(ids[0], ids[1], added.single()).inOrder()
+            val folder = repo.groups.first().single()
+            assertThat(folder.subscriptionUrl).isEqualTo(url)
+            assertThat(folder.profileIds).containsExactly(ids[0], ids[1], added.single()).inOrder()
         } finally {
             db.close()
         }

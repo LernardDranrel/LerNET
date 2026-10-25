@@ -89,8 +89,9 @@ data class ExpertProfile(
     val folderId: String? = null,
     val protocol: String = "",
     val interfaceBinding: VerifiedInterfaceBinding? = null,
+    val subscriptionUrl: String? = null,
 )
-data class ExpertFolder(val id: String, val name: String)
+data class ExpertFolder(val id: String, val name: String, val subscriptionUrl: String? = null)
 
 data class ExpertExternalProfile(val id: String, val request: ExternalExitRequest, val fingerprint: String = "")
 

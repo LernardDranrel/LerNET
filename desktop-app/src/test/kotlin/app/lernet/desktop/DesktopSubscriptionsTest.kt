@@ -41,18 +41,31 @@ class DesktopSubscriptionsTest {
         assertEquals("g", fi.groupId)
         assertEquals(url, fi.subscriptionUrl)
         assertEquals("UNDERLAY", fi.dnsPolicy)
+        assertEquals(url, next.groups.single().subscriptionUrl)
     }
 
     @Test
-    fun configWithOwnRulesIsNotRemoved() {
+    fun goneConfigIsRemovedEvenWhenItHasRules() {
         val saved = StoredState(
             profiles = listOf(profile("a", "DE", "de.example"), profile("b", "NL", "nl.example")),
+            groups = listOf(StoredGroup("g", "Подписка", subscriptionUrl = url)),
             rules = listOf(StoredRule("r", "b", sortIndex = 0)),
         )
         val configs = DesktopSubscriptions.configs(saved, url)
         val plan = SubscriptionRefresh.plan(configs, listOf(draft("DE", "de.example")), emptyMap())
         val (next, _) = DesktopSubscriptions.apply(saved, url, plan)
-        assertEquals(listOf("a", "b"), next.profiles.map { it.id })
+        assertEquals(listOf("a"), next.profiles.map { it.id })
+        assertEquals(listOf("a"), next.profiles.filter { it.groupId == "g" }.map { it.id })
+    }
+
+    @Test
+    fun ungroupedSubscriptionBecomesItsOwnFolder() {
+        val saved = StoredState(profiles = listOf(profile("a", "DE", "de.example", group = null)))
+        val next = DesktopSubscriptions.adoptAll(saved)
+        val folder = next.groups.single()
+        assertEquals(url, folder.subscriptionUrl)
+        assertEquals("Подписка · sub.example", folder.name)
+        assertEquals(folder.id, next.profiles.single().groupId)
     }
 
     @Test
@@ -64,6 +77,7 @@ class DesktopSubscriptionsTest {
             controller.duplicateProfile("a")
             val copy = controller.state.value.saved.profiles.first { it.id != "a" }
             assertNull(copy.subscriptionUrl)
+            assertNull(copy.groupId)
         }
     }
 }

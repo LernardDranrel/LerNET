@@ -15,16 +15,12 @@ import kotlinx.serialization.json.jsonPrimitive
 @Serializable
 data class SubscriptionOrigin(val name: String, val hash: String)
 
-/** One config of a subscription as the platform stores it now. */
+/** One config of a subscription as the platform stores it now. The remote list owns it. */
 data class SubscribedConfig(
     val id: String,
     val name: String,
     val outbounds: List<NormalizedOutbound>,
     val selectedOutboundId: String,
-    /** The config the user has chosen (or that runs now): never removed by a refresh. */
-    val selected: Boolean = false,
-    /** The user gave this config something of their own (rules, own DNS, own mode): never removed by a refresh. */
-    val hasOwnSettings: Boolean = false,
 ) {
     val selectedOutbound: NormalizedOutbound? get() = outbounds.firstOrNull { it.id == selectedOutboundId } ?: outbounds.firstOrNull()
 }
@@ -42,10 +38,6 @@ data class RefreshPlan(
     val updates: List<ConfigUpdate> = emptyList(),
     val adds: List<ImportedProfileDraft> = emptyList(),
     val removes: List<String> = emptyList(),
-    /** In the subscription no more, kept because they are chosen or have the user's own settings. */
-    val keptGone: List<String> = emptyList(),
-    /** The user changed the server data by hand: left as they are. */
-    val keptEdited: List<String> = emptyList(),
     /** Removal was skipped as a whole: the answer is much shorter than before (an error page, an expired plan). */
     val removalHeld: Boolean = false,
     /** Origins of the configs that stay, by id. Added configs get theirs from [originOf] once they have an id. */
@@ -60,10 +52,6 @@ data class RefreshPlan(
             if (updates.isEmpty() && adds.isEmpty() && removes.isEmpty()) "Подписка обновлена, изменений нет"
             else "Подписка обновлена: изменено ${updates.size}, добавлено ${adds.size}, удалено ${removes.size}",
         )
-        if (keptEdited.isNotEmpty()) add("конфиги с вашими правками не тронуты: ${keptEdited.size}")
-        if (keptGone.isNotEmpty()) {
-            add("больше нет в подписке, но оставлены, потому что выбраны или настроены вами: ${keptGone.size}")
-        }
         if (removalHeld) add("подписка вернула намного меньше серверов, чем было, поэтому старые конфиги не удалены")
         if (updates.isNotEmpty()) add("изменения вступят в силу при следующем подключении")
         skippedText?.let(::add)
@@ -71,12 +59,12 @@ data class RefreshPlan(
 }
 
 /**
- * Plans a subscription refresh without touching storage, the same way on Android and Windows:
- * - a config is matched by name and server, then by name, then by server;
- * - a matched config keeps its id, folder, rules and selection; only server data (and the name, unless the
- *   user renamed it) change; a config whose server data the user edited is left as it is;
- * - new servers are added; a config gone from the subscription is removed only when it is not chosen and has
- *   nothing of the user's own, and never when the answer is much shorter than before.
+ * Plans a subscription refresh without touching storage, the same way on Android and Windows.
+ * The folder mirrors the remote list:
+ * - a config is matched by name and server, then by name, then by server, and keeps its id;
+ * - a matched config takes the remote name and server data (the user does not own it);
+ * - new servers are added; a config gone from the subscription is removed;
+ * - removal is skipped as a whole when the answer is much shorter than before (an error page).
  */
 object SubscriptionRefresh {
     private val json = Json { ignoreUnknownKeys = true }
@@ -106,62 +94,40 @@ object SubscriptionRefresh {
         pass({ freshEndpoint[it] }) { endpointOf(it.selectedOutbound) }
 
         val updates = mutableListOf<ConfigUpdate>()
-        val keptEdited = mutableListOf<String>()
         val newOrigins = mutableMapOf<String, SubscriptionOrigin>()
         var unchanged = 0
         existing.forEach { config ->
             val index = matches[config.id] ?: return@forEach
             val draft = fresh[index]
-            val origin = origins[config.id]
             val freshHash = hashOf(draft.outbounds)
-            // Without a stored origin (configs imported by an older version) the current data counts as untouched.
-            val edited = origin != null && origin.hash != hashOf(config.outbounds)
-            val renamed = origin == null || origin.name != config.name
-            if (edited) {
-                keptEdited += config.id
-                newOrigins[config.id] = origin!!
-                return@forEach
-            }
-            val keepName = renamed || draft.name == config.name
-            // The origin always names what the subscription says, so a kept own name stays kept next time too.
-            if (freshHash == hashOf(config.outbounds) && keepName) {
+            val sameName = draft.name == config.name
+            if (freshHash == hashOf(config.outbounds) && sameName) {
                 unchanged++
                 newOrigins[config.id] = SubscriptionOrigin(draft.name, freshHash)
                 return@forEach
             }
-            // The chosen server keeps its id, so a selection or rule pointing at it stays valid.
+            // The chosen server keeps its id, so a folder strategy pointing at it stays valid.
             val freshSelected = draft.outbounds.firstOrNull { it.id == draft.selectedOutboundId } ?: draft.outbounds.first()
             val currentSelected = config.selectedOutbound
             val outbounds = draft.outbounds.map { outbound ->
                 if (outbound.id == freshSelected.id && currentSelected != null) outbound.copy(id = currentSelected.id) else outbound
             }
             val selectedId = currentSelected?.id ?: freshSelected.id
-            updates += ConfigUpdate(config.id, if (keepName) null else draft.name, outbounds, selectedId)
+            updates += ConfigUpdate(config.id, if (sameName) null else draft.name, outbounds, selectedId)
             newOrigins[config.id] = SubscriptionOrigin(draft.name, freshHash)
         }
 
         val gone = existing.filter { it.id !in matches }
         // An answer under half the old size is more likely an error page or an expired plan than a real change.
         val removalHeld = gone.isNotEmpty() && fresh.size * 2 < existing.size
-        val removes = mutableListOf<String>()
-        val keptGone = mutableListOf<String>()
-        gone.forEach { config ->
-            val origin = origins[config.id]
-            val touched = config.selected || config.hasOwnSettings ||
-                (origin != null && (origin.hash != hashOf(config.outbounds) || origin.name != config.name))
-            when {
-                removalHeld -> Unit
-                touched -> keptGone += config.id
-                else -> removes += config.id
-            }
-            if (config.id !in removes) origin?.let { newOrigins[config.id] = it }
+        val removes = if (removalHeld) emptyList() else gone.map { it.id }
+        if (removalHeld) {
+            gone.forEach { config -> origins[config.id]?.let { newOrigins[config.id] = it } }
         }
         return RefreshPlan(
             updates = updates,
             adds = freshLeft.map { fresh[it] },
             removes = removes,
-            keptGone = keptGone,
-            keptEdited = keptEdited,
             removalHeld = removalHeld,
             origins = newOrigins,
             unchanged = unchanged,

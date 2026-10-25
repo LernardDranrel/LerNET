@@ -228,13 +228,17 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                     workspaceReady = true,
                     workspaceError = null,
                     profiles = workspace.legacy.profiles.map { profile ->
+                        val folder = workspace.legacy.groups.firstOrNull { profile.id in it.profileIds }
                         ExpertProfile(
-                            profile.id, profile.name, workspace.legacy.groups.firstOrNull { profile.id in it.profileIds }?.id,
+                            profile.id, profile.name, folder?.id,
                             profile.outbounds.firstOrNull { outbound -> outbound.id == profile.selectedOutboundId }?.type.orEmpty(),
-                            interfaceBinding = ExternalExitProfiles.binding(profile)
+                            interfaceBinding = ExternalExitProfiles.binding(profile),
+                            subscriptionUrl = profile.subscriptionUrl,
                         )
                     },
-                    folders = workspace.legacy.groups.map { group -> ExpertFolder(group.id, group.name) },
+                    folders = workspace.legacy.groups.map { group ->
+                        ExpertFolder(group.id, group.name, group.subscriptionUrl)
+                    },
                     externalProfiles = workspace.legacy.profiles.mapNotNull { profile ->
                         ExternalExitProfiles.describe(profile)?.let { request ->
                             ExpertExternalProfile(profile.id, request, ExternalExitProfiles.fingerprint(profile))
@@ -260,6 +264,14 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
     }
 
     fun startKeepingVpn(profileId: String, expected: NetworkPolicy) = dispatch(UiIntent.Start, profileId to expected)
+
+    fun copyProfile(profileId: String) = simple.duplicateProfile(profileId)
+
+    fun renameFolder(id: String, name: String) = simple.renameGroup(id, name)
+
+    fun deleteFolder(id: String) = simple.deleteGroup(id)
+
+    fun refreshSubscription(url: String) = simple.refreshSubscription(url)
 
     fun dispatch(intent: UiIntent) = dispatch(intent, null)
 

@@ -110,12 +110,16 @@ sealed class ConfigEditorIntent {
     data object Save : ConfigEditorIntent()
 
     data object RefreshSubscription : ConfigEditorIntent()
+
+    data object CopySubscription : ConfigEditorIntent()
 }
 
 sealed class ConfigEditorEvent {
     data object Saved : ConfigEditorEvent()
 
     data object SaveFailed : ConfigEditorEvent()
+
+    data object Copied : ConfigEditorEvent()
 }
 
 @HiltViewModel
@@ -162,8 +166,11 @@ class ConfigEditorViewModel @Inject constructor(
             ConfigEditorIntent.ToggleEngine -> _state.update { it.copy(showEngine = !it.showEngine) }
             ConfigEditorIntent.Save -> save()
             ConfigEditorIntent.RefreshSubscription -> refreshSubscription()
+            ConfigEditorIntent.CopySubscription -> copySubscription()
         }
     }
+
+    private fun locked(): Boolean = _state.value.subscriptionUrl != null
 
     private fun withField(state: ConfigEditorUiState, intent: ConfigEditorIntent): ConfigEditorUiState = when (intent) {
         is ConfigEditorIntent.Server -> state.copy(server = intent.value)
@@ -242,6 +249,7 @@ class ConfigEditorViewModel @Inject constructor(
     }
 
     private fun edit(block: (ConfigEditorUiState) -> ConfigEditorUiState) {
+        if (locked()) return
         _state.update { current ->
             val next = block(current)
             next.copy(dirty = savedDraft?.let { DraftSnapshot.of(next) != it } ?: false)
@@ -300,9 +308,17 @@ class ConfigEditorViewModel @Inject constructor(
         schedulePreview()
     }
 
+    private fun copySubscription() {
+        if (!locked()) return
+        viewModelScope.launch {
+            val copyId = withContext(Dispatchers.IO) { repository.duplicateProfile(profileId) } ?: return@launch
+            if (copyId.isNotEmpty()) _events.emit(ConfigEditorEvent.Copied)
+        }
+    }
+
     private fun save() {
         val current = _state.value
-        if (current.saving) return
+        if (current.saving || current.subscriptionUrl != null) return
         val error = validate(current)
         if (error != null) {
             _state.update { it.copy(fieldError = error) }

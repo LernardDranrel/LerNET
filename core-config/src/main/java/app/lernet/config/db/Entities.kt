@@ -63,6 +63,8 @@ data class GroupEntity(
     val sortIndex: Int = 0,
     val canvasLayout: String? = null,
     val autoFailover: Boolean = false,
+    /** Set when the folder is a live subscription. Null for a folder the user owns. */
+    val subscriptionUrl: String? = null,
 )
 
 @Entity(

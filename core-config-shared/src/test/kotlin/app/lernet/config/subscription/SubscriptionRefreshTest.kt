@@ -19,13 +19,13 @@ class SubscriptionRefreshTest {
         return ImportedProfileDraft(name, ProfileSource.SUBSCRIPTION, listOf(o), o.id, "https://sub")
     }
 
-    private fun config(id: String, name: String, server: String, uuid: String = "u1", selected: Boolean = false, own: Boolean = false) =
-        SubscribedConfig(id, name, listOf(outbound("o-$id", server, uuid)), "o-$id", selected, own)
+    private fun config(id: String, name: String, server: String, uuid: String = "u1") =
+        SubscribedConfig(id, name, listOf(outbound("o-$id", server, uuid)), "o-$id")
 
     private fun origin(c: SubscribedConfig) = SubscriptionOrigin(c.name, SubscriptionRefresh.hashOf(c.outbounds))
 
     @Test fun newKeyKeepsIdSelectionAndOutboundId() {
-        val de = config("a", "Германия", "de.example", selected = true)
+        val de = config("a", "Германия", "de.example")
         val plan = SubscriptionRefresh.plan(listOf(de), listOf(draft("Германия", "de.example", uuid = "u2")), mapOf("a" to origin(de)))
         val update = plan.updates.single()
         assertThat(update.id).isEqualTo("a")
@@ -49,33 +49,31 @@ class SubscriptionRefreshTest {
         assertThat(plan.updates.single().name).isEqualTo("Германия 1")
     }
 
-    @Test fun userRenameIsKept() {
+    @Test fun localRenameIsReplacedByTheRemoteName() {
         val imported = config("a", "DE", "de.example")
         val renamed = imported.copy(name = "Мой сервер")
         val plan = SubscriptionRefresh.plan(listOf(renamed), listOf(draft("DE", "de.example", uuid = "u2")), mapOf("a" to origin(imported)))
-        assertThat(plan.updates.single().name).isNull()
+        assertThat(plan.updates.single().name).isEqualTo("DE")
         assertThat(plan.origins.getValue("a").name).isEqualTo("DE")
     }
 
-    @Test fun userEditedServerDataIsLeftAlone() {
+    @Test fun localServerEditsAreReplaced() {
         val imported = config("a", "DE", "de.example")
         val edited = imported.copy(outbounds = listOf(outbound("o-a", "my.example")))
         val plan = SubscriptionRefresh.plan(listOf(edited), listOf(draft("DE", "de.example", uuid = "u2")), mapOf("a" to origin(imported)))
-        assertThat(plan.updates).isEmpty()
-        assertThat(plan.keptEdited).containsExactly("a")
-        assertThat(plan.summary(null)).contains("с вашими правками не тронуты: 1")
+        assertThat(plan.updates.single().outbounds.single().singBoxJson).contains("de.example")
+        assertThat(plan.updates.single().outbounds.single().singBoxJson).contains("u2")
     }
 
-    @Test fun goneConfigsAreRemovedUnlessChosenOrTuned() {
+    @Test fun goneConfigsAreRemoved() {
         val keep = config("keep", "A", "a.example")
-        val chosen = config("chosen", "B", "b.example", selected = true)
-        val tuned = config("tuned", "C", "c.example", own = true)
+        val chosen = config("chosen", "B", "b.example")
+        val tuned = config("tuned", "C", "c.example")
         val plain = config("plain", "D", "d.example")
         val all = listOf(keep, chosen, tuned, plain)
         val fresh = listOf(draft("A", "a.example"), draft("E", "e.example"))
         val plan = SubscriptionRefresh.plan(all, fresh, all.associate { it.id to origin(it) })
-        assertThat(plan.removes).containsExactly("plain")
-        assertThat(plan.keptGone).containsExactly("chosen", "tuned")
+        assertThat(plan.removes).containsExactly("chosen", "tuned", "plain")
         assertThat(plan.adds.map { it.name }).containsExactly("E")
         assertThat(plan.unchanged).isEqualTo(1)
         assertThat(plan.removalHeld).isFalse()
@@ -89,10 +87,10 @@ class SubscriptionRefreshTest {
         assertThat(plan.summary(null)).contains("старые конфиги не удалены")
     }
 
-    @Test fun configsFromOlderVersionWithoutOriginKeepTheirNameButGetNewData() {
+    @Test fun configsFromOlderVersionWithoutOriginTakeTheRemoteNameAndData() {
         val old = config("a", "Мой DE", "de.example")
         val plan = SubscriptionRefresh.plan(listOf(old), listOf(draft("DE", "de.example", uuid = "u9")), emptyMap())
-        assertThat(plan.updates.single().name).isNull()
+        assertThat(plan.updates.single().name).isEqualTo("DE")
         assertThat(plan.updates.single().outbounds.single().singBoxJson).contains("u9")
         assertThat(plan.origins.getValue("a").name).isEqualTo("DE")
     }

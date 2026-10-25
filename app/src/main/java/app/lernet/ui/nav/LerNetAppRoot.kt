@@ -410,6 +410,7 @@ private fun drawerActions(
     onSetAutoFailover = { id, enabled -> homeViewModel.onIntent(HomeIntent.SetGroupAutoFailover(id, enabled)) },
     onMoveGroup = { id, index -> homeViewModel.onIntent(HomeIntent.MoveGroup(id, index)) },
     onReorderUngrouped = { id, beforeId -> homeViewModel.onIntent(HomeIntent.ReorderUngrouped(id, beforeId)) },
+    onRefreshSubscription = { homeViewModel.onIntent(HomeIntent.RefreshSubscription(it)) },
 )
 
 @Composable

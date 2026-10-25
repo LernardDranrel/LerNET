@@ -14,6 +14,8 @@ import app.lernet.config.parse.GuessedMode
 import app.lernet.config.parse.ImportCoordinator
 import app.lernet.config.parse.ImportHint
 import app.lernet.config.parse.ImportResult
+import app.lernet.config.subscription.SubscriptionFolders
+import app.lernet.config.subscription.SubscriptionUpdater
 import app.lernet.engine.RunMode
 import app.lernet.engine.compile.AssembledConfig
 import app.lernet.engine.compile.ConfigAssembler
@@ -138,9 +140,14 @@ class DesktopController(
     }
     private val loaded = runCatching { store.load() }
     internal val sessionMarks = DesktopSessionMarks(store.workDirectory())
+    private val opened = loaded.getOrDefault(StoredState()).withExplicitDns().let { state ->
+        if (loaded.isFailure) state else DesktopSubscriptions.adoptAll(state).also { adopted ->
+            if (adopted != state) runCatching { store.save(adopted) }
+        }
+    }
     private val mutable = MutableStateFlow(
         DesktopUiState(
-            saved = loaded.getOrDefault(StoredState()).withExplicitDns(),
+            saved = opened,
             message = loaded.exceptionOrNull()?.let { app.lernet.engine.text.UserText.withReason("Не удалось прочитать конфиги", it) }
                 ?: if (store.recoveredFromBackup) "Конфиги восстановлены из резервной копии"
                 else if (sessionMarks.previousSessionCrashed) DesktopSessionMarks.CRASH_NOTICE else "",
@@ -678,21 +685,37 @@ class DesktopController(
             when (result) {
                 is ImportResult.Success -> {
                     var added = emptyList<StoredProfile>()
-                    val ok = change { saved ->
-                        added = result.drafts.map {
-                            val base = StoredProfile.fromDraft(it).copy(groupId = groupId, dnsPolicy = saved.defaultDnsPolicy)
-                            val named = displayName?.trim()?.takeIf { n -> n.isNotEmpty() }
-                            if (named != null) base.copy(name = named) else base
-                        }
-                        saved.copy(
-                            profiles = saved.profiles + added,
-                            selectedProfileId = saved.selectedProfileId ?: added.firstOrNull()?.id,
-                        )
-                    }
+                    var installed: DesktopSubscriptions.Installed? = null
                     val url = result.drafts.firstOrNull()?.subscriptionUrl?.takeIf(String::isNotBlank)
-                    if (ok && url != null) runCatching { subscriptionUpdater.imported(url, result, added.map { it.id }) }
+                    val ok = change { saved ->
+                        if (url != null) {
+                            val origins = subscriptionBook().entry(url)?.origins.orEmpty()
+                            DesktopSubscriptions.install(saved, result.drafts, url, origins).also { installed = it }.state
+                        } else {
+                            added = result.drafts.map {
+                                val base = StoredProfile.fromDraft(it).copy(groupId = groupId, dnsPolicy = saved.defaultDnsPolicy)
+                                val named = displayName?.trim()?.takeIf { n -> n.isNotEmpty() }
+                                if (named != null) base.copy(name = named) else base
+                            }
+                            saved.copy(
+                                profiles = saved.profiles + added,
+                                selectedProfileId = saved.selectedProfileId ?: added.firstOrNull()?.id,
+                            )
+                        }
+                    }
+                    val recorded = installed
+                    if (ok && url != null && recorded != null) {
+                        if (recorded.refreshed && recorded.plan != null) {
+                            subscriptionUpdater.applied(SubscriptionUpdater.Prepared.Ready(url, recorded.plan, result), recorded.addedIds)
+                        } else {
+                            runCatching { subscriptionUpdater.imported(url, result, recorded.addedIds) }
+                        }
+                    }
+                    val subscriptionMessage = recorded?.plan?.let { plan ->
+                        if (url != null) SubscriptionUpdater.Prepared.Ready(url, plan, result).message else null
+                    }
                     mutable.update {
-                        it.copy(busy = false, message = importMessage(result.drafts.size, result.unusedParts,
+                        it.copy(busy = false, message = subscriptionMessage ?: importMessage(result.drafts.size, result.unusedParts,
                             app.lernet.config.parse.ImportReport.skipped(result.skipped)))
                     }
                 }
@@ -721,11 +744,13 @@ class DesktopController(
     }
 
     private fun StoredState.withMode(profile: StoredProfile?, mode: RunMode): StoredState =
-        if (profile?.modeOverride != null) copy(profiles = profiles.map {
+        if (profile?.modeOverride != null && !SubscriptionFolders.owned(profile.subscriptionUrl)) copy(profiles = profiles.map {
             if (it.id == profile.id) it.copy(modeOverride = mode.name) else it
         }) else copy(mode = mode.name)
 
     fun clearModeOverride(profileId: String) {
+        val profile = state.value.saved.profiles.firstOrNull { it.id == profileId } ?: return
+        if (SubscriptionFolders.owned(profile.subscriptionUrl)) return
         reconfigureConnection { saved -> saved.copy(profiles = saved.profiles.map {
             if (it.id == profileId) it.copy(modeOverride = null) else it
         }) }
@@ -764,11 +789,14 @@ class DesktopController(
     }
 
     fun rename(profileId: String, name: String) = change { saved ->
+        val profile = saved.profiles.firstOrNull { it.id == profileId } ?: return@change saved
+        if (SubscriptionFolders.owned(profile.subscriptionUrl)) return@change saved
         saved.copy(profiles = saved.profiles.map { if (it.id == profileId) it.copy(name = name.trim()) else it })
     }
 
     fun moveProfile(profileId: String, delta: Int) = change { saved ->
         val profile = saved.profiles.firstOrNull { it.id == profileId } ?: return@change saved
+        if (SubscriptionFolders.owned(profile.subscriptionUrl)) return@change saved
         val indexes = saved.profiles.indices.filter { saved.profiles[it].groupId == profile.groupId }
         val current = indexes.indexOfFirst { saved.profiles[it].id == profileId }
         val target = current + delta
@@ -783,9 +811,11 @@ class DesktopController(
 
     fun dropProfile(profileId: String, targetProfileId: String?, targetGroupId: String?, afterTarget: Boolean) = change { saved ->
         val source = saved.profiles.firstOrNull { it.id == profileId } ?: return@change saved
+        if (SubscriptionFolders.owned(source.subscriptionUrl)) return@change saved
         val target = saved.profiles.firstOrNull { it.id == targetProfileId && it.id != profileId }
         if (target == null && targetGroupId != null && saved.groups.none { it.id == targetGroupId }) return@change saved
         val groupId = target?.groupId ?: targetGroupId
+        if (SubscriptionFolders.owned(saved.groups.firstOrNull { it.id == groupId }?.subscriptionUrl)) return@change saved
         val reordered = saved.profiles.filterNot { it.id == profileId }.toMutableList()
         val targetIndex = if (target != null) {
             reordered.indexOfFirst { it.id == target.id }.let { it + if (afterTarget) 1 else 0 }
@@ -805,9 +835,11 @@ class DesktopController(
             rule.copy(id = ids.getValue(rule.id), profileId = copyId,
                 parentId = app.lernet.config.transfer.TransferCodec.remapParentId(rule.parentId, ids))
         }
+        val owned = SubscriptionFolders.owned(source.subscriptionUrl)
         saved.copy(
             // The copy is the user's own config: a subscription refresh must never touch or remove it.
             profiles = saved.profiles + source.copy(id = copyId, name = source.name + " (копия)", subscriptionUrl = null,
+                groupId = if (owned) null else source.groupId,
                 canvasLayout = app.lernet.config.transfer.TransferCodec.remapCanvasLayout(source.canvasLayout, ids)),
             rules = saved.rules + copiedRules,
             rulePositions = saved.rulePositions + ids.mapNotNull { (old, fresh) ->
@@ -846,6 +878,7 @@ class DesktopController(
 
     fun delete(profileId: String) {
         val before = state.value.saved
+        if (SubscriptionFolders.owned(before.profiles.firstOrNull { it.id == profileId }?.subscriptionUrl)) return
         before.profiles.indexOfFirst { it.id == profileId }.takeIf { it >= 0 }?.let { index ->
             val rules = before.rules.filter { it.profileId == profileId }
             val ids = rules.mapTo(HashSet()) { it.id }
@@ -941,6 +974,8 @@ class DesktopController(
     }
 
     fun updateProfile(profile: StoredProfile) = change { saved ->
+        val current = saved.profiles.firstOrNull { it.id == profile.id } ?: return@change saved
+        if (SubscriptionFolders.owned(current.subscriptionUrl)) return@change saved
         saved.copy(profiles = saved.profiles.map { if (it.id == profile.id) profile else it })
     }
     fun addGroup(name: String) = change {
@@ -961,14 +996,47 @@ class DesktopController(
     fun renameGroup(groupId: String, name: String) = change { saved ->
         saved.copy(groups = saved.groups.map { if (it.id == groupId) it.copy(name = name.trim()) else it })
     }
-    fun deleteGroup(groupId: String) = change { saved ->
-        val removedIds = saved.rules.filter { it.profileId == "grp_$groupId" }.mapTo(HashSet()) { it.id }
-        saved.copy(
-            groups = saved.groups.filterNot { it.id == groupId },
-            profiles = saved.profiles.map { if (it.groupId == groupId) it.copy(groupId = null) else it },
-            rules = saved.rules.filterNot { it.id in removedIds },
-            rulePositions = saved.rulePositions.filterKeys { it !in removedIds },
-        )
+    fun deleteGroup(groupId: String) {
+        val group = state.value.saved.groups.firstOrNull { it.id == groupId }
+        val owned = SubscriptionFolders.owned(group?.subscriptionUrl)
+        if (owned) {
+            val memberIds = state.value.saved.profiles.filter {
+                it.groupId == groupId || it.subscriptionUrl == group?.subscriptionUrl
+            }.map { it.id }.toSet()
+            if (state.value.saved.selectedProfileId in memberIds) disconnect()
+        }
+        val removed = change { saved ->
+            val current = saved.groups.firstOrNull { it.id == groupId } ?: return@change saved
+            if (SubscriptionFolders.owned(current.subscriptionUrl)) {
+                val memberIds = saved.profiles.filter {
+                    it.groupId == groupId || it.subscriptionUrl == current.subscriptionUrl
+                }.map { it.id }.toSet()
+                val removedRuleIds = saved.rules.filter { it.profileId in memberIds || it.profileId == "grp_$groupId" }
+                    .mapTo(HashSet()) { it.id }
+                saved.copy(
+                    groups = saved.groups.filterNot { it.id == groupId },
+                    profiles = saved.profiles.filterNot { it.id in memberIds },
+                    rules = saved.rules.filterNot { it.id in removedRuleIds },
+                    rulePositions = saved.rulePositions.filterKeys { it !in removedRuleIds },
+                    selectedProfileId = if (saved.selectedProfileId in memberIds) {
+                        saved.profiles.firstOrNull { it.id !in memberIds }?.id
+                    } else {
+                        saved.selectedProfileId
+                    },
+                )
+            } else {
+                val removedIds = saved.rules.filter { it.profileId == "grp_$groupId" }.mapTo(HashSet()) { it.id }
+                saved.copy(
+                    groups = saved.groups.filterNot { it.id == groupId },
+                    profiles = saved.profiles.map { if (it.groupId == groupId) it.copy(groupId = null) else it },
+                    rules = saved.rules.filterNot { it.id in removedIds },
+                    rulePositions = saved.rulePositions.filterKeys { it !in removedIds },
+                )
+            }
+        }
+        if (removed && owned) {
+            subscriptionBook().retain(state.value.saved.profiles.mapNotNull { it.subscriptionUrl?.takeIf(String::isNotBlank) }.toSet())
+        }
     }
 
     data class RuleDraft(val baseline: List<StoredRule>, val rules: List<StoredRule>)

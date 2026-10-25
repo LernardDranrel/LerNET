@@ -10,12 +10,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -65,6 +67,7 @@ import app.lernet.routing.policy.PolicyChannel
 import app.lernet.routing.policy.PolicyScope
 import app.lernet.routing.policy.PolicyTarget
 import app.lernet.routing.policy.ProfileExitPolicy
+import app.lernet.config.subscription.SubscriptionFolders
 import app.lernet.routing.policy.normalized
 import app.lernet.ui.components.PanelCard
 import java.util.UUID
@@ -81,7 +84,12 @@ internal fun ExpertExits(
     onSaveExternal: (suspend (ExternalExitRequest, TransferProfile?) -> String?)? = null,
     onSaveDraft: (suspend (NetworkPolicy, NetworkPolicy) -> String?)? = null,
     formMemory: ExpertFormMemory = remember { ExpertFormMemory() },
+    onCopyProfile: (suspend (String) -> Unit)? = null,
+    onRenameFolder: (suspend (String, String) -> Unit)? = null,
+    onDeleteFolder: (suspend (String) -> Unit)? = null,
+    onRefreshSubscription: (suspend (String) -> String)? = null,
 ) {
+    val jobs = rememberCoroutineScope()
     var editingChannel by rememberSaveable(stateSaver = ExpertOptionalJsonSaver<PolicyChannel>()) { mutableStateOf<PolicyChannel?>(null) }
     var chooseOwner by remember { mutableStateOf(false) }
     var lifecycleOwner by rememberSaveable(stateSaver = ExpertOptionalJsonSaver<PolicyScope>()) { mutableStateOf<PolicyScope?>(null) }
@@ -183,6 +191,10 @@ internal fun ExpertExits(
             folderSettingsId = null
         } else {
             val settings = policy.folderPolicies.firstOrNull { it.folderId == folder.id } ?: FolderPolicy(folder.id)
+            val subscription = SubscriptionFolders.owned(folder.subscriptionUrl)
+            var draftName by remember(folder.id) { mutableStateOf(folder.name) }
+            var confirmDelete by remember(folder.id) { mutableStateOf(false) }
+            var refreshMessage by remember(folder.id) { mutableStateOf<String?>(null) }
             fun update(next: FolderPolicy) {
                 onIntent(
                     ExpertIntent.EditChecked(
@@ -200,6 +212,45 @@ internal fun ExpertExits(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text(folder.name, style = MaterialTheme.typography.titleSmall)
+                        if (subscription) {
+                            OutlinedTextField(
+                                draftName,
+                                { draftName = it },
+                                Modifier.fillMaxWidth().testTag("expert_subscription_rename"),
+                                label = { Text(stringResource(R.string.expert_subscription_rename)) },
+                                singleLine = true,
+                            )
+                            val trimmed = draftName.trim()
+                            if (onRenameFolder != null && trimmed.isNotEmpty() && trimmed != folder.name) {
+                                val rename = onRenameFolder
+                                TextButton(
+                                    { jobs.launch { rename(folder.id, trimmed) } },
+                                    Modifier.testTag("expert_subscription_rename_apply"),
+                                ) { Text(stringResource(R.string.rename)) }
+                            }
+                            val subscriptionUrl = folder.subscriptionUrl
+                            if (onRefreshSubscription != null && !subscriptionUrl.isNullOrBlank()) {
+                                val refresh = onRefreshSubscription
+                                OutlinedButton(
+                                    { jobs.launch { refreshMessage = refresh(subscriptionUrl) } },
+                                    Modifier.fillMaxWidth().testTag("expert_subscription_refresh"),
+                                ) { Text(stringResource(R.string.expert_subscription_refresh)) }
+                            }
+                            refreshMessage?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            if (onDeleteFolder != null) {
+                                TextButton(
+                                    { confirmDelete = true },
+                                    Modifier.testTag("expert_subscription_delete"),
+                                ) {
+                                    Text(
+                                        stringResource(R.string.expert_subscription_delete),
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                            }
+                        }
                         Text(
                             stringResource(
                                 when (settings.selection.normalized()) {
@@ -236,6 +287,26 @@ internal fun ExpertExits(
                     TextButton({ folderSettingsId = null }) { Text(stringResource(R.string.expert_node_accept)) }
                 },
             )
+            if (confirmDelete && onDeleteFolder != null) {
+                val remove = onDeleteFolder
+                AlertDialog(
+                    onDismissRequest = { confirmDelete = false },
+                    title = { Text(stringResource(R.string.expert_subscription_delete)) },
+                    text = { Text(stringResource(R.string.expert_subscription_delete_body)) },
+                    confirmButton = {
+                        TextButton({
+                            jobs.launch {
+                                remove(folder.id)
+                                confirmDelete = false
+                                folderSettingsId = null
+                            }
+                        }) { Text(stringResource(R.string.expert_subscription_delete)) }
+                    },
+                    dismissButton = {
+                        TextButton({ confirmDelete = false }) { Text(stringResource(R.string.cancel)) }
+                    },
+                )
+            }
             if (preferredOpen) {
                 AlertDialog(
                     onDismissRequest = { preferredOpen = false },
@@ -264,6 +335,7 @@ internal fun ExpertExits(
         val settings = policy.profilePolicies.firstOrNull { it.profileId == profile.id } ?: ProfileExitPolicy(profile.id)
         val external = remember(profile) { ExternalExitProfiles.describe(profile) }
         val windowsOnly = profile.id in unsupportedProfiles
+        val owned = SubscriptionFolders.owned(profile.subscriptionUrl)
         val liveExits = runtime.exits.filter { it.key.profileId == profile.id && it.key.channelId == null }
         AlertDialog(
             onDismissRequest = { profileDetails = null },
@@ -273,32 +345,52 @@ internal fun ExpertExits(
                     Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    if (external != null || windowsOnly) {
-                        if (windowsOnly) {
-                            ExpertHint(R.string.expert_external_corporate_unavailable)
-                        } else {
-                            val described = requireNotNull(external)
-                            Text(
-                                stringResource(
-                                    if (described.kind == ExternalExitKind.SOCKS5) {
-                                        R.string.expert_external_socks
-                                    } else {
-                                        R.string.expert_external_http
-                                    },
-                                ),
-                                style = MaterialTheme.typography.labelLarge,
-                            )
-                            Text("${described.host}:${described.port}", style = MaterialTheme.typography.bodySmall)
+                    if (owned) {
+                        Text(
+                            stringResource(R.string.expert_subscription_readonly),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (onCopyProfile != null) {
+                            val copy = onCopyProfile
                             OutlinedButton(
                                 onClick = {
-                                    externalDetails = profile
-                                    profileDetails = null
+                                    jobs.launch {
+                                        copy(profile.id)
+                                        profileDetails = null
+                                    }
                                 },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text(stringResource(R.string.expert_external_details)) }
+                                modifier = Modifier.fillMaxWidth().testTag("expert_subscription_copy"),
+                            ) { Text(stringResource(R.string.expert_subscription_copy)) }
                         }
+                    } else {
+                        if (external != null || windowsOnly) {
+                            if (windowsOnly) {
+                                ExpertHint(R.string.expert_external_corporate_unavailable)
+                            } else {
+                                val described = requireNotNull(external)
+                                Text(
+                                    stringResource(
+                                        if (described.kind == ExternalExitKind.SOCKS5) {
+                                            R.string.expert_external_socks
+                                        } else {
+                                            R.string.expert_external_http
+                                        },
+                                    ),
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                                Text("${described.host}:${described.port}", style = MaterialTheme.typography.bodySmall)
+                                OutlinedButton(
+                                    onClick = {
+                                        externalDetails = profile
+                                        profileDetails = null
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text(stringResource(R.string.expert_external_details)) }
+                            }
+                        }
+                        LifecycleSummary(settings.lifecycle) { lifecycleOwner = PolicyScope.Profile(profile.id) }
                     }
-                    LifecycleSummary(settings.lifecycle) { lifecycleOwner = PolicyScope.Profile(profile.id) }
                     if (liveExits.isEmpty()) {
                         Text(
                             stringResource(R.string.expert_exit_card_idle),
@@ -608,12 +700,21 @@ private fun FolderConfigCard(
     onProfileTap: (TransferProfile) -> Unit,
 ) {
     val current = settings.selection.normalized()
+    val subscription = SubscriptionFolders.owned(folder.subscriptionUrl)
     PanelCard(Modifier.testTag("expert_folder_${folder.id}")) {
         Row(
             Modifier.fillMaxWidth().testTag("expert_folder_header_${folder.id}"),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            if (subscription) {
+                Icon(
+                    Icons.Outlined.Public,
+                    contentDescription = stringResource(R.string.expert_subscription_folder),
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp).testTag("expert_subscription_icon_${folder.id}"),
+                )
+            }
             Text(
                 folder.name,
                 style = MaterialTheme.typography.titleSmall,

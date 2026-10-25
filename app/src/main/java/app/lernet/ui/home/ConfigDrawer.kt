@@ -32,6 +32,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -81,6 +82,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.zIndex
 import app.lernet.R
+import app.lernet.config.subscription.SubscriptionFolders
 import app.lernet.config.model.Group
 import app.lernet.config.model.Profile
 import app.lernet.ui.components.LerNetLogo
@@ -222,7 +224,15 @@ fun ConfigDrawer(
         AlertDialog(
             onDismissRequest = { deleteGroup = null },
             title = { Text(stringResource(R.string.group_delete_title)) },
-            text = { Text(stringResource(R.string.group_delete_body, group.name)) },
+            text = {
+                Text(
+                    stringResource(
+                        if (SubscriptionFolders.owned(group.subscriptionUrl)) R.string.group_delete_subscription_body
+                        else R.string.group_delete_body,
+                        group.name,
+                    ),
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     actions.onDeleteGroup(group.id)
@@ -342,7 +352,9 @@ fun ConfigDrawer(
                                                 zone.key in listState.layoutInfo.visibleItemsInfo.map { it.key.toString() }
                                         }
                                         val profile = currentProfiles.firstOrNull { it.id == source?.profileId }
-                                        if (source != null && profile != null && profile.id != currentEditingId) {
+                                        if (source != null && profile != null && profile.id != currentEditingId &&
+                                            !SubscriptionFolders.owned(profile.subscriptionUrl)
+                                        ) {
                                             currentDragHooks.onStart(profile, pointer, pointer - source.bounds.topLeft)
                                         }
                                     },
@@ -376,7 +388,9 @@ fun ConfigDrawer(
                                     onToggle = {
                                         val moving = movingId
                                         if (moving != null) {
-                                            actions.onMoveProfile(moving, group.id, group.profileIds.size)
+                                            if (!SubscriptionFolders.owned(group.subscriptionUrl)) {
+                                                actions.onMoveProfile(moving, group.id, group.profileIds.size)
+                                            }
                                             movingId = null
                                         } else {
                                             expandedGroups = if (group.id in expandedGroups) {
@@ -425,11 +439,15 @@ fun ConfigDrawer(
                                                 val moving = movingId
                                                 if (moving == null) {
                                                     actions.openProfile(profile.id)
-                                                } else {
+                                                } else if (!SubscriptionFolders.owned(group.subscriptionUrl) &&
+                                                    !SubscriptionFolders.owned(currentProfiles.firstOrNull { it.id == moving }?.subscriptionUrl)
+                                                ) {
                                                     val targetIndex = group.profileIds.indexOf(profile.id)
                                                     val sourceIndex = group.profileIds.indexOf(moving)
                                                     val adjusted = targetIndex - if (sourceIndex in 0 until targetIndex) 1 else 0
                                                     actions.onMoveProfile(moving, group.id, adjusted)
+                                                    movingId = null
+                                                } else {
                                                     movingId = null
                                                 }
                                             },
@@ -626,7 +644,14 @@ private fun FolderHeader(
     )
     ListItem(
         modifier = Modifier.fillMaxWidth().onGloballyPositioned { onBounds(it.boundsInRoot()) }.clickable(onClick = onToggle),
-        leadingContent = { Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+        leadingContent = {
+            val subscription = SubscriptionFolders.owned(group.subscriptionUrl)
+            Icon(
+                if (subscription) Icons.Outlined.Public else Icons.Default.Folder,
+                contentDescription = if (subscription) stringResource(R.string.expert_subscription_folder) else null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        },
         headlineContent = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(group.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -710,10 +735,17 @@ private fun FolderHeader(
                             menu = false
                             actions.onSetAutoFailover(group.id, !group.autoFailover)
                         })
-                        DropdownMenuItem(text = { Text(stringResource(R.string.drawer_add_to_folder)) }, onClick = {
-                            menu = false
-                            actions.onImportIntoGroup(group.id)
-                        })
+                        if (SubscriptionFolders.owned(group.subscriptionUrl)) {
+                            DropdownMenuItem(text = { Text(stringResource(R.string.expert_subscription_refresh)) }, onClick = {
+                                menu = false
+                                group.subscriptionUrl?.let(actions.onRefreshSubscription)
+                            })
+                        } else {
+                            DropdownMenuItem(text = { Text(stringResource(R.string.drawer_add_to_folder)) }, onClick = {
+                                menu = false
+                                actions.onImportIntoGroup(group.id)
+                            })
+                        }
                         DropdownMenuItem(text = { Text(stringResource(R.string.group_routes)) }, onClick = {
                             menu = false
                             actions.onGroupRoutes(group.id)
@@ -906,13 +938,16 @@ private fun ProfileOverflow(
             Icon(LerNetSymbols.more(), contentDescription = stringResource(R.string.more))
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { onExpanded(false) }) {
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.drawer_move_profile)) },
-                onClick = {
-                    onExpanded(false)
-                    onMoveRequested()
-                },
-            )
+            val owned = SubscriptionFolders.owned(profile.subscriptionUrl)
+            if (!owned) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.drawer_move_profile)) },
+                    onClick = {
+                        onExpanded(false)
+                        onMoveRequested()
+                    },
+                )
+            }
             if (!actions.managementOnly) DropdownMenuItem(
                 text = { Text(stringResource(R.string.select_profile)) },
                 onClick = {
@@ -920,41 +955,47 @@ private fun ProfileOverflow(
                     actions.openProfile(profile.id)
                 },
             )
+            if (!owned) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.edit_profile)) },
+                    onClick = {
+                        onExpanded(false)
+                        actions.onConfig(profile.id)
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.edit_routes)) },
+                    onClick = {
+                        onExpanded(false)
+                        actions.onRoutes(profile.id)
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.rename)) },
+                    onClick = {
+                        onExpanded(false)
+                        onRename()
+                    },
+                )
+            }
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.edit_profile)) },
-                onClick = {
-                    onExpanded(false)
-                    actions.onConfig(profile.id)
+                text = {
+                    Text(stringResource(if (owned) R.string.expert_subscription_copy else R.string.duplicate))
                 },
-            )
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.edit_routes)) },
-                onClick = {
-                    onExpanded(false)
-                    actions.onRoutes(profile.id)
-                },
-            )
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.rename)) },
-                onClick = {
-                    onExpanded(false)
-                    onRename()
-                },
-            )
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.duplicate)) },
                 onClick = {
                     onExpanded(false)
                     actions.onDuplicate(profile.id)
                 },
             )
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.delete)) },
-                onClick = {
-                    onExpanded(false)
-                    actions.onDelete(profile.id)
-                },
-            )
+            if (!owned) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.delete)) },
+                    onClick = {
+                        onExpanded(false)
+                        actions.onDelete(profile.id)
+                    },
+                )
+            }
         }
     }
 }

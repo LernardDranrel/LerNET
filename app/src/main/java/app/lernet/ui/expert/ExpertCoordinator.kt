@@ -29,6 +29,7 @@ import app.lernet.routing.policy.PolicyTarget
 import app.lernet.vpn.DefaultNetworkMonitor
 import app.lernet.vpn.expert.AndroidExpertEnvironment
 import app.lernet.vpn.expert.AndroidExpertEnvironmentState
+import app.lernet.subscription.SubscriptionAutoRefresh
 import app.lernet.vpn.expert.ExpertServiceRestorer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.atomic.AtomicLong
@@ -69,6 +70,7 @@ class ExpertCoordinator @Inject constructor(
     private val backend: ExpertAndroidEngine,
     private val scope: CoroutineScope,
     private val environment: AndroidExpertEnvironment,
+    private val subscriptions: SubscriptionAutoRefresh,
 ) {
     private val workspace = PolicyWorkspaceRepository(PolicyWorkspaceStore(context.filesDir.resolve("expert-workspace.json").toPath()))
     private val mutex = Mutex()
@@ -496,4 +498,20 @@ class ExpertCoordinator @Inject constructor(
         mutableState.update { it.copy(inventory = adopted.legacy, inventoryNotes = emptyList(), storageError = null) }
         return adopted
     }
+
+    suspend fun copyProfile(profileId: String) = withContext(Dispatchers.IO) {
+        configurations.duplicateProfile(profileId)
+    }
+
+    suspend fun renameFolder(id: String, name: String) = withContext(Dispatchers.IO) {
+        configurations.renameGroup(id, name)
+    }
+
+    suspend fun deleteFolder(id: String) = withContext(Dispatchers.IO) {
+        val url = configurations.groups.first().firstOrNull { it.id == id }?.subscriptionUrl
+        configurations.deleteGroup(id)
+        if (!url.isNullOrBlank()) subscriptions.forget(url)
+    }
+
+    suspend fun refreshSubscription(url: String): String = subscriptions.refresh(url)
 }

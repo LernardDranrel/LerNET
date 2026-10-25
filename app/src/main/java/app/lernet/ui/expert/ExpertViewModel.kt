@@ -31,4 +31,12 @@ class ExpertViewModel @Inject constructor(private val coordinator: ExpertCoordin
 
     suspend fun saveHealthSettings(expected: PolicyHealthSettings, next: PolicyHealthSettings): String? =
         coordinator.saveHealthSettings(expected, next)
+
+    suspend fun copyProfile(profileId: String) = coordinator.copyProfile(profileId)
+
+    suspend fun renameFolder(id: String, name: String) = coordinator.renameFolder(id, name)
+
+    suspend fun deleteFolder(id: String) = coordinator.deleteFolder(id)
+
+    suspend fun refreshSubscription(url: String): String = coordinator.refreshSubscription(url)
 }

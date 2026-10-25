@@ -103,11 +103,13 @@ fun ConfigEditorScreen(
     val snackbar = remember { SnackbarHostState() }
     val saved = stringResource(R.string.cfg_saved)
     val saveFailed = stringResource(R.string.cfg_save_failed)
+    val copied = stringResource(R.string.cfg_subscription_copied)
     LaunchedEffect(events) {
         events.collect { event ->
             when (event) {
                 ConfigEditorEvent.Saved -> snackbar.showSnackbar(saved)
                 ConfigEditorEvent.SaveFailed -> snackbar.showSnackbar(saveFailed)
+                ConfigEditorEvent.Copied -> snackbar.showSnackbar(copied)
             }
         }
     }
@@ -130,7 +132,7 @@ fun ConfigEditorScreen(
             )
         },
         bottomBar = {
-            if (!state.loading && !state.missing) {
+            if (!state.loading && !state.missing && state.subscriptionUrl == null) {
                 Button(
                     onClick = { onIntent(ConfigEditorIntent.Save) },
                     enabled = !state.saving,
@@ -196,6 +198,11 @@ private fun ConfigBody(
             .padding(metrics.gutter),
         verticalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap),
     ) {
+        if (state.subscriptionUrl != null) {
+            SubscriptionCard(state, onIntent)
+            Text("${state.server}:${state.port}", style = MaterialTheme.typography.bodyMedium)
+            return@Column
+        }
         Text(stringResource(R.string.cfg_local_section), style = MaterialTheme.typography.headlineSmall)
         Text(stringResource(R.string.cfg_local_help), color = MaterialTheme.colorScheme.onSurfaceVariant)
         DnsCard(state, onIntent, byId[TruthFieldId.DNS])
@@ -222,6 +229,12 @@ private fun SubscriptionCard(state: ConfigEditorUiState, onIntent: (ConfigEditor
             modifier = Modifier.lernetButton().testTag("cfg-subscription-refresh"),
         ) {
             Text(stringResource(if (state.subscriptionBusy) R.string.cfg_subscription_busy else R.string.cfg_subscription_refresh))
+        }
+        OutlinedButton(
+            onClick = { onIntent(ConfigEditorIntent.CopySubscription) },
+            modifier = Modifier.lernetButton().testTag("cfg-subscription-copy"),
+        ) {
+            Text(stringResource(R.string.cfg_subscription_copy))
         }
     }
 }

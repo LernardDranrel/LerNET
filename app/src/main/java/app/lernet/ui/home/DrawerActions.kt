@@ -21,6 +21,7 @@ data class DrawerActions(
     val onSetAutoFailover: (String, Boolean) -> Unit,
     val onMoveGroup: (String, Int) -> Unit,
     val onReorderUngrouped: (String, String) -> Unit,
+    val onRefreshSubscription: (String) -> Unit = {},
     val managementOnly: Boolean = false,
 ) {
     fun openProfile(id: String) {

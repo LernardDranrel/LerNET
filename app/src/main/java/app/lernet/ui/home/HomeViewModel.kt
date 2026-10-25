@@ -11,6 +11,8 @@ import app.lernet.config.model.Group
 import app.lernet.config.model.GroupLayout
 import app.lernet.config.model.Profile
 import app.lernet.config.repo.ConfigRepository
+import app.lernet.config.subscription.SubscriptionFolders
+import app.lernet.subscription.SubscriptionAutoRefresh
 import app.lernet.config.repo.RuleNodeRecord
 import app.lernet.engine.ConnectionController
 import app.lernet.ui.expert.ExpertCoordinator
@@ -125,6 +127,8 @@ sealed class HomeIntent {
 
     data class DeleteGroup(val id: String) : HomeIntent()
 
+    data class RefreshSubscription(val url: String) : HomeIntent()
+
     data class SetGroupAutoFailover(val id: String, val enabled: Boolean) : HomeIntent()
 
     data class MoveProfile(val id: String, val groupId: String?, val index: Int) : HomeIntent()
@@ -189,6 +193,7 @@ class HomeViewModel @Inject constructor(
     private val settingsStore: SettingsStore,
     private val controller: ConnectionController,
     private val expertCoordinator: ExpertCoordinator,
+    private val subscriptions: SubscriptionAutoRefresh,
 ) : ViewModel() {
     val events = MutableSharedFlow<HomeEvent>(extraBufferCapacity = 4)
     val transferMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
@@ -401,7 +406,7 @@ class HomeViewModel @Inject constructor(
                 is HomeIntent.DuplicateProfile -> {
                     val copyId = repository.duplicateProfile(intent.id)
                     val group = repository.groups.first().firstOrNull { intent.id in it.profileIds }
-                    if (copyId != null && group != null) {
+                    if (copyId != null && group != null && !SubscriptionFolders.owned(group.subscriptionUrl)) {
                         val groups = repository.groups.first()
                         repository.replaceAllMemberships(
                             GroupLayout.moveProfile(
@@ -424,7 +429,12 @@ class HomeViewModel @Inject constructor(
                 is HomeIntent.RenameGroup -> if (intent.name.isNotBlank()) {
                     repository.renameGroup(intent.id, intent.name)
                 }
-                is HomeIntent.DeleteGroup -> repository.deleteGroup(intent.id)
+                is HomeIntent.DeleteGroup -> {
+                    val url = repository.groups.first().firstOrNull { it.id == intent.id }?.subscriptionUrl
+                    repository.deleteGroup(intent.id)
+                    if (SubscriptionFolders.owned(url)) subscriptions.forget(url!!)
+                }
+                is HomeIntent.RefreshSubscription -> subscriptions.refresh(intent.url)
                 is HomeIntent.SetGroupAutoFailover -> repository.setGroupAutoFailover(intent.id, intent.enabled)
                 is HomeIntent.MoveProfile -> {
                     val groups = repository.groups.first()
@@ -572,8 +582,13 @@ class HomeViewModel @Inject constructor(
     fun assignImportedToGroup(groupId: String, profileIds: List<String>) {
         viewModelScope.launch {
             val groups = repository.groups.first()
+            val target = groups.firstOrNull { it.id == groupId } ?: return@launch
+            if (SubscriptionFolders.owned(target.subscriptionUrl)) return@launch
+            val movable = profileIds.filter { id ->
+                !SubscriptionFolders.owned(repository.getProfile(id)?.subscriptionUrl)
+            }
             var next = groups
-            profileIds.forEach { profileId ->
+            movable.forEach { profileId ->
                 val group = next.firstOrNull { it.id == groupId } ?: return@launch
                 next = app.lernet.config.model.GroupLayout.moveProfile(next, profileId, groupId, group.profileIds.size)
             }
@@ -663,9 +678,10 @@ class HomeViewModel @Inject constructor(
 
     private suspend fun deleteProfile(id: String) {
         val profile = repository.getProfile(id) ?: return
+        if (SubscriptionFolders.owned(profile.subscriptionUrl)) return
         val nodes = repository.listRuleNodes(id)
         lastDeleted = DeletedSnapshot(profile, nodes)
-        repository.deleteProfile(id)
+        if (!repository.deleteProfile(id)) return
         events.emit(HomeEvent.ProfileDeleted(profile.name))
     }
 

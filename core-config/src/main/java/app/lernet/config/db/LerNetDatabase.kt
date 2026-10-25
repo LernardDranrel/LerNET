@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GroupEntity::class,
         GroupMemberEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = false,
 )
 abstract class LerNetDatabase : RoomDatabase() {
@@ -42,6 +42,7 @@ abstract class LerNetDatabase : RoomDatabase() {
                     MIGRATION_8_9,
                     MIGRATION_9_10,
                     MIGRATION_10_11,
+                    MIGRATION_11_12,
                 )
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
@@ -98,6 +99,11 @@ abstract class LerNetDatabase : RoomDatabase() {
         val MIGRATION_10_11 = object : Migration(10, 11) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE profiles ADD COLUMN modeOverride TEXT")
+            }
+        }
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE groups ADD COLUMN subscriptionUrl TEXT")
             }
         }
     }

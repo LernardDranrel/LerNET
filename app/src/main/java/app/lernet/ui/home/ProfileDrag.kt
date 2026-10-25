@@ -3,6 +3,7 @@ package app.lernet.ui.home
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import app.lernet.config.model.Group
+import app.lernet.config.subscription.SubscriptionFolders
 
 internal enum class DrawerZoneKind { FOLDER, MEMBER, UNGROUPED, PROFILE }
 
@@ -38,6 +39,7 @@ internal fun resolveDrawerDrop(
     draggedId: String,
     snapDistancePx: Float,
 ): DrawerDrop? {
+    if (groups.any { SubscriptionFolders.owned(it.subscriptionUrl) && draggedId in it.profileIds }) return null
     val zone = zones.asSequence()
         .filter { it.key in visibleKeys && pointer.x in it.bounds.left..it.bounds.right }
         .map { candidate ->
@@ -56,10 +58,12 @@ internal fun resolveDrawerDrop(
     return when (zone.kind) {
         DrawerZoneKind.FOLDER -> {
             val group = groups.firstOrNull { it.id == zone.groupId } ?: return null
+            if (SubscriptionFolders.owned(group.subscriptionUrl)) return null
             DrawerDrop(zone.key, group.id, group.profileIds.size - if (sourceGroup?.id == group.id) 1 else 0)
         }
         DrawerZoneKind.MEMBER -> {
             val group = groups.firstOrNull { it.id == zone.groupId } ?: return null
+            if (SubscriptionFolders.owned(group.subscriptionUrl)) return null
             val rowIndex = group.profileIds.indexOf(zone.profileId)
             if (rowIndex < 0) return null
             val after = pointer.y >= zone.bounds.center.y

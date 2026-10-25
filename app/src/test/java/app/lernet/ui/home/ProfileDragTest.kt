@@ -30,6 +30,26 @@ class ProfileDragTest {
     }
 
     @Test
+    fun subscriptionFolderRejectsIncomingAndOutgoingDrags() {
+        val owned = group.copy(subscriptionUrl = "https://sub.example/s")
+        val folder = DrawerDropZone("group:folder", DrawerZoneKind.FOLDER, Rect(0f, 0f, 300f, 70f), "folder")
+        val member = DrawerDropZone("member:b", DrawerZoneKind.MEMBER, Rect(0f, 80f, 300f, 140f), "folder", "b")
+        val ungrouped = DrawerDropZone("ungrouped", DrawerZoneKind.UNGROUPED, Rect(0f, 200f, 300f, 240f))
+        assertEquals(
+            null,
+            resolveDrawerDrop(Offset(40f, 20f), listOf(folder), setOf(folder.key), listOf(owned), listOf("outside"), "outside", 20f),
+        )
+        assertEquals(
+            null,
+            resolveDrawerDrop(Offset(40f, 100f), listOf(member), setOf(member.key), listOf(owned), owned.profileIds, "a", 20f),
+        )
+        assertEquals(
+            null,
+            resolveDrawerDrop(Offset(40f, 210f), listOf(ungrouped), setOf(ungrouped.key), listOf(owned), owned.profileIds, "a", 20f),
+        )
+    }
+
+    @Test
     fun invisibleRowCannotReceiveDrop() {
         val zone = DrawerDropZone("group:folder", DrawerZoneKind.FOLDER, Rect(0f, 0f, 300f, 70f), "folder")
         val result = resolveDrawerDrop(

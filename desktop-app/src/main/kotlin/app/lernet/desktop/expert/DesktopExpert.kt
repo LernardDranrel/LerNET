@@ -77,6 +77,10 @@ fun DesktopExpert(
     appSettings: (@Composable (Modifier) -> Unit)? = null,
     /** VPN|Эксперт strip — lives only in the right column so the sidebar reaches the window top. */
     topChrome: @Composable () -> Unit = {},
+    onCopyProfile: ((String) -> Unit)? = null,
+    onRenameFolder: ((String, String) -> Unit)? = null,
+    onDeleteFolder: ((String) -> Unit)? = null,
+    onRefreshSubscription: ((String) -> Unit)? = null,
 ) {
     // G3: the section is remembered for the session (mode switches included); a new launch opens the pult.
     var pageName by rememberSaveable { mutableStateOf(ExpertPage.OVERVIEW.name) }
@@ -182,7 +186,14 @@ fun DesktopExpert(
                         state, Modifier.weight(1f), onIntent, { openPage(ExpertPage.ROUTES) }, recordedFlow = recordedFlow,
                         showRecordedPath = recordedPathOnly, requestToken = previewRequest,
                     )
-                    ExpertPage.EXITS -> ExpertExits(state, onIntent, Modifier.weight(1f)) { openPage(ExpertPage.ROUTES) }
+                    ExpertPage.EXITS -> ExpertExits(
+                        state, onIntent, Modifier.weight(1f),
+                        openRoutes = { openPage(ExpertPage.ROUTES) },
+                        onCopyProfile = onCopyProfile,
+                        onRenameFolder = onRenameFolder,
+                        onDeleteFolder = onDeleteFolder,
+                        onRefreshSubscription = onRefreshSubscription,
+                    )
                     ExpertPage.EVENTS -> ExpertEvents(
                         state, onIntent, Modifier.weight(1f),
                         simulate = {

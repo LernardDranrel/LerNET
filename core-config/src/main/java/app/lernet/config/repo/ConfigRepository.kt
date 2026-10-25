@@ -26,8 +26,10 @@ import app.lernet.config.transfer.TransferProfile
 import app.lernet.config.transfer.TransferRule
 import app.lernet.config.parse.ImportedProfileDraft
 import app.lernet.config.parse.newId
+import app.lernet.config.subscription.FolderView
 import app.lernet.config.subscription.RefreshPlan
 import app.lernet.config.subscription.SubscribedConfig
+import app.lernet.config.subscription.SubscriptionFolders
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -90,6 +92,7 @@ class ConfigRepository(
                     canvasLayout = group.canvasLayout,
                     hasRoutes = ownerId in routeOwners,
                     autoFailover = group.autoFailover,
+                    subscriptionUrl = group.subscriptionUrl,
                 )
             }
         }
@@ -108,7 +111,8 @@ class ConfigRepository(
         val allRules = ruleNodeDao.listAll().map { it.toRecord() }
         val allGroups = groupDao.listGroups().sortedWith(compareBy<GroupEntity> { it.sortIndex }.thenBy { it.name }).map { group ->
             Group(group.id, group.name, groupMemberDao.listForGroup(group.id).map { it.profileId },
-                group.canvasLayout, allRules.any { it.profileId == RouteOwners.group(group.id) }, group.autoFailover)
+                group.canvasLayout, allRules.any { it.profileId == RouteOwners.group(group.id) }, group.autoFailover,
+                group.subscriptionUrl)
         }
         val chosenGroups = if (groupId == null) allGroups else listOf(allGroups.firstOrNull { it.id == groupId }
             ?: error("Папка не найдена"))
@@ -120,7 +124,9 @@ class ConfigRepository(
             chosenGroups.associate { RouteOwners.group(it.id) to it.canvasLayout }
         return TransferCodec.encode(TransferBundle(
             scope = if (groupId == null) "all" else "group",
-            groups = chosenGroups.map { TransferGroup(it.id, it.name, it.profileIds.filter(ids::contains), it.autoFailover, it.canvasLayout) },
+            groups = chosenGroups.map {
+                TransferGroup(it.id, it.name, it.profileIds.filter(ids::contains), it.autoFailover, it.canvasLayout, it.subscriptionUrl)
+            },
             profiles = chosenProfiles.map { profile -> TransferProfile(
                 id = profile.id, name = profile.name, source = profile.source.name,
                 outbounds = profile.outbounds.map { TransferOutbound(it.id, it.tag, it.type, it.singBoxJson) },
@@ -211,7 +217,7 @@ class ConfigRepository(
                 })
             }
             bundle.groups.forEachIndexed { index, item ->
-                groupDao.upsertGroup(GroupEntity(item.id, item.name, index, item.canvasLayout, item.autoSwap))
+                groupDao.upsertGroup(GroupEntity(item.id, item.name, index, item.canvasLayout, item.autoSwap, item.subscriptionUrl))
                 groupMemberDao.upsertAll(item.profileIds.mapIndexed { position, id -> GroupMemberEntity(item.id, id, position) })
             }
             ruleNodeDao.upsertAll(bundle.rules.map { item ->
@@ -223,6 +229,7 @@ class ConfigRepository(
                     title = item.title, processes = item.processes, blocksJson = item.blocksJson,
                 ).toEntity()
             })
+            adoptAllSubscriptions()
         }
     }
 
@@ -253,7 +260,7 @@ class ConfigRepository(
             }
             bundle.groups.forEach { item ->
                 val id = groupIds.getValue(item.id)
-                upsertGroup(item.name, id)
+                upsertGroup(item.name, id, item.subscriptionUrl)
                 setGroupAutoFailover(id, item.autoSwap)
                 setGroupMembers(id, item.profileIds.map(profileIds::getValue))
                 (TransferCodec.remapCanvasLayout(item.canvasLayout, ruleIds)
@@ -278,6 +285,7 @@ class ConfigRepository(
                 if (remappedRules.none { it.profileId == id }) ensureDefaultElse(id)
             }
             reorderProfiles(previousOrder + bundle.profiles.map { profileIds.getValue(it.id) })
+            adoptAllSubscriptions()
         }
         if (database != null) database.withTransaction { operation() } else operation()
         return bundle
@@ -317,8 +325,8 @@ class ConfigRepository(
     suspend fun subscriptionUrls(): Set<String> =
         profileDao.listProfiles().mapNotNullTo(mutableSetOf()) { it.subscriptionUrl?.takeIf(String::isNotBlank) }
 
-    /** Configs of one subscription as the refresh planner sees them; [activeProfileId] is the user's current choice. */
-    suspend fun subscribedConfigs(url: String, activeProfileId: String?): List<SubscribedConfig> =
+    /** Configs of one subscription as the refresh planner sees them. */
+    suspend fun subscribedConfigs(url: String): List<SubscribedConfig> =
         profileDao.listProfiles().filter { it.subscriptionUrl == url }.map { entity ->
             SubscribedConfig(
                 id = entity.id,
@@ -327,15 +335,13 @@ class ConfigRepository(
                     NormalizedOutbound(id = it.id, tag = it.tag, type = it.type, singBoxJson = it.singBoxJson)
                 },
                 selectedOutboundId = entity.selectedOutboundId,
-                selected = entity.id == activeProfileId,
-                hasOwnSettings = entity.modeOverride != null || entity.canvasLayout != null ||
-                    ruleNodeDao.listForProfile(entity.id).size > 1,
             )
         }
 
     /**
-     * Save a subscription refresh: changed configs keep their id, name the user gave and selection;
-     * new ones join the folder the subscription's configs are in. Returns the ids of added configs, in plan order.
+     * Save a subscription refresh. Matched configs keep their id and take the remote name and server data.
+     * The subscription folder then holds exactly the configs that still carry [url].
+     * Returns the ids of added configs, in plan order.
      */
     suspend fun applySubscriptionPlan(
         url: String,
@@ -358,20 +364,52 @@ class ConfigRepository(
                     ),
                 )
             }
-            val memberIds = profileDao.listProfiles().filter { it.subscriptionUrl == url }.map { it.id }.toSet()
-            val folder = groupDao.listGroups()
-                .map { group -> group.id to groupMemberDao.listForGroup(group.id).count { it.profileId in memberIds } }
-                .filter { it.second > 0 }
-                .maxByOrNull { it.second }?.first
             plan.adds.forEach { draft -> added += insertDraft(draft.copy(subscriptionUrl = url), defaultDnsPolicy) }
-            if (folder != null && added.isNotEmpty()) {
-                val current = groupMemberDao.listForGroup(folder).sortedBy { it.sortIndex }.map { it.profileId }
-                setGroupMembers(folder, current + added)
-            }
-            plan.removes.forEach { deleteProfile(it) }
+            plan.removes.forEach { eraseProfile(it) }
+            adoptSubscription(url)
         }
         if (database != null) database.withTransaction { operation() } else operation()
         return added
+    }
+
+    /** Gather every subscription that still has configs into its own folder. Safe to call more than once. */
+    suspend fun adoptAllSubscriptions() {
+        subscriptionUrls().forEach { adoptSubscription(it) }
+    }
+
+    /**
+     * Make sure [url] has one folder and that folder's members are exactly the profiles that carry [url].
+     * Returns the folder id, or null when the subscription has no configs and no folder yet.
+     */
+    suspend fun adoptSubscription(url: String): String? {
+        val ids = profileDao.listProfiles().filter { it.subscriptionUrl == url }.map { it.id }
+        val folders = groupDao.listGroups().map { group ->
+            FolderView(
+                group.id,
+                group.name,
+                groupMemberDao.listForGroup(group.id).sortedBy { it.sortIndex }.map { it.profileId },
+                group.subscriptionUrl,
+            )
+        }
+        if (ids.isEmpty()) {
+            val marked = folders.firstOrNull { it.subscriptionUrl == url } ?: return null
+            setGroupMembers(marked.id, emptyList())
+            return marked.id
+        }
+        val plan = SubscriptionFolders.adopt(url, ids, folders)
+        val folderId = if (plan.create) {
+            val id = newId()
+            val next = (groupDao.listGroups().maxOfOrNull { it.sortIndex } ?: -1) + 1
+            groupDao.upsertGroup(GroupEntity(id = id, name = plan.name, sortIndex = next, subscriptionUrl = url))
+            id
+        } else {
+            val id = requireNotNull(plan.folderId)
+            val existing = groupDao.listGroups().first { it.id == id }
+            groupDao.upsertGroup(existing.copy(subscriptionUrl = url))
+            id
+        }
+        setGroupMembers(folderId, plan.memberIds)
+        return folderId
     }
 
     suspend fun getProfile(id: String): Profile? {
@@ -381,12 +419,14 @@ class ConfigRepository(
 
     suspend fun renameProfile(profileId: String, name: String) {
         val profile = profileDao.getProfile(profileId) ?: return
+        if (SubscriptionFolders.owned(profile.subscriptionUrl)) return
         profileDao.updateProfile(profile.copy(name = name, updatedAtEpochMs = nowMs()))
     }
 
     suspend fun setModeOverride(profileId: String, mode: String?) {
         require(mode == null || mode == "FULL_VPN" || mode == "PROXY")
         val profile = profileDao.getProfile(profileId) ?: return
+        if (SubscriptionFolders.owned(profile.subscriptionUrl)) return
         profileDao.updateProfile(profile.copy(modeOverride = mode, updatedAtEpochMs = nowMs()))
     }
 
@@ -420,7 +460,15 @@ class ConfigRepository(
         }
     }
 
-    suspend fun deleteProfile(profileId: String) {
+    /** False when [profileId] belongs to a subscription: those configs leave only with the folder or a refresh. */
+    suspend fun deleteProfile(profileId: String): Boolean {
+        val profile = profileDao.getProfile(profileId) ?: return false
+        if (SubscriptionFolders.owned(profile.subscriptionUrl)) return false
+        eraseProfile(profileId)
+        return true
+    }
+
+    private suspend fun eraseProfile(profileId: String) {
         outboundDao.deleteForProfile(profileId)
         ruleNodeDao.deleteForProfile(profileId)
         groupMemberDao.deleteForProfile(profileId)
@@ -480,14 +528,19 @@ class ConfigRepository(
             return
         }
         val profile = profileDao.getProfile(ownerId) ?: return
+        if (SubscriptionFolders.owned(profile.subscriptionUrl)) return
         profileDao.updateProfile(profile.copy(canvasLayout = json))
     }
 
     suspend fun replaceRuleNodes(ownerId: String, nodes: List<RuleNodeRecord>) {
+        val groupId = RouteOwners.groupIdOf(ownerId)
+        if (groupId == null) {
+            val profile = profileDao.getProfile(ownerId) ?: return
+            if (SubscriptionFolders.owned(profile.subscriptionUrl)) return
+        }
         ruleNodeDao.deleteForProfile(ownerId)
         val stamped = nodes.map { it.copy(profileId = ownerId) }
         ruleNodeDao.upsertAll(stamped.map { it.toEntity() })
-        val groupId = RouteOwners.groupIdOf(ownerId)
         if (groupId != null) return
         val profile = profileDao.getProfile(ownerId) ?: return
         profileDao.updateProfile(profile.copy(updatedAtEpochMs = nowMs()))
@@ -507,6 +560,7 @@ class ConfigRepository(
                 canvasLayout = group.canvasLayout,
                 hasRoutes = true,
                 autoFailover = group.autoFailover,
+                subscriptionUrl = group.subscriptionUrl,
             )
         }
         return profileId to null
@@ -537,9 +591,9 @@ class ConfigRepository(
         return profileDao.getProfile(ownerId)?.name.orEmpty()
     }
 
-    suspend fun upsertGroup(name: String, id: String = newId()): String {
+    suspend fun upsertGroup(name: String, id: String = newId(), subscriptionUrl: String? = null): String {
         val next = (groupDao.listGroups().maxOfOrNull { it.sortIndex } ?: -1) + 1
-        groupDao.upsertGroup(GroupEntity(id = id, name = name.trim(), sortIndex = next))
+        groupDao.upsertGroup(GroupEntity(id = id, name = name.trim(), sortIndex = next, subscriptionUrl = subscriptionUrl))
         return id
     }
 
@@ -562,16 +616,35 @@ class ConfigRepository(
     }
 
     suspend fun replaceAllMemberships(groups: List<Group>) {
-        val rows = groups.flatMap { group ->
+        val profiles = profileDao.listProfiles().associateBy { it.id }
+        val stored = groupDao.listGroups().associateBy { it.id }
+        val current = stored.keys.associateWith { id ->
+            groupMemberDao.listForGroup(id).sortedBy { it.sortIndex }.map { it.profileId }
+        }
+        val sanitized = groups.map { group ->
+            if (SubscriptionFolders.owned(stored[group.id]?.subscriptionUrl)) {
+                group.copy(profileIds = current[group.id].orEmpty())
+            } else {
+                group.copy(profileIds = group.profileIds.filter { id -> !SubscriptionFolders.owned(profiles[id]?.subscriptionUrl) })
+            }
+        }
+        val rows = sanitized.flatMap { group ->
             group.profileIds.mapIndexed { index, profileId ->
                 GroupMemberEntity(groupId = group.id, profileId = profileId, sortIndex = index)
             }
         }
-        groupMemberDao.replaceAllGroupMembers(groups.map { it.id }, rows)
+        groupMemberDao.replaceAllGroupMembers(sanitized.map { it.id }, rows)
     }
 
     suspend fun deleteGroup(id: String) {
-        groupMemberDao.deleteForGroup(id)
+        val existing = groupDao.listGroups().firstOrNull { it.id == id } ?: return
+        if (SubscriptionFolders.owned(existing.subscriptionUrl)) {
+            val members = groupMemberDao.listForGroup(id).map { it.profileId }
+            val byUrl = profileDao.listProfiles().filter { it.subscriptionUrl == existing.subscriptionUrl }.map { it.id }
+            (members + byUrl).distinct().forEach { eraseProfile(it) }
+        } else {
+            groupMemberDao.deleteForGroup(id)
+        }
         ruleNodeDao.deleteForProfile(RouteOwners.group(id))
         groupDao.deleteGroup(id)
     }
@@ -628,6 +701,7 @@ class ConfigRepository(
         dnsPolicy: DnsPolicy,
     ) {
         val profile = profileDao.getProfile(profileId) ?: return
+        if (SubscriptionFolders.owned(profile.subscriptionUrl)) return
         val outbound = outboundDao.listForProfile(profileId).firstOrNull { it.id == outboundId } ?: return
         outboundDao.upsertAll(listOf(outbound.copy(singBoxJson = singBoxJson)))
         profileDao.updateProfile(

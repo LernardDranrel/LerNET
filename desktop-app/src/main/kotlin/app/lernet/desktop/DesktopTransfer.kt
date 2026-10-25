@@ -21,7 +21,7 @@ object DesktopTransfer {
         val layouts = bundle.profiles.associate { it.id to it.canvasLayout } +
             bundle.groups.associate { groupOwner(it.id) to it.canvasLayout }
         return saved.copy(
-            groups = bundle.groups.map { StoredGroup(it.id, it.name, it.autoSwap, it.canvasLayout) },
+            groups = bundle.groups.map { StoredGroup(it.id, it.name, it.autoSwap, it.canvasLayout, it.subscriptionUrl) },
             profiles = bundle.profiles.map { profile ->
                 StoredProfile(
                     id = profile.id, name = profile.name, source = profile.source,
@@ -47,7 +47,7 @@ object DesktopTransfer {
             }.toMap(),
             selectedProfileId = bundle.selectedProfileId ?: saved.selectedProfileId?.takeIf { id -> bundle.profiles.any { it.id == id } }
                 ?: bundle.profiles.firstOrNull()?.id,
-        )
+        ).let(DesktopSubscriptions::adoptAll)
     }
 
     fun export(saved: StoredState, groupId: String? = null): String {
@@ -61,7 +61,8 @@ object DesktopTransfer {
         return TransferCodec.encode(TransferBundle(
             scope = if (groupId == null) "all" else "group",
             groups = groups.map { group -> TransferGroup(group.id, group.name,
-                profiles.filter { it.groupId == group.id }.map { it.id }, group.autoSwap, group.canvasLayout) },
+                profiles.filter { it.groupId == group.id }.map { it.id }, group.autoSwap, group.canvasLayout,
+                group.subscriptionUrl) },
             profiles = profiles.map { profile -> TransferProfile(
                 id = profile.id, name = profile.name, source = profile.source,
                 outbounds = profile.outbounds.map { TransferOutbound(it.id, it.tag, it.type, it.singBoxJson) },
@@ -93,7 +94,7 @@ object DesktopTransfer {
             bundle.groups.associate { groupOwner(it.id) to it.canvasLayout }
         val importedGroups = bundle.groups.map { group ->
             StoredGroup(groupIds.getValue(group.id), group.name, group.autoSwap,
-                TransferCodec.remapCanvasLayout(group.canvasLayout, ruleIds))
+                TransferCodec.remapCanvasLayout(group.canvasLayout, ruleIds), group.subscriptionUrl)
         }
         val profileToGroup = bundle.groups.flatMap { group -> group.profileIds.map { it to groupIds.getValue(group.id) } }.toMap()
         val profileById = bundle.profiles.associateBy { it.id }
@@ -134,6 +135,6 @@ object DesktopTransfer {
             rulePositions = saved.rulePositions + positions,
             selectedProfileId = saved.selectedProfileId ?: bundle.selectedProfileId?.let(profileIds::getValue)
                 ?: importedProfiles.firstOrNull()?.id,
-        )
+        ).let(DesktopSubscriptions::adoptAll)
     }
 }

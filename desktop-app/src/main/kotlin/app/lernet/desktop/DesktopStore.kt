@@ -56,6 +56,8 @@ data class StoredGroup(
     val name: String,
     val autoSwap: Boolean = false,
     val canvasLayout: String? = null,
+    /** Set when the folder is a live subscription. The remote list owns its configs. */
+    val subscriptionUrl: String? = null,
 )
 
 @Serializable
