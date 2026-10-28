@@ -94,7 +94,9 @@ class SubscriptionBook(private val file: Path) {
     /** Drop one subscription after its folder was deleted. */
     @Synchronized
     fun forget(url: String) {
-        retain(read().map { it.url }.filter { it != url }.toSet())
+        val all = read()
+        val kept = all.filter { it.url != url }
+        if (kept.size != all.size) write(kept)
     }
 
     private fun write(entries: List<SubscriptionEntry>) {

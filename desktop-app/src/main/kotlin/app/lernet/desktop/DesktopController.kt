@@ -404,11 +404,12 @@ class DesktopController(
 
     private val importer = ImportCoordinator(OkHttpTextFetcher())
     // The address of a subscription is a secret: it stays in %APPDATA%\LerNET, like state.json.
+    // One book instance: @Synchronized on the book only works within that object.
+    private val subscriptionBook by lazy {
+        app.lernet.config.subscription.SubscriptionBook(store.workDirectory().resolve("subscriptions.json"))
+    }
     private val subscriptionUpdater by lazy {
-        app.lernet.config.subscription.SubscriptionUpdater(
-            importer,
-            app.lernet.config.subscription.SubscriptionBook(store.workDirectory().resolve("subscriptions.json")),
-        )
+        app.lernet.config.subscription.SubscriptionUpdater(importer, subscriptionBook)
     }
     private val subscriptionLock = Any()
     @Volatile private var subscriptionSchedule: Thread? = null
@@ -604,7 +605,7 @@ class DesktopController(
                 runCatching {
                     val saved = state.value.saved
                     val urls = saved.profiles.mapNotNullTo(mutableSetOf()) { it.subscriptionUrl?.takeIf(String::isNotBlank) }
-                    subscriptionBook().retain(urls)
+                    subscriptionBook.retain(urls)
                     subscriptionUpdater.due(urls).forEach { url ->
                         val message = refreshSubscriptionNow(url)
                         mutable.update { it.copy(message = message) }
@@ -618,9 +619,6 @@ class DesktopController(
             }
         }
     }
-
-    private fun subscriptionBook() =
-        app.lernet.config.subscription.SubscriptionBook(store.workDirectory().resolve("subscriptions.json"))
 
     /** «Обновить подписку»: the change takes effect at the next connect, the running VPN is not restarted. */
     fun refreshSubscription(url: String) {
@@ -689,7 +687,7 @@ class DesktopController(
                     val url = result.drafts.firstOrNull()?.subscriptionUrl?.takeIf(String::isNotBlank)
                     val ok = change { saved ->
                         if (url != null) {
-                            val origins = subscriptionBook().entry(url)?.origins.orEmpty()
+                            val origins = subscriptionBook.entry(url)?.origins.orEmpty()
                             DesktopSubscriptions.install(saved, result.drafts, url, origins).also { installed = it }.state
                         } else {
                             added = result.drafts.map {
@@ -1035,7 +1033,7 @@ class DesktopController(
             }
         }
         if (removed && owned) {
-            group?.subscriptionUrl?.takeIf(SubscriptionFolders::owned)?.let { subscriptionBook().forget(it) }
+            group?.subscriptionUrl?.takeIf(SubscriptionFolders::owned)?.let { subscriptionBook.forget(it) }
         }
     }
 

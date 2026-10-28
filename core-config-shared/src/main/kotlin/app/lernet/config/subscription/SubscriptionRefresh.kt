@@ -2,7 +2,6 @@ package app.lernet.config.subscription
 
 import app.lernet.config.model.NormalizedOutbound
 import app.lernet.config.parse.ImportedProfileDraft
-import app.lernet.config.parse.newId
 import java.security.MessageDigest
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -168,12 +167,4 @@ object SubscriptionRefresh {
         return "${outbound.type}|${server.lowercase()}|$port"
     }
 
-    /** Fresh outbound ids for a draft that is added as a new config. */
-    fun withNewIds(draft: ImportedProfileDraft): ImportedProfileDraft {
-        val map = draft.outbounds.associate { it.id to newId() }
-        return draft.copy(
-            outbounds = draft.outbounds.map { it.copy(id = map.getValue(it.id)) },
-            selectedOutboundId = map[draft.selectedOutboundId] ?: draft.selectedOutboundId,
-        )
-    }
 }
