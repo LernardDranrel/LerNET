@@ -33,8 +33,13 @@ func TestMixedDirectDNSPreservesProxyIPv6(t *testing.T) {
 		if got := d.UnavailableIPv6("music.yandex.ru.", "dns-direct"); got != (state == "unavailable") {
 			t.Fatalf("family %s: %v", state, got)
 		}
-		if d.UnavailableIPv6("ip.me.", "dns-direct") {
-			t.Fatal("proxy inherited physical IPv6 limitation")
+		// Adaptation is keyed by underlay resolver, not domain Direct proof.
+		// Proxy IPv6 stays on dns-protected; dns-direct may suppress AAAA.
+		if d.UnavailableIPv6("ip.me.", "dns-protected") {
+			t.Fatal("protected resolver adapted")
+		}
+		if got := d.UnavailableIPv6("ip.me.", "dns-direct"); got != (state == "unavailable") {
+			t.Fatalf("underlay dns-direct family %s for proxy name: %v", state, got)
 		}
 	}
 }
@@ -85,5 +90,34 @@ func TestDirectDNSProofValidatesOriginalResolverAndFinalRoute(t *testing.T) {
 	custom := strings.Replace(plain, `"type":"local","tag":"dns-direct","lernet_preserve_destination":true`, `"type":"udp","tag":"dns-direct","server":"192.0.2.53","lernet_system_route":true`, 1)
 	if !compileDirectDNSPolicy(custom, "direct").direct("music.yandex.ru", "dns-direct") {
 		t.Fatal("intentional Direct DNS lost family adaptation")
+	}
+}
+
+func TestUnderlayAAAAWhenGeoIPDirectUnprovenAndFinalProxy(t *testing.T) {
+	// Expert keeps route.final=direct and emits ELSE→NEXTA as an empty catch-all
+	// rule. At DNS time geoip is unknown, so Direct is never proven — yet
+	// dns-direct must still NODATA AAAA when the underlay has no IPv6 path.
+	const rules = `{"rule_set":["geoip-ru"],"action":"route","outbound":"direct"},{"action":"route","outbound":"vpn"}`
+	plan := compileDirectDNSPolicy(directDNSTestPolicy(rules, "direct"), "direct")
+	if plan == nil {
+		t.Fatal("policy rejected")
+	}
+	if plan.direct("music.yandex.ru", "dns-direct") {
+		t.Fatal("Direct should stay unproven with geoip unknown and ELSE→proxy")
+	}
+	d := &directFamilySnapshot{policy: plan, epoch: func() int64 { return 0 }, at: time.Now(), value: dialer.LerNETDirectFamilies{IPv6: "unavailable"}}
+	if !d.UnavailableIPv6("music.yandex.ru.", "dns-direct") {
+		t.Fatal("underlay AAAA not suppressed when IPv6 path is missing")
+	}
+	if d.UnavailableIPv6("music.yandex.ru.", "dns-protected") {
+		t.Fatal("protected resolver adapted")
+	}
+	d.value.IPv6 = "available"
+	if d.UnavailableIPv6("music.yandex.ru.", "dns-direct") {
+		t.Fatal("AAAA suppressed while underlay IPv6 path exists")
+	}
+	d.value.IPv6 = "unknown"
+	if d.UnavailableIPv6("music.yandex.ru.", "dns-direct") {
+		t.Fatal("AAAA suppressed while underlay IPv6 is unknown")
 	}
 }

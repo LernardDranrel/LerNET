@@ -28,6 +28,16 @@ func (d *directFamilySnapshot) snapshot() dialer.LerNETDirectFamilies {
 	return d.value
 }
 
+// UnavailableIPv6 reports whether underlay AAAA answers should become NODATA.
+// Gate is the selected resolver: only underlay-safe Direct DNS servers adapt,
+// and only when the local IPv6 path is known missing. Domain Direct proof is
+// not required — Expert emits ELSE→proxy as an empty catch-all, so geoip→Direct
+// is never proven at DNS time, yet dns-direct still must not hand out AAAA on
+// a broken Ethernet. Tunnel/protected resolvers keep their AAAA answers.
 func (d *directFamilySnapshot) UnavailableIPv6(domain, server string) bool {
-	return d.policy.direct(domain, server) && d.snapshot().IPv6 == "unavailable"
+	_ = domain
+	if d.policy == nil || !d.policy.servers[server] {
+		return false
+	}
+	return d.snapshot().IPv6 == "unavailable"
 }

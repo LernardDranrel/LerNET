@@ -21,9 +21,11 @@ type directDNSRule struct {
 	direct bool
 }
 
-// This is a proof of Direct routing, not a second traffic router. Only domain
-// predicates can be known before DNS replies. All other predicates stay unknown;
-// every possible first matching terminal action must be unprotected Direct.
+// servers lists underlay-safe Direct DNS resolvers; AAAA NODATA keys off that
+// set when local IPv6 is unavailable. rules/finalDirect remain a Direct-routing
+// proof for analysis (domain predicates only; unknown IP/country/owner stay
+// unknown) and are not the NODATA gate — Expert ELSE→proxy catch-alls would
+// otherwise block adaptation for every name.
 type directDNSPolicy struct {
 	rules       []directDNSRule
 	finalDirect bool
