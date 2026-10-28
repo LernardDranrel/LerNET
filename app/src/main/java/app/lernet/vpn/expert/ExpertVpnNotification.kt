@@ -5,9 +5,11 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.graphics.Color
 import androidx.core.app.NotificationCompat
 import app.lernet.MainActivity
 import app.lernet.R
+import app.lernet.engine.text.StatusWords
 import app.lernet.vpn.LerNetVpnService
 
 internal object ExpertVpnNotification {
@@ -30,9 +32,11 @@ internal object ExpertVpnNotification {
             ExpertNotificationStatus.STOPPED -> R.string.state_disconnected
             ExpertNotificationStatus.STARTING -> R.string.expert_platform_notification_starting
         }
+        val attention = expertNeedsAttention(status)
         return NotificationCompat.Builder(service, channelId)
-            .setSmallIcon(if (status == ExpertNotificationStatus.FAILED) R.drawable.ic_status_l_alert else R.drawable.ic_status_l)
-            .setContentTitle(service.getString(R.string.expert_platform_notification_title))
+            .setSmallIcon(if (attention) R.drawable.ic_status_l_alert else R.drawable.ic_status_l)
+            .setColor(if (attention) ALERT_COLOR else NORMAL_COLOR)
+            .setContentTitle(StatusWords.chrome(StatusWords.EXPERT))
             .setContentText(service.getString(message))
             .setContentIntent(openApp)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -42,4 +46,7 @@ internal object ExpertVpnNotification {
             .setShowWhen(false)
             .build()
     }
+
+    private val ALERT_COLOR = Color.rgb(211, 47, 47)
+    private val NORMAL_COLOR = Color.rgb(35, 153, 137)
 }

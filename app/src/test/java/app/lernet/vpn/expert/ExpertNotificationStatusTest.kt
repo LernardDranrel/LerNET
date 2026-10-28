@@ -3,6 +3,8 @@ package app.lernet.vpn.expert
 import app.lernet.engine.policy.*
 import app.lernet.routing.policy.NetworkPolicy
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ExpertNotificationStatusTest {
@@ -21,5 +23,15 @@ class ExpertNotificationStatusTest {
     @Test fun startupIsProgressEvenWhenNetworkIsUnavailableAndFailureIsExplicit() {
         assertEquals(ExpertNotificationStatus.STARTING, expertNotificationStatus(running.copy(phase = ExpertSessionPhase.STARTING), false))
         assertEquals(ExpertNotificationStatus.FAILED, expertNotificationStatus(running.copy(phase = ExpertSessionPhase.FAILED), true))
+    }
+
+    @Test fun attentionMatchesProblemStates() {
+        assertFalse(expertNeedsAttention(ExpertNotificationStatus.ACTIVE))
+        assertFalse(expertNeedsAttention(ExpertNotificationStatus.STARTING))
+        assertFalse(expertNeedsAttention(ExpertNotificationStatus.STOPPING))
+        assertFalse(expertNeedsAttention(ExpertNotificationStatus.STOPPED))
+        assertTrue(expertNeedsAttention(ExpertNotificationStatus.FAILED))
+        assertTrue(expertNeedsAttention(ExpertNotificationStatus.OFFLINE))
+        assertTrue(expertNeedsAttention(ExpertNotificationStatus.RECOVERING))
     }
 }

@@ -8,6 +8,19 @@ import kotlinx.coroutines.flow.MutableStateFlow
 
 internal enum class ExpertNotificationStatus { STARTING, ACTIVE, OFFLINE, RECOVERING, STOPPING, FAILED, STOPPED }
 
+/** Status-bar / shade: problem states use the alert glyph, the same split as plain VPN. */
+internal fun expertNeedsAttention(status: ExpertNotificationStatus): Boolean = when (status) {
+    ExpertNotificationStatus.FAILED,
+    ExpertNotificationStatus.OFFLINE,
+    ExpertNotificationStatus.RECOVERING,
+    -> true
+    ExpertNotificationStatus.STARTING,
+    ExpertNotificationStatus.ACTIVE,
+    ExpertNotificationStatus.STOPPING,
+    ExpertNotificationStatus.STOPPED,
+    -> false
+}
+
 internal fun expertNotificationStatus(state: ExpertRuntimeState, underlay: Boolean): ExpertNotificationStatus = when {
     state.phase == ExpertSessionPhase.FAILED -> ExpertNotificationStatus.FAILED
     state.phase == ExpertSessionPhase.STOPPED -> ExpertNotificationStatus.STOPPED

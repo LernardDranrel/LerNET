@@ -103,6 +103,10 @@ object StatusWords {
     const val HOLD = "Серверы не отвечают · VPN держим"
     const val JAMMED = "Связь глушат · держим подключение"
     const val NO_REPLY = "Подключено · нет ответа"
+    /** Short label when Expert owns the link (tray / notification title). */
+    const val EXPERT = "Эксперт"
+    /** Tray tooltip and notification titles: «LerNET · …». */
+    fun chrome(status: String) = "LerNET · $status"
 }
 
 /**

@@ -234,24 +234,16 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
     LaunchedEffect(expertStartPending) {
         if (expertStartPending) expertStartPreflight = WindowsExpertPreflight().read()
     }
-    val icon = painterResource(
-        when {
-            expertUi?.phase == ExpertPhase.RUNNING -> "lernet-icon-running.png"
-            expertUi?.phase == ExpertPhase.FAILED -> "lernet-icon-failed.png"
-            else -> when (tunnel.status) {
-                TunnelStatus.RUNNING -> when {
-                    ui.healthFailures >= 2 -> "lernet-icon-failed.png"
-                    ui.healthVerified == true -> "lernet-icon-running.png"
-                    else -> "lernet-icon.png"
-                }
-                TunnelStatus.FAILED -> "lernet-icon-failed.png"
-                else -> "lernet-icon.png"
-            }
-        },
+    val chrome = trayChrome(
+        expertUi?.phase,
+        expertUi?.tunnelHealth == app.lernet.engine.policy.ExpertTunnelHealth.ERROR,
+        tunnel.status,
+        ui.healthFailures,
     )
+    val icon = painterResource(chrome.icon)
     Tray(
         icon = icon,
-        tooltip = "LerNET",
+        tooltip = chrome.tooltip,
         onAction = { visible = true },
         menu = {
             Item("Открыть", onClick = { visible = true })
