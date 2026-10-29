@@ -30,15 +30,16 @@ func TestMixedDirectDNSPreservesProxyIPv6(t *testing.T) {
 	}
 	for _, state := range []string{"available", "unknown", "unavailable"} {
 		d := &directFamilySnapshot{policy: plan, epoch: func() int64 { return 0 }, at: time.Now(), value: dialer.LerNETDirectFamilies{IPv6: state}}
-		if got := d.UnavailableIPv6("music.yandex.ru.", "dns-direct"); got != (state == "unavailable") {
+		want := state == "unavailable"
+		if got := d.UnavailableIPv6("music.yandex.ru.", "dns-direct"); got != want {
 			t.Fatalf("family %s: %v", state, got)
 		}
-		// Adaptation is keyed by underlay resolver, not domain Direct proof.
-		// Proxy IPv6 stays on dns-protected; dns-direct may suppress AAAA.
-		if d.UnavailableIPv6("ip.me.", "dns-protected") {
-			t.Fatal("protected resolver adapted")
+		// ELSE→proxy DNS catch-all selects dns-protected for geoip-unproven names;
+		// those AAAA still feed a later Direct dial — adapt every resolver.
+		if got := d.UnavailableIPv6("ip.me.", "dns-protected"); got != want {
+			t.Fatalf("proxy resolver family %s: %v", state, got)
 		}
-		if got := d.UnavailableIPv6("ip.me.", "dns-direct"); got != (state == "unavailable") {
+		if got := d.UnavailableIPv6("ip.me.", "dns-direct"); got != want {
 			t.Fatalf("underlay dns-direct family %s for proxy name: %v", state, got)
 		}
 	}
@@ -109,15 +110,32 @@ func TestUnderlayAAAAWhenGeoIPDirectUnprovenAndFinalProxy(t *testing.T) {
 	if !d.UnavailableIPv6("music.yandex.ru.", "dns-direct") {
 		t.Fatal("underlay AAAA not suppressed when IPv6 path is missing")
 	}
-	if d.UnavailableIPv6("music.yandex.ru.", "dns-protected") {
-		t.Fatal("protected resolver adapted")
+	// Catch-all ELSE→proxy DNS is the resolver Yandex actually hits in Expert.
+	if !d.UnavailableIPv6("music.yandex.ru.", "dns-protected") {
+		t.Fatal("ELSE→proxy DNS AAAA not suppressed when IPv6 path is missing")
 	}
 	d.value.IPv6 = "available"
-	if d.UnavailableIPv6("music.yandex.ru.", "dns-direct") {
+	if d.UnavailableIPv6("music.yandex.ru.", "dns-direct") || d.UnavailableIPv6("music.yandex.ru.", "dns-protected") {
 		t.Fatal("AAAA suppressed while underlay IPv6 path exists")
 	}
 	d.value.IPv6 = "unknown"
-	if d.UnavailableIPv6("music.yandex.ru.", "dns-direct") {
+	if d.UnavailableIPv6("music.yandex.ru.", "dns-direct") || d.UnavailableIPv6("music.yandex.ru.", "dns-protected") {
 		t.Fatal("AAAA suppressed while underlay IPv6 is unknown")
+	}
+}
+
+func TestUnderlayAAAAWithOwnerGuardStillAdaptsResolvers(t *testing.T) {
+	plain := directDNSTestPolicy(`{"action":"route","outbound":"direct"}`, "direct")
+	guarded := strings.Replace(plain, `"final":"direct"`, `"final":"direct","lernet_owner_guard":"windows"`, 1)
+	plan := compileDirectDNSPolicy(guarded, "direct")
+	if plan == nil {
+		t.Fatal("owner guard dropped AAAA policy")
+	}
+	if plan.direct("music.yandex.ru", "dns-direct") {
+		t.Fatal("owner guard must not prove Direct")
+	}
+	d := &directFamilySnapshot{policy: plan, epoch: func() int64 { return 0 }, at: time.Now(), value: dialer.LerNETDirectFamilies{IPv6: "unavailable"}}
+	if !d.UnavailableIPv6("music.yandex.ru.", "dns-direct") {
+		t.Fatal("owner guard disabled underlay AAAA NODATA")
 	}
 }

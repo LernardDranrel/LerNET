@@ -67,16 +67,16 @@ Android reports source-address evidence and never upgrades it into a routing
 or Internet reachability promise. The enclosing identity, revision and
 `network_epoch` fence these facts. A missing/unknown family never means absent.
 These facts do not describe remote proxy capability. AAAA may receive
-NOERROR/NODATA when IPv6 absence is known and the selected resolver is an
-underlay-safe Direct DNS server (`local`, or `udp` with `lernet_system_route`).
-Domain Direct proof is not required: Expert emits ELSE→proxy as an empty
-catch-all while keeping `route.final` as Direct, so geoip→Direct is never proven
-at DNS time, yet `dns-direct` must still suppress AAAA on a broken underlay.
-Tunnel, protected and predefined resolvers keep their AAAA answers. This runs
-in the shared DNS client after resolver selection, so both sync/async and
-legacy/current DNS rule paths obey it. Rejection, predefined responses,
-protected resolvers, response checkers and DNSSEC/signed queries are preserved.
-Domain Direct-proof helpers remain for policy analysis; they do not gate NODATA.
+NOERROR/NODATA when IPv6 absence is known for any selected DNS resolver in
+Expert — not only underlay-safe Direct (`local`, or `udp` with
+`lernet_system_route`). Domain Direct proof is not required: Expert emits
+ELSE→proxy as an empty catch-all (and often projects that catch-all onto
+profile/tunnel DNS) while keeping `route.final` as Direct, so geoip→Direct is
+never proven at DNS time, yet AAAA answers from that tunnel DNS would still
+feed a later Direct dial on a broken underlay. Predefined responses, rejection,
+response checkers and DNSSEC/signed queries are preserved. Owner-guarded
+policies still adapt AAAA; they only withhold Direct-routing proof. Domain
+Direct-proof helpers remain for policy analysis; they do not gate NODATA.
 Synthetic NODATA is not stored in the native DNS cache and family facts are
 invalidated on network epoch changes. Application caches and bypassing DoH
 remain outside this adaptation.

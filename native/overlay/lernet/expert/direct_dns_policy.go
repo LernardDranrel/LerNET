@@ -21,11 +21,11 @@ type directDNSRule struct {
 	direct bool
 }
 
-// servers lists underlay-safe Direct DNS resolvers; AAAA NODATA keys off that
-// set when local IPv6 is unavailable. rules/finalDirect remain a Direct-routing
-// proof for analysis (domain predicates only; unknown IP/country/owner stay
-// unknown) and are not the NODATA gate — Expert ELSE→proxy catch-alls would
-// otherwise block adaptation for every name.
+// servers lists underlay-safe Direct DNS resolvers for Direct-routing proof
+// analysis (domain predicates only; unknown IP/country/owner stay unknown).
+// AAAA NODATA no longer keys off this set alone: when local IPv6 is unavailable
+// every selected resolver adapts, because Expert ELSE→proxy DNS catch-alls feed
+// answers that geoip may later send Direct. rules/finalDirect stay analysis-only.
 type directDNSPolicy struct {
 	rules       []directDNSRule
 	finalDirect bool
@@ -44,7 +44,7 @@ func compileDirectDNSPolicy(raw, directTag string) *directDNSPolicy {
 			Servers []map[string]json.RawMessage `json:"servers"`
 		} `json:"dns"`
 	}
-	if json.Unmarshal([]byte(raw), &root) != nil || root.Route.Guard != "" {
+	if json.Unmarshal([]byte(raw), &root) != nil {
 		return nil
 	}
 	verified := false
@@ -62,10 +62,12 @@ func compileDirectDNSPolicy(raw, directTag string) *directDNSPolicy {
 	if !verified {
 		return nil
 	}
-	plan := &directDNSPolicy{finalDirect: root.Route.Final == directTag, servers: make(map[string]bool)}
+	// Owner guard rejects unknown owners but must not disable underlay AAAA NODATA:
+	// dns-direct still answers ordinary names, and ELSE→proxy DNS may feed Direct.
+	plan := &directDNSPolicy{finalDirect: root.Route.Final == directTag && root.Route.Guard == "", servers: make(map[string]bool)}
 	for _, server := range root.DNS.Servers {
-		// Adapt only the original-network or explicit Direct resolver. A protected
-		// resolver, predefined answer and proxy DNS transport keep their semantics.
+		// Track underlay-safe resolvers for Direct-proof analysis. NODATA itself
+		// no longer keys off this set — see UnavailableIPv6.
 		kind := jsonString(server["type"])
 		safe := kind == "local" || (kind == "udp" && string(server["lernet_system_route"]) == "true")
 		for key := range server {
@@ -77,6 +79,9 @@ func compileDirectDNSPolicy(raw, directTag string) *directDNSPolicy {
 		if safe {
 			plan.servers[jsonString(server["tag"])] = true
 		}
+	}
+	if root.Route.Guard != "" {
+		return plan
 	}
 	for _, rule := range root.Route.Rules {
 		action := jsonString(rule["action"])
