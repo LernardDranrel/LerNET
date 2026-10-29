@@ -138,6 +138,9 @@ internal class WindowsExpertBackend(
         check(capabilities.preservesTun && capabilities.atomicRules && capabilities.independentExits) {
             "Встроенное ядро не подтвердило постоянный туннель и независимые выходы"
         }
+        // Adapter off at Start used to fail immediately (red) and never resume after plug-in.
+        // Wait here so STARTING stays honest until a physical underlay exists or Stop cancels.
+        awaitPhysicalUnderlay(ticket)
         val config = assemble(program)
         check(config.isValid) { config.errors.joinToString("\n") }
         synchronized(lifecycleLock) {
@@ -262,7 +265,10 @@ internal class WindowsExpertBackend(
 
     suspend fun networkChanged() = withContext(Dispatchers.IO) {
         val before = applied ?: return@withContext
-        val underlay = physicalNetwork()
+        val underlay = runCatching { physicalNetwork() }.getOrElse {
+            // Native watcher pauses on empty underlay; Kotlin must not abort when Ethernet is still down.
+            return@withContext
+        }
         before.owner.client.request("network_changed", identityPayload(before.ack) { put("underlay_interface", underlay) }, 4_000)
         // The native watcher retains ingress and reports transient route failures.
         // A failed verification must not release the TUN behind the user's back.
@@ -288,6 +294,23 @@ internal class WindowsExpertBackend(
         ExpertProbeResult(
             response.nativeLong("https_latency_ms")?.takeIf { it > 0 },
             response.nativeString("reason", 256)?.let(::nativeReason)
+        )
+    }
+
+    private suspend fun awaitPhysicalUnderlay(ticket: Long): String {
+        var last: Exception? = null
+        repeat(180) {
+            check(ticket == epoch.get()) { "Запуск был отменён" }
+            try {
+                return physicalNetwork()
+            } catch (failure: Exception) {
+                last = failure
+                log("Нет физического адаптера — ждём подключения сети…")
+                delay(1_000)
+            }
+        }
+        throw last ?: IllegalStateException(
+            "Нет подключённого физического адаптера. Подключите Wi‑Fi или Ethernet; параметры другого VPN не изменяются."
         )
     }
 

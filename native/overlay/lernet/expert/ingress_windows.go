@@ -21,7 +21,7 @@ func requireExpertPrivilege() error {
 }
 
 func physicalUnderlay(name, ownName string) (*net.Interface, error) {
-	iif, err := net.InterfaceByName(name)
+	iif, err := interfaceByUnderlayName(name)
 	if err != nil || iif.Flags&net.FlagUp == 0 || iif.Flags&net.FlagLoopback != 0 || strings.EqualFold(iif.Name, ownName) {
 		return nil, errors.New("expert_underlay_binding_invalid")
 	}
@@ -34,6 +34,25 @@ func physicalUnderlay(name, ownName string) (*net.Interface, error) {
 		return nil, errors.New("expert_underlay_must_be_physical")
 	}
 	return iif, nil
+}
+
+// Prefer net.InterfaceByName; fall back to winipcfg friendly-name → IfIndex when
+// Windows reports a different view of the same adapter after plug-in.
+func interfaceByUnderlayName(name string) (*net.Interface, error) {
+	if iif, err := net.InterfaceByName(name); err == nil {
+		return iif, nil
+	}
+	adapters, err := winipcfg.GetAdaptersAddresses(windows.AF_UNSPEC, winipcfg.GAAFlagIncludeGateways)
+	if err != nil {
+		return nil, err
+	}
+	for _, adapter := range adapters {
+		if !strings.EqualFold(adapter.FriendlyName(), name) || adapter.OperStatus != winipcfg.IfOperStatusUp {
+			continue
+		}
+		return net.InterfaceByIndex(int(adapter.IfIndex))
+	}
+	return nil, errors.New("expert_underlay_binding_invalid")
 }
 
 func preparePlatformIngress(ctx context.Context, options *option.Options) error {

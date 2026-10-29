@@ -155,6 +155,34 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                 delay(6_000)
             }
         }
+        scope.launch { watchUnderlayReturn() }
+    }
+
+    /**
+     * When Ethernet/Wi‑Fi returns, native refresh must run and a Start that failed only for
+     * "no adapter" must resume — otherwise Expert stays red while traffic bypasses the TUN.
+     */
+    private suspend fun watchUnderlayReturn() {
+        var lastSignature = runCatching { WindowsTunnelHealth.networkSignature() }.getOrDefault("")
+        while (!closed.get()) {
+            delay(3_000)
+            val signature = runCatching { WindowsTunnelHealth.networkSignature() }.getOrDefault("")
+            if (signature == lastSignature) continue
+            lastSignature = signature
+            val snapshot = runtime?.state?.value ?: continue
+            when {
+                snapshot.phase == ExpertSessionPhase.RUNNING -> {
+                    runCatching { backend.networkChanged() }
+                        .onFailure { writeLog("Смена сети: не удалось обновить underlay Эксперта: ${it.message}") }
+                }
+                ExpertUnderlayRecovery.shouldRetryFailedStart(
+                    snapshot.desiredEnabled, snapshot.phase, snapshot.errors,
+                ) && runCatching { WindowsPhysicalNetwork.select() }.isSuccess -> {
+                    writeLog("Физический адаптер снова доступен — повторяем запуск Эксперта.")
+                    dispatch(UiIntent.Start)
+                }
+            }
+        }
     }
 
     private suspend fun refreshInventory(allowLiveApply: Boolean = true) {

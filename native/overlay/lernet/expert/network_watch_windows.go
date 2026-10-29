@@ -16,6 +16,11 @@ import (
 // Include DNS/gateway/MAC changes even when IP/index stay unchanged. Only
 // hardware interfaces select the underlay. Remote routes on all operational
 // adapters also participate, so PPP resource-prefix-only changes are detected.
+//
+// Prefer a hardware interface that still has a default route. When Ethernet
+// comes back Up before DHCP installs 0.0.0.0/0 (or defaults only exist on TUN),
+// still select an Up physical adapter so NetworkChangedToAt can rebind and
+// reinstall capture — matching WindowsPhysicalNetwork's PowerShell selection.
 func physicalNetworkSnapshot(ctx context.Context) (string, string, error) {
 	adapters, err := winipcfg.GetAdaptersAddresses(windows.AF_UNSPEC, winipcfg.GAAFlagIncludeGateways)
 	if err != nil {
@@ -71,6 +76,21 @@ func physicalNetworkSnapshot(ctx context.Context) (string, string, error) {
 			break
 		}
 	}
+	if selected == "" {
+		var fallbackIndex uint32 = ^uint32(0)
+		for _, adapter := range physical {
+			if adapter.OperStatus != winipcfg.IfOperStatusUp {
+				continue
+			}
+			if adapter.IfIndex > 0 && adapter.IfIndex < fallbackIndex {
+				fallbackIndex = adapter.IfIndex
+				selected = adapter.FriendlyName()
+			}
+		}
+		if selected != "" {
+			facts = append(facts, fmt.Sprintf("fallback-underlay:%s:%d", selected, fallbackIndex))
+		}
+	}
 	routes, err := operationalCaptureRoutes(ctx)
 	if err != nil {
 		return "", "", err
@@ -96,36 +116,36 @@ func (s *Session) startPlatformNetworkWatch() {
 				return
 			case <-ticker.C:
 				// Failed reads/refreshes pause egress; they never destroy ingress.
-				if s.checkPlatformIngress(false) != nil {
-					continue
-				}
 				name, fingerprint, err := physicalNetworkSnapshot(s.ctx)
-				if err != nil {
-					s.mu.Lock()
-					s.setNetworkReasonLocked("expert_route_snapshot_failed")
-					s.mu.Unlock()
-					continue
-				}
-				if name == "" {
-					s.mu.Lock()
-					s.setNetworkReasonLocked("expert_underlay_unavailable")
-					if fingerprint != previous {
-						s.mux.ResetNetwork()
-					}
-					s.mu.Unlock()
-					previous = fingerprint
-					continue
-				}
 				s.stateMu.Lock()
 				ack, running, pending := s.ack, s.running, s.networkReason != ""
 				s.stateMu.Unlock()
-				if !running {
+				captureBroken := false
+				if err == nil && name != "" && running && fingerprint == previous && !pending {
+					captureBroken = s.checkPlatformIngress(true) != nil
+				}
+				pauseReason, refresh, stop, nextFingerprint := decideNetworkWatchTick(
+					previous, name, fingerprint, err, running, pending, captureBroken,
+				)
+				if stop {
 					return
 				}
-				if fingerprint == previous && !pending && s.checkPlatformIngress(true) == nil {
+				if pauseReason != "" {
+					s.mu.Lock()
+					s.setNetworkReasonLocked(pauseReason)
+					if pauseReason == "expert_underlay_unavailable" && fingerprint != previous {
+						s.mux.ResetNetwork()
+					}
+					s.mu.Unlock()
+					previous = nextFingerprint
+					continue
+				}
+				if !refresh {
 					continue
 				}
 				// Repair returning interfaces' new routes before testing capture.
+				// Do not require a prior TUN-identity probe: that gate left Expert
+				// waiting while Ethernet traffic already bypassed the TUN.
 				if s.NetworkChangedToAt(ack.InstanceID, ack.InterfaceID, ack.Revision, name) == nil {
 					previous = fingerprint
 				}
