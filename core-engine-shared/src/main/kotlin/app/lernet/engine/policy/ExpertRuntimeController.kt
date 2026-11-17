@@ -1047,6 +1047,7 @@ class ExpertRuntimeController(
                     val evict = retained.indexOfLast { it.active != true || it.identity != mutableState.value.tun }
                     retained.removeAt(if (evict >= 0) evict else retained.lastIndex)
                     localConnectionDroppedCount++
+                    note(DiagEvent.FLOW_KEEP, DiagKind.EDGE, "outcome" to "truncated", "code" to localConnectionDroppedCount.toString())
                 }
                 mutableState.value = mutableState.value.copy(
                     connections = retained,
@@ -1067,7 +1068,11 @@ class ExpertRuntimeController(
                         },
                     )
                 }
+                val previousDrops = nativeConnectionDroppedCount
                 nativeConnectionDroppedCount = maxOf(nativeConnectionDroppedCount, event.droppedCount.coerceAtLeast(0))
+                if (nativeConnectionDroppedCount > previousDrops) {
+                    note(DiagEvent.FLOW_KEEP, DiagKind.EDGE, "outcome" to "truncated", "code" to nativeConnectionDroppedCount.toString())
+                }
                 mutableState.value = mutableState.value.copy(
                     connectionHistoryLimit = minOf(MAX_CONNECTIONS, event.limit.coerceAtLeast(1)),
                     connectionDroppedCount = maxOf(localConnectionDroppedCount, nativeConnectionDroppedCount),

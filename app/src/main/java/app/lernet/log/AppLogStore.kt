@@ -3,6 +3,11 @@ package app.lernet.log
 import android.content.Context
 import android.os.Looper
 import app.lernet.config.redact.SecretRedactor
+import app.lernet.config.redact.DiagEvent
+import app.lernet.config.redact.DiagFact
+import app.lernet.config.redact.DiagKind
+import app.lernet.config.redact.DiagnosticJournal
+import app.lernet.config.redact.DiagnosticLevels
 import app.lernet.engine.log.CrashFailureSink
 import app.lernet.engine.log.CrashReport
 import app.lernet.engine.log.CrashTrail
@@ -19,6 +24,7 @@ import java.io.FileOutputStream
 import java.time.Instant
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionHandler
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -44,7 +50,16 @@ class AppLogStore(
     private val journalWriter = ThreadPoolExecutor(
         1, 1, 0L, TimeUnit.MILLISECONDS, ArrayBlockingQueue(2_048),
         { runnable -> Thread(runnable, "lernet-journal").apply { isDaemon = true } },
-        ThreadPoolExecutor.DiscardOldestPolicy(),
+        RejectedExecutionHandler { runnable, executor ->
+            ThreadPoolExecutor.DiscardOldestPolicy().rejectedExecution(runnable, executor)
+            val line = DiagnosticJournal.process.admit(
+                DiagnosticLevels.current,
+                DiagFact(DiagEvent.WRITER_FAIL, DiagKind.STATE, code = "queue"),
+                System.currentTimeMillis(),
+            )
+            if (line != null) ring.append(line, sync = false)
+        },
+    )
     )
     private val downloadMirror = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "lernet-crumb-mirror").apply { isDaemon = true }

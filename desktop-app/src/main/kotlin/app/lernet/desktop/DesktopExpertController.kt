@@ -935,7 +935,8 @@ internal fun writeExpertJournal(journal: DiagnosticJournal, root: java.nio.file.
             file, line + "\n",
             java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND,
         )
-    } catch (_: java.io.IOException) {
+    } catch (failure: Exception) {
         journal.noteDrop()
+        failure.javaClass
     }
 }

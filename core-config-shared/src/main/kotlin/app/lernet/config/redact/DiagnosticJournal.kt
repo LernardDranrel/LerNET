@@ -83,27 +83,30 @@ object DiagnosticLevels {
 }
 
 class DiagnosticJournal {
-    private val lastAt = HashMap<Key, Long>()
-    private val held = HashMap<Group, Int>()
+    private val gate = Any()
+    private val lastAt = LinkedHashMap<Key, Long>()
+    private val held = LinkedHashMap<Group, Int>()
     private var drops = 0
 
     fun noteDrop() {
-        drops++
+        synchronized(gate) { drops++ }
     }
 
     /** Null means the line is a repeated state and was counted on its group. */
-    fun admit(level: DiagLevel, fact: DiagFact, nowMs: Long): String? {
+    fun admit(level: DiagLevel, fact: DiagFact, nowMs: Long): String? = synchronized(gate) {
         val key = fact.key()
         val group = fact.group()
         val previous = lastAt[key]
         if (fact.kind == DiagKind.STATE && previous != null && nowMs - previous < WINDOW_MS) {
             held[group] = (held[group] ?: 0) + 1
+            trim(held)
             return null
         }
         val skip = held.remove(group) ?: 0
         val dropped = drops.also { drops = 0 }
         lastAt[key] = nowMs
-        return render(level, fact, skip, dropped)
+        trim(lastAt)
+        render(level, fact, skip, dropped)
     }
 
     fun incoming(line: String, nowMs: Long): String? {
@@ -116,18 +119,22 @@ class DiagnosticJournal {
         return text(DiagnosticLevels.current, trimmed, keepAddress = false, nowMs = nowMs)
     }
 
-    fun text(level: DiagLevel, raw: String, keepAddress: Boolean, nowMs: Long): String {
+    fun text(level: DiagLevel, raw: String, keepAddress: Boolean, nowMs: Long): String = synchronized(gate) {
         val dropped = drops.also { drops = 0 }
         val body = privacy(level, raw, keepAddress)
         val drop = if (dropped > 0) " dropped=$dropped" else ""
-        return "rcv=$nowMs$drop $body"
+        "rcv=$nowMs$drop $body"
     }
 
     companion object {
         const val WINDOW_MS = 10_000L
         val process = DiagnosticJournal()
 
-        fun writerFailureKillsProcess(error: Throwable): Boolean = error !is IOException
+        fun writerFailureKillsProcess(error: Throwable): Boolean {
+            // A file, redactor, or formatting failure must not be treated as process death.
+            error.javaClass
+            return false
+        }
 
         fun wire(event: DiagEvent, kind: DiagKind, vararg fields: Pair<String, String?>): String {
             val kindWire = if (kind == DiagKind.EDGE) "edge" else "state"
@@ -140,7 +147,7 @@ class DiagnosticJournal {
     }
 }
 
-private data class Group(val event: DiagEvent, val run: String?, val session: String?, val attempt: Long?)
+private data class Group(val family: String, val run: String?, val session: String?)
 
 private data class Key(
     val group: Group,
@@ -152,9 +159,23 @@ private data class Key(
     val ip: String?,
 )
 
-private fun DiagFact.group() = Group(event, run, session, attempt)
+private fun DiagEvent.family(): String = when (this) {
+    DiagEvent.START_RESULT, DiagEvent.START_CANCEL -> "start"
+    else -> wire
+}
+
+private fun DiagFact.group() = Group(event.family(), run, session)
 
 private fun DiagFact.key() = Key(group(), stage, outcome, code, state, domain, ip)
+
+private fun <K, V> trim(map: LinkedHashMap<K, V>) {
+    while (map.size > MAP_BOUND) {
+        val eldest = map.entries.firstOrNull() ?: return
+        map.remove(eldest.key)
+    }
+}
+
+private const val MAP_BOUND = 256
 
 private val wireKeys = setOf(
     "ev", "kind", "stage", "outcome", "code", "run", "session", "attempt",
@@ -244,10 +265,17 @@ private fun renderRejected(nowMs: Long): String = "rcv=$nowMs event=diag_rejecte
 
 private val ipv4 = Regex("""\b(?:\d{1,3}\.){3}\d{1,3}\b""")
 private val ipv6 = Regex("""\b(?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}\b""")
+private val mac = Regex("""\b[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}\b""")
 private val labeledAddress = Regex("""(?i)\b(domain|ip|dest|server|host)=([^\s]+)""")
+private val labeledRadio = Regex("""(?i)\b(ssid|bssid)=([^\s]+)""")
+private val hostname = Regex("""\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b""")
 
 internal fun privacy(level: DiagLevel, raw: String, keepAddress: Boolean): String {
-    val redacted = SecretRedactor.redact(raw)
-    if (keepAddress || level != DiagLevel.WARN) return redacted
-    return labeledAddress.replace(ipv6.replace(ipv4.replace(redacted, "*"), "*")) { "${it.groupValues[1]}=*" }
+    var out = SecretRedactor.redact(raw)
+    out = mac.replace(out, "*")
+    out = labeledRadio.replace(out) { "${it.groupValues[1]}=*" }
+    if (keepAddress || level != DiagLevel.WARN) return out
+    out = labeledAddress.replace(out) { "${it.groupValues[1]}=*" }
+    out = hostname.replace(ipv6.replace(ipv4.replace(out, "*"), "*"), "*")
+    return out
 }

@@ -97,6 +97,14 @@ func (f *folderGate) choose(ctx context.Context) (*exitGate, error) {
 			}
 			close(w.done)
 			f.mu.Unlock()
+			code := "ok"
+			if err != nil {
+				code = "failed"
+				if err.Error() == "network_changed_during_selection" {
+					code = "network_changed_during_selection"
+				}
+			}
+			emitDiag("folder_select", "edge", "outcome="+code, "state="+diagToken(tag))
 		}()
 	}
 	f.mu.Unlock()

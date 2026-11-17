@@ -62,21 +62,24 @@ object DefaultNetworkMonitor {
         override fun onAvailable(network: Network) = synchronized(this@DefaultNetworkMonitor) {
             if (callback !== this) return@synchronized
             facts.available(network)
-            underlayNote("available")
+            underlayNote("available", DiagKind.EDGE)
             if (underlay.get() != network) clearUnderlay()
         }
 
         override fun onLost(network: Network) = synchronized(this@DefaultNetworkMonitor) {
             if (callback === this && facts.lost(network)) {
-                underlayNote("lost")
+                underlayNote("lost", DiagKind.EDGE)
                 clearUnderlay()
             }
         }
 
         override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) =
             synchronized(this@DefaultNetworkMonitor) {
-                if (callback === this) facts.capabilities(network, NetworkCapabilities(capabilities))?.let {
-                    publish(it.network, it.capabilities, it.link)
+                if (callback === this) {
+                    underlayNote("caps", DiagKind.STATE)
+                    facts.capabilities(network, NetworkCapabilities(capabilities))?.let {
+                        publish(it.network, it.capabilities, it.link)
+                    }
                 }
             }
 
@@ -223,7 +226,7 @@ object DefaultNetworkMonitor {
             .onFailure { LerNetLog.w(TAG, "native underlay delivery failed", it) }
     }
 
-    private fun underlayNote(code: String) {
-        LerNetLog.i(TAG, DiagnosticJournal.wire(DiagEvent.UNDERLAY_CALLBACK, DiagKind.EDGE, "code" to code))
+    private fun underlayNote(code: String, kind: DiagKind) {
+        LerNetLog.i(TAG, DiagnosticJournal.wire(DiagEvent.UNDERLAY_CALLBACK, kind, "code" to code))
     }
 }

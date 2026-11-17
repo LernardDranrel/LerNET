@@ -149,13 +149,17 @@ internal class LibboxStatusClient(
                     server = query.dnsServer,
                 ),
             )
-            val failed = query.failed || !query.error.isNullOrBlank()
+            val outcome = when {
+                failed -> "fail"
+                query.rcode == 3 -> "absent"
+                else -> "ok"
+            }
             LerNetLog.i(
                 TAG,
                 DiagnosticJournal.wire(
                     DiagEvent.DNS_DECISION,
-                    if (failed) DiagKind.EDGE else DiagKind.STATE,
-                    "outcome" to if (failed) "fail" else "ok",
+                    if (outcome == "ok") DiagKind.STATE else DiagKind.EDGE,
+                    "outcome" to outcome,
                     "code" to query.rcode.toString(),
                     "domain" to query.domain,
                 ),

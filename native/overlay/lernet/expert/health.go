@@ -112,9 +112,10 @@ func (g *exitGate) checkHealth() {
 			return
 		}
 		if result.HTTPSLatencyMs != nil {
+			latency := *result.HTTPSLatencyMs
 			g.healthFailures = 0
 			g.mu.Unlock()
-			emitDiag("health_gate", "state", "outcome=ok")
+			emitDiag("health_gate", "state", "outcome=ok", "mono="+itoa64(latency))
 			return
 		}
 		if !probeNeedsRecovery(result) {
@@ -124,15 +125,18 @@ func (g *exitGate) checkHealth() {
 			return
 		}
 		if g.healthFailures < schedule.FailedChecksBeforeRecovery {
+			failures := g.healthFailures
+			threshold := schedule.FailedChecksBeforeRecovery
 			reason := diagToken(result.Reason)
 			g.mu.Unlock()
-			emitDiag("health_gate", "state", "outcome=below", "code="+reason)
+			emitDiag("health_gate", "state", "outcome=below", "code="+reason, "state=f"+itoa(failures), "stage=t"+itoa(threshold))
 			return
 		}
+		failures := g.healthFailures
 		g.healthFailures = 0
 		g.lastError = "tunnel_health_failed"
 		g.mu.Unlock()
-		emitDiag("health_gate", "edge", "outcome=recover", "code=tunnel_health_failed")
+		emitDiag("health_gate", "edge", "outcome=recover", "code=tunnel_health_failed", "state=f"+itoa(failures))
 		_ = g.recoverAt(g.ctx, transportGeneration)
 		_ = probeGate(g.ctx, g, g.probeURL, schedule.ActiveProbeTimeoutMs)
 	}()

@@ -160,7 +160,11 @@ class WindowsBoxProcess internal constructor(
                             return@thread
                         }
                         attempt++
-                        val runId = runCatching { running.pid().toString() }.getOrNull()
+        val runId = runCatching {
+            val started = running.info().startInstant().orElse(null)?.toEpochMilli()
+            val pid = running.pid()
+            if (started == null) pid.toString() else "$pid:$started"
+        }.getOrNull()
                         admit(
                             DiagEvent.PROCESS_EXIT, DiagKind.EDGE, "code" to code.toString(),
                             "run" to runId, "session" to ticket.toString(),

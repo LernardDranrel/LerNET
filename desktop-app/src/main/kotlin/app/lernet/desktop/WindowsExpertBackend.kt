@@ -366,8 +366,7 @@ internal class WindowsExpertBackend(
                             try {
                                 log(line.replace(token, "***").take(4_000))
                             } catch (failure: Exception) {
-                                // The line is already off the pipe. A file error must not kill the core.
-                                // Anything else still stops it: an undrained pipe must not be left open.
+                                // The line is already off the pipe. File and redactor errors keep the drain going.
                                 if (!DiagnosticJournal.writerFailureKillsProcess(failure)) return@forEach
                                 child.destroy()
                                 ready.completeExceptionally(IllegalStateException("Не удалось сохранить журнал ядра", failure))

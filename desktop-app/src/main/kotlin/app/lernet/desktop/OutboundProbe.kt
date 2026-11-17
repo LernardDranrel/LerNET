@@ -27,6 +27,7 @@ data class OutboundProbeResult(
     val latencyMs: Long? = null,
     val message: String = "",
     val diagnostics: List<String> = emptyList(),
+    val stage: String = "prepare",
 )
 
 /**
@@ -86,7 +87,7 @@ object OutboundProbe {
             check(remaining > 0) { "Бюджет проверки исчерпан при запуске ядра" }
             val latency = try { api.delay(assembled.proxyTag, saved.healthUrl, remaining) }
                 catch (error: Exception) { delayFailed = true; throw error }
-            OutboundProbeResult(latencyMs = latency, message = "HTTP через выбранный узел")
+            OutboundProbeResult(latencyMs = latency, message = "HTTP через выбранный узел", stage = stageCode(stage))
         } catch (error: Exception) {
             val message = when (error) {
                 is InterruptedException -> "Проверка прервана"
@@ -105,6 +106,7 @@ object OutboundProbe {
                 diagnostics = listOf("Этап: $stage; до отказа $elapsed мс; общий лимит $timeoutMs мс",
                     "Локальный API ядра сообщает результат проверки; его HTTP-код не является доказанным ответом проверяемого сайта.",
                     "Причина: ${ProbeDiagnostics.cause(error)}", httpDetail).filter(String::isNotBlank) + coreLines,
+                stage = stageCode(stage),
             )
         } finally {
             process?.let { running ->
@@ -118,6 +120,12 @@ object OutboundProbe {
             deleteWhenReleased(logFile)
             deleteWhenReleased(directory)
         }
+    }
+
+    private fun stageCode(stage: String) = when (stage) {
+        "запуск временного ядра" -> "core"
+        "HTTP-проверка через локальный delay API ядра" -> "http"
+        else -> "prepare"
     }
 
     private fun localInbound(raw: String, port: Int): String {

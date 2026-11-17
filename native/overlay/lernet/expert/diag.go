@@ -60,6 +60,32 @@ func watchState(refresh, stop, captureBroken bool) string {
 	return state
 }
 
+func itoa(value int) string {
+	return itoa64(int64(value))
+}
+
+func itoa64(value int64) string {
+	if value == 0 {
+		return "0"
+	}
+	negative := value < 0
+	if negative {
+		value = -value
+	}
+	var digits [20]byte
+	i := len(digits)
+	for value > 0 {
+		i--
+		digits[i] = byte('0' + value%10)
+		value /= 10
+	}
+	if negative {
+		i--
+		digits[i] = '-'
+	}
+	return string(digits[i:])
+}
+
 func emitFallback(protected bool, out adapter.Outbound) {
 	outcome := "block"
 	if out != nil {

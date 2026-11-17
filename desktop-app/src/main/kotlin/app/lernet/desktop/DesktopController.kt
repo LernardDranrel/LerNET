@@ -546,11 +546,17 @@ class DesktopController(
             OutboundProbe.check(profile, saved, executable, store.workDirectory())
         }.getOrElse { OutboundProbeResult(message = app.lernet.engine.text.UserText.of(it, "Не удалось проверить связь через VPN")) }
         if (result.latencyMs == null) {
-            tunnel.logDiagnostic(DiagnosticJournal.wire(DiagEvent.PROBE_RESULT, DiagKind.EDGE, "outcome" to "fail"))
+            tunnel.logDiagnostic(DiagnosticJournal.wire(
+                DiagEvent.PROBE_RESULT, DiagKind.EDGE,
+                "outcome" to "fail", "stage" to result.stage,
+            ))
             tunnel.logDiagnostic("Конфиг «${profile.name}»: ${result.message}")
             result.diagnostics.forEach(tunnel::logDiagnostic)
         } else {
-            tunnel.logDiagnostic(DiagnosticJournal.wire(DiagEvent.PROBE_RESULT, DiagKind.EDGE, "outcome" to "ok"))
+            tunnel.logDiagnostic(DiagnosticJournal.wire(
+                DiagEvent.PROBE_RESULT, DiagKind.EDGE,
+                "outcome" to "ok", "stage" to result.stage,
+            ))
         }
         return result
     }
@@ -595,9 +601,12 @@ class DesktopController(
             runCatching {
                 val bundle = app.lernet.config.transfer.TransferCodec.decode(raw)
                 check(change { DesktopTransfer.merge(it, raw) }) { "Не удалось сохранить импортированные данные" }
-                "Добавлено папок: ${bundle.groups.size}, конфигов: ${bundle.profiles.size}, правил: ${bundle.rules.size}"
-            }.onSuccess { summary ->
-                tunnel.logDiagnostic(DiagnosticJournal.wire(DiagEvent.IMPORT_RESULT, DiagKind.EDGE, "outcome" to "ok"))
+                bundle.profiles.size to
+                    "Добавлено папок: ${bundle.groups.size}, конфигов: ${bundle.profiles.size}, правил: ${bundle.rules.size}"
+            }.onSuccess { (count, summary) ->
+                tunnel.logDiagnostic(DiagnosticJournal.wire(
+                    DiagEvent.IMPORT_RESULT, DiagKind.EDGE, "outcome" to "ok", "code" to count.toString(),
+                ))
                 mutable.update { it.copy(busy = false, message = summary) }
             }
                 .onFailure { error ->

@@ -112,7 +112,7 @@ class DiagnosticJournalTest {
 
     @Test fun fileFailureDoesNotCountAsProcessDeath() {
         assertThat(DiagnosticJournal.writerFailureKillsProcess(IOException("disk"))).isFalse()
-        assertThat(DiagnosticJournal.writerFailureKillsProcess(IllegalStateException("stdout"))).isTrue()
+        assertThat(DiagnosticJournal.writerFailureKillsProcess(IllegalStateException("redactor"))).isFalse()
         journal.noteDrop()
         val line = journal.admit(DiagLevel.WARN, DiagFact(DiagEvent.WRITER_FAIL, DiagKind.EDGE, code = "io"), 9)!!
         assertThat(line).contains("dropped=1")
@@ -123,5 +123,70 @@ class DiagnosticJournalTest {
         val fact = DiagFact(DiagEvent.UNDERLAY_WAIT, DiagKind.STATE, state = "absent")
         journal.admit(DiagLevel.WARN, fact, 0)
         assertThat(DiagnosticJournal().admit(DiagLevel.WARN, fact, 1)).isNotNull()
+    }
+
+    @Test fun ordinaryDnsAndRawLinesHideAddressAtWarnAndKeepItAtInfo() {
+        val dns = "dns query ok domain=dns.example type=1 rcode=0 answers=1 serverType=udp server=1.1.1.1"
+        val warn = journal.text(DiagLevel.WARN, dns, keepAddress = false, nowMs = 1)
+        val info = journal.text(DiagLevel.INFO, dns, keepAddress = false, nowMs = 2)
+        assertThat(warn).doesNotContain("dns.example")
+        assertThat(warn).doesNotContain("1.1.1.1")
+        assertThat(warn).contains("domain=*")
+        assertThat(info).contains("domain=dns.example")
+        assertThat(info).contains("1.1.1.1")
+        val raw = "dial tcp dns.example:443 mac=aa:bb:cc:dd:ee:ff ssid=HomeNet " +
+            """"password":"s3cret" vless://abc@h:443"""
+        val hidden = journal.text(DiagLevel.WARN, raw, keepAddress = false, nowMs = 3)
+        assertThat(hidden).doesNotContain("dns.example")
+        assertThat(hidden).doesNotContain("aa:bb:cc:dd:ee:ff")
+        assertThat(hidden).doesNotContain("HomeNet")
+        assertThat(hidden).doesNotContain("s3cret")
+        assertThat(hidden).doesNotContain("vless://abc")
+        val shown = journal.text(DiagLevel.INFO, raw, keepAddress = false, nowMs = 4)
+        assertThat(shown).contains("dns.example")
+        assertThat(shown).doesNotContain("aa:bb:cc:dd:ee:ff")
+        assertThat(shown).doesNotContain("HomeNet")
+        assertThat(shown).doesNotContain("s3cret")
+        val exported = SecretRedactor.redact(info)
+        assertThat(exported).contains("dns.example")
+        assertThat(exported).doesNotContain("s3cret")
+    }
+
+    @Test fun explicitHopSurvivesWarnAndAPollCounterDoesNotDefeatSuppression() {
+        val hop = journal.text(DiagLevel.WARN, "event=hop_check dest=203.0.113.9 dns.example", true, 1)
+        assertThat(hop).contains("203.0.113.9")
+        assertThat(hop).contains("dns.example")
+        val first = DiagFact(DiagEvent.UNDERLAY_WAIT, DiagKind.STATE, state = "absent", attempt = 1)
+        assertThat(journal.admit(DiagLevel.WARN, first, 0)).isNotNull()
+        assertThat(journal.admit(DiagLevel.WARN, first.copy(attempt = 2), 1_000)).isNull()
+        val found = journal.admit(DiagLevel.WARN, first.copy(kind = DiagKind.EDGE, outcome = "found", attempt = 3), 2_000)!!
+        assertThat(found).contains("skip=1")
+    }
+
+    @Test fun reusedPidAndResetGenerationDoNotJoin() {
+        val older = DiagFact(DiagEvent.CORE_RECONNECT, DiagKind.STATE, run = "9:1000", session = "1", state = "again")
+        journal.admit(DiagLevel.WARN, older, 0)
+        assertThat(journal.admit(DiagLevel.WARN, older.copy(run = "9:2000"), 100)).isNotNull()
+        val fresh = DiagnosticJournal()
+        assertThat(fresh.admit(DiagLevel.WARN, older, 100)).isNotNull()
+        val below = DiagFact(DiagEvent.HEALTH_GATE, DiagKind.STATE, outcome = "below", state = "f1", session = "1")
+        journal.admit(DiagLevel.DEBUG, below, 0)
+        assertThat(journal.admit(DiagLevel.DEBUG, below, 500)).isNull()
+        val reset = journal.admit(DiagLevel.WARN, below.copy(kind = DiagKind.EDGE, outcome = "recover", state = "f0"), 800)!!
+        assertThat(reset).contains("skip=1")
+        val again = journal.admit(DiagLevel.DEBUG, below, 20_000)!!
+        assertThat(again).doesNotContain("skip=")
+    }
+
+    @Test fun cancelFlushesTheStartGroupAndTheMapStaysBounded() {
+        val held = DiagFact(DiagEvent.START_RESULT, DiagKind.STATE, outcome = "wait", session = "1")
+        journal.admit(DiagLevel.WARN, held, 0)
+        journal.admit(DiagLevel.WARN, held, 100)
+        val cancel = journal.admit(DiagLevel.WARN, DiagFact(DiagEvent.START_CANCEL, DiagKind.EDGE, session = "1"), 200)!!
+        assertThat(cancel).contains("skip=1")
+        repeat(300) { index ->
+            journal.admit(DiagLevel.WARN, DiagFact(DiagEvent.NET_WATCH, DiagKind.EDGE, state = "n$index"), index.toLong())
+        }
+        assertThat(journal.admit(DiagLevel.WARN, DiagFact(DiagEvent.NET_REASON, DiagKind.EDGE, state = "up"), 400)).contains("event=net_reason")
     }
 }
