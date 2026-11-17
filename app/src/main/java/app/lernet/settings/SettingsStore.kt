@@ -72,6 +72,16 @@ class SettingsStore(private val context: Context) {
             it[PROXY_USERNAME] = username.trim()
             it[PROXY_PASSWORD] = password
         }
+    }.also {
+        val cleared = username.isBlank() || password.isEmpty()
+        app.lernet.engine.redact.LerNetLog.i(
+            "proxy",
+            app.lernet.config.redact.DiagnosticJournal.wire(
+                app.lernet.config.redact.DiagEvent.PROXY_CRED,
+                app.lernet.config.redact.DiagKind.EDGE,
+                "outcome" to if (cleared) "cleared" else "set",
+            ),
+        )
     }
 
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {

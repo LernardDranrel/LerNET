@@ -41,11 +41,15 @@ class ReleaseUpdatesTest {
     }
     @Test fun autoCheckIsDailyManualCheckOverridesAndDisabledMakesNoRequest() = runBlocking {
         var automatic = true; var stamp = 0L; var calls = 0
+        val notes = mutableListOf<String>()
         val monitor = UpdateMonitor("1.0.11", { automatic }, { automatic = it }, { stamp }, { stamp = it },
-            { calls++; ReleaseUpdates.parse(payload()) }, { 100_000_000L })
+            { calls++; ReleaseUpdates.parse(payload()) }, { 100_000_000L }, notes::add)
         monitor.check(); monitor.check()
         assertEquals(1, calls)
         assertEquals("1.0.12", monitor.state.value.release!!.version)
+        assertTrue(notes.single { it.contains("outcome=newer") }.contains("ev=update_result"))
+        val admitted = app.lernet.config.redact.DiagnosticJournal().incoming(notes.single { it.contains("outcome=newer") }, 1)
+        assertTrue(admitted!!.contains("event=update_result"))
         monitor.check(manual = true)
         assertEquals(2, calls)
         monitor.automatic(false); monitor.check()

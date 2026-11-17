@@ -149,6 +149,7 @@ internal class LibboxStatusClient(
                     server = query.dnsServer,
                 ),
             )
+            val failed = query.failed || !query.error.isNullOrBlank()
             val outcome = when {
                 failed -> "fail"
                 query.rcode == 3 -> "absent"

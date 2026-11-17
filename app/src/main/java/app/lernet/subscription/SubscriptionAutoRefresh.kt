@@ -81,18 +81,36 @@ class SubscriptionAutoRefresh internal constructor(
         lock.withLock {
             val active = settings.settings.first().activeProfileId
             when (val prepared = updater.prepare(url, repository.subscribedConfigs(url))) {
-                is SubscriptionUpdater.Prepared.Failed -> prepared.message.also { LerNetLog.w(TAG, "refresh failed: $it") }
+                is SubscriptionUpdater.Prepared.Failed -> {
+                    LerNetLog.w(TAG, app.lernet.config.redact.DiagnosticJournal.wire(
+                        app.lernet.config.redact.DiagEvent.SUB_REFRESH,
+                        app.lernet.config.redact.DiagKind.EDGE,
+                        "outcome" to "fail",
+                    ))
+                    prepared.message
+                }
                 is SubscriptionUpdater.Prepared.Ready -> try {
                     val policy = settings.settings.first().defaultDnsPolicy
                     val added = repository.applySubscriptionPlan(url, prepared.plan, policy)
                     updater.applied(prepared, added)
                     if (active != null && repository.getProfile(active) == null) settings.setActiveProfile(null)
+                    LerNetLog.i(TAG, app.lernet.config.redact.DiagnosticJournal.wire(
+                        app.lernet.config.redact.DiagEvent.SUB_REFRESH,
+                        app.lernet.config.redact.DiagKind.EDGE,
+                        "outcome" to "ok",
+                        "code" to added.size.toString(),
+                    ))
                     prepared.message
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
                     val message = "Подписку не удалось сохранить: ${error.message ?: error.javaClass.simpleName}"
                     updater.failedToSave(url, message)
+                    LerNetLog.w(TAG, app.lernet.config.redact.DiagnosticJournal.wire(
+                        app.lernet.config.redact.DiagEvent.SUB_REFRESH,
+                        app.lernet.config.redact.DiagKind.EDGE,
+                        "outcome" to "fail",
+                    ))
                     message
                 }
             }

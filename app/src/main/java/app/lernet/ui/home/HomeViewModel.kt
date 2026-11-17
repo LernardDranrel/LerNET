@@ -234,13 +234,31 @@ class HomeViewModel @Inject constructor(
                         expertCoordinator.importArchive(raw)
                         null
                     } else {
-                        repository.importTransfer(raw, settingsStore.settings.first().defaultDnsPolicy)
+                        val bundle = repository.importTransfer(raw, settingsStore.settings.first().defaultDnsPolicy)
+                        app.lernet.engine.redact.LerNetLog.i(
+                            "import",
+                            app.lernet.config.redact.DiagnosticJournal.wire(
+                                app.lernet.config.redact.DiagEvent.IMPORT_RESULT,
+                                app.lernet.config.redact.DiagKind.EDGE,
+                                "outcome" to "ok",
+                                "code" to bundle.profiles.size.toString(),
+                            ),
+                        )
+                        bundle
                     }
                 }
             }.onSuccess { bundle ->
                 if (bundle == null) transferMessages.emit(appContext.getString(R.string.expert_import_saved))
                 else transferMessages.emit("Добавлено папок: ${bundle.groups.size}, конфигов: ${bundle.profiles.size}, правил: ${bundle.rules.size}")
             }.onFailure {
+                app.lernet.engine.redact.LerNetLog.w(
+                    "import",
+                    app.lernet.config.redact.DiagnosticJournal.wire(
+                        app.lernet.config.redact.DiagEvent.IMPORT_RESULT,
+                        app.lernet.config.redact.DiagKind.EDGE,
+                        "outcome" to "fail",
+                    ),
+                )
                 if (it is SerializationException) transferMessages.emit(appContext.getString(R.string.expert_import_invalid))
                 else transferMessages.emit(app.lernet.engine.text.UserText.withReason("Импорт не выполнен", it))
             }

@@ -52,8 +52,22 @@ internal object DesktopUpdates {
                     copyVerified(input, output, asset.size, digest, progress)
                 } }
             }
-            return target
-        } catch (error: Exception) { Files.deleteIfExists(target); Files.deleteIfExists(directory); throw error }
+            return target.also {
+                desktopDiagnostic(app.lernet.config.redact.DiagnosticJournal.wire(
+                    app.lernet.config.redact.DiagEvent.UPDATE_RESULT,
+                    app.lernet.config.redact.DiagKind.EDGE,
+                    "outcome" to "fetched",
+                    "code" to asset.size.toString(),
+                ))
+            }
+        } catch (error: Exception) {
+            desktopDiagnostic(app.lernet.config.redact.DiagnosticJournal.wire(
+                app.lernet.config.redact.DiagEvent.UPDATE_RESULT,
+                app.lernet.config.redact.DiagKind.EDGE,
+                "outcome" to "fetch_fail",
+            ))
+            Files.deleteIfExists(target); Files.deleteIfExists(directory); throw error
+        }
     }
 
     internal fun copyVerified(input: java.io.InputStream, output: java.io.OutputStream,

@@ -1098,11 +1098,7 @@ class ExpertRuntimeController(
                 event.exits.forEach(::recordNativeExit)
             }
             is ExpertBackendEvent.FolderSelectionsSnapshot -> {
-                val next = event.selections.toMap()
-                if (next != mutableState.value.actualFolderSelections) {
-                    note(DiagEvent.FOLDER_SELECT, DiagKind.EDGE, "outcome" to "selected", "code" to next.size.toString())
-                }
-                mutableState.value = mutableState.value.copy(actualFolderSelections = next)
+                mutableState.value = mutableState.value.copy(actualFolderSelections = event.selections.toMap())
             }
             is ExpertBackendEvent.RetiredCleanupSnapshot -> recordRetiredCleanup(event.failures)
         }

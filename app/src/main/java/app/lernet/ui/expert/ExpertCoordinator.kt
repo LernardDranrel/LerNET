@@ -469,7 +469,15 @@ class ExpertCoordinator @Inject constructor(
                     throw error
                 } catch (error: Exception) {
                     // Parser exceptions may include nearby profile credentials; record only the failure type.
-                    LerNetLog.e("LerNET.Expert", "workspace import failed (${error.javaClass.simpleName})")
+                    LerNetLog.e(
+                        "LerNET.Expert",
+                        app.lernet.config.redact.DiagnosticJournal.wire(
+                            app.lernet.config.redact.DiagEvent.IMPORT_RESULT,
+                            app.lernet.config.redact.DiagKind.EDGE,
+                            "outcome" to "fail",
+                            "code" to error.javaClass.simpleName,
+                        ),
+                    )
                     mutableMessages.emit(context.getString(R.string.expert_storage_error))
                 }
             }
@@ -497,6 +505,15 @@ class ExpertCoordinator @Inject constructor(
         session.handle(ExpertIntent.WorkspaceChanged(adopted.saved, adopted.draft, PolicyMigration.inventory(adopted.legacy)))
         adoptedInventory = adopted.legacy
         mutableState.update { it.copy(inventory = adopted.legacy, inventoryNotes = emptyList(), storageError = null) }
+        LerNetLog.i(
+            "LerNET.Expert",
+            app.lernet.config.redact.DiagnosticJournal.wire(
+                app.lernet.config.redact.DiagEvent.IMPORT_RESULT,
+                app.lernet.config.redact.DiagKind.EDGE,
+                "outcome" to "ok",
+                "code" to adopted.legacy.profiles.size.toString(),
+            ),
+        )
         return adopted
     }
 

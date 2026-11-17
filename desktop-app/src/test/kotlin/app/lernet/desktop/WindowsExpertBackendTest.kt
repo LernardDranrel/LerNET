@@ -426,12 +426,100 @@ class WindowsExpertBackendTest {
         }
     }
 
+    @Test fun `core selection line is the only folder choice`() = runBlocking {
+        val lines = mutableListOf<String>()
+        Fixture(
+            log = { lines += it },
+            stdoutTail = "LERNET_DIAG ev=folder_select kind=edge outcome=ok state=de\n",
+        ).use { fixture ->
+            fixture.statusFields = """"running":true,"folders":[{"tag":"f","selected_tag":"de"}]"""
+            fixture.backend.negotiateCapabilities()
+            fixture.backend.start(PolicyProgram(1, emptyList()))
+            withTimeout(5_000) {
+                while (lines.none { it.contains("ev=folder_select") }) kotlinx.coroutines.delay(20)
+            }
+            assertEquals(1, lines.count { it.contains("folder_select") })
+            assertTrue(fixture.process!!.isAlive)
+        }
+    }
+
+    @Test fun `file error while reading stdout leaves the core alive for the next line`() = runBlocking {
+        val lines = mutableListOf<String>()
+        var failed = false
+        Fixture(
+            log = { line ->
+                if (!failed && line.contains("folder_select")) {
+                    failed = true
+                    throw java.io.IOException("disk full")
+                }
+                lines += line
+            },
+            stdoutTail = "LERNET_DIAG ev=folder_select kind=edge outcome=ok state=de\n" +
+                "LERNET_DIAG ev=process_exit kind=edge code=later\n",
+        ).use { fixture ->
+            fixture.backend.negotiateCapabilities()
+            fixture.backend.start(PolicyProgram(1, emptyList()))
+            withTimeout(5_000) {
+                while (lines.none { it.contains("code=later") }) kotlinx.coroutines.delay(20)
+            }
+            assertTrue(failed)
+            assertTrue(fixture.process!!.isAlive)
+            assertEquals(0, lines.count { it.contains("folder_select") })
+            assertEquals(1, lines.count { it.contains("code=later") })
+        }
+    }
+
+    @Test fun `broken stdout is not a clean process exit`() = runBlocking {
+        val lines = mutableListOf<String>()
+        Fixture(log = { lines += it }, brokenStdout = true).use { fixture ->
+            val failure = runCatching { fixture.backend.negotiateCapabilities() }.exceptionOrNull()
+            assertTrue(failure != null)
+            withTimeout(5_000) {
+                while (lines.none { it.contains("stdout_broken") }) kotlinx.coroutines.delay(20)
+            }
+            assertTrue(lines.none { it.contains("code=dead") || it.contains("status_stop") })
+            assertTrue(failure!!.message.orEmpty().contains("управление"))
+        }
+    }
+
+    @Test fun `status stop is a process exit and not a journal failure`() = runBlocking {
+        val lines = mutableListOf<String>()
+        val queue = Channel<ExpertBackendEvent>(Channel.UNLIMITED)
+        Fixture(log = { lines += it }).use { fixture ->
+            fixture.statusFields = """"running":false,"stop_reason":"user_stop""""
+            val collector = launch(start = CoroutineStart.UNDISPATCHED) {
+                fixture.backend.events.collect { queue.send(it) }
+            }
+            try {
+                fixture.backend.negotiateCapabilities()
+                fixture.backend.start(PolicyProgram(1, emptyList()))
+                withTimeout(5_000) {
+                    while (true) {
+                        if (queue.receive() is ExpertBackendEvent.TunnelLost) break
+                    }
+                }
+                withTimeout(5_000) {
+                    while (lines.none { it.contains("ev=process_exit") && it.contains("status_stop") }) {
+                        kotlinx.coroutines.delay(20)
+                    }
+                }
+                assertTrue(lines.none { it.contains("stdout_broken") || it.contains("writer_fail") })
+            } finally {
+                collector.cancelAndJoin()
+            }
+        }
+    }
+
     private class Fixture(
         private val prepare: ((Path) -> Path)? = null,
         private val routeCheck: (ExpertNativeAck) -> String? = { null },
         private val permit: (ExpertNativeAck) -> Unit = {},
         private val physicalExits: List<PolicyPhysicalExit> = emptyList(),
         private val revoke: () -> Unit = {},
+        private val physical: () -> String = { "Ethernet" },
+        private val stdoutTail: String = "",
+        private val brokenStdout: Boolean = false,
+        private val log: (String) -> Unit = {},
     ) : AutoCloseable {
         private val directory = Files.createTempDirectory("lernet-expert-fake-")
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -530,7 +618,8 @@ class WindowsExpertBackendTest {
                         program, physicalExits, emptyList(),
                     )
                 },
-                probeUrl = { "https://health.example/204" }, log = {}, elevated = { true },
+                probeUrl = { "https://health.example/204" }, log = log, elevated = { true },
+                physicalNetwork = physical,
                 prepareBinary = { prepare?.invoke(it) ?: it.resolve("lernet-core.exe") }, verifyRoutes = routeCheck,
                 beforeStop = {
                     beforeStops.incrementAndGet()
@@ -549,7 +638,10 @@ class WindowsExpertBackendTest {
                     assertTrue(args[args.indexOf("--owner-started-ms") + 1].toLong() > 0)
                     assertEquals("--token-file", args[args.lastIndex - 1])
                     token = Files.readString(Path.of(args.last()))
-                    FakeProcess("LERNET_CONTROL_READY {\"port\":${server.address.port},\"protocol_version\":1}\n").also {
+                    FakeProcess(
+                        "LERNET_CONTROL_READY {\"port\":${server.address.port},\"protocol_version\":1}\n$stdoutTail",
+                        brokenStdout,
+                    ).also {
                         process = it
                     }
                 }
@@ -567,9 +659,9 @@ class WindowsExpertBackendTest {
         }
     }
 
-    private class FakeProcess(ready: String) : Process() {
+    private class FakeProcess(ready: String, broken: Boolean = false) : Process() {
         private val alive = AtomicBoolean(true)
-        private val input = ByteArrayInputStream(ready.toByteArray())
+        private val input = if (broken) BrokenStream() else ByteArrayInputStream(ready.toByteArray())
         override fun getInputStream(): InputStream = input
         override fun getErrorStream(): InputStream = ByteArrayInputStream(byteArrayOf())
         override fun getOutputStream(): OutputStream = ByteArrayOutputStream()
@@ -590,5 +682,9 @@ class WindowsExpertBackendTest {
             return this
         }
         override fun isAlive(): Boolean = alive.get()
+    }
+
+    private class BrokenStream : InputStream() {
+        override fun read(): Int = throw java.io.IOException("stdout closed")
     }
 }

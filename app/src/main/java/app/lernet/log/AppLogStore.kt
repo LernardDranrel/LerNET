@@ -60,7 +60,6 @@ class AppLogStore(
             if (line != null) ring.append(line, sync = false)
         },
     )
-    )
     private val downloadMirror = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "lernet-crumb-mirror").apply { isDaemon = true }
     }

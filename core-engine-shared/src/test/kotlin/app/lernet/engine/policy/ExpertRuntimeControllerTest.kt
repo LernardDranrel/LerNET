@@ -991,7 +991,8 @@ class ExpertRuntimeControllerTest {
     }
 
     @Test fun `actual folder selection snapshots preserve context and clear obsolete choices`() = runTest {
-        val controller = controller(FakeBackend())
+        val lines = mutableListOf<String>()
+        val controller = controller(FakeBackend(), lines = lines)
         controller.handle(ExpertIntent.Start)
         val key = ExpertExitKey("b", "inner", listOf("outer", "inner"), "folder")
         controller.onBackendEvent(ExpertBackendEvent.FolderSelectionsSnapshot(mapOf("native-folder-tag" to key), TunIdentity("tun")))
@@ -1000,6 +1001,7 @@ class ExpertRuntimeControllerTest {
         assertEquals(1, controller.state.value.actualFolderSelections.size)
         controller.onBackendEvent(ExpertBackendEvent.FolderSelectionsSnapshot(emptyMap(), TunIdentity("tun")))
         assertTrue(controller.state.value.actualFolderSelections.isEmpty())
+        assertTrue(lines.none { it.contains("folder_select") })
     }
 
     @Test fun `snapshot from previous revision cannot overwrite new exits with the same tunnel identity`() = runTest {
@@ -1318,11 +1320,13 @@ class ExpertRuntimeControllerTest {
         initial: NetworkPolicy = NetworkPolicy(),
         persist: ExpertPolicyPersistence = ExpertPolicyPersistence { _, _ -> },
         probeSchedule: ExpertProbeSchedule? = null,
+        lines: MutableList<String> = mutableListOf(),
     ): ExpertRuntimeController = ExpertRuntimeController(
         initial, inventory, RoutePlatform.WINDOWS, backend, persist, backgroundScope,
         clockMs = { testScheduler.currentTime }, initialDraft = initial, maintenanceIntervalMs = null,
         nextProbeIntervalMs = { 3_000 },
         probeSchedule = probeSchedule,
+        onDiagnostic = lines::add,
     )
 
     private fun coldPolicy(
