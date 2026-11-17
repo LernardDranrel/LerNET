@@ -8,6 +8,9 @@ import android.net.NetworkRequest
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
+import app.lernet.config.redact.DiagEvent
+import app.lernet.config.redact.DiagKind
+import app.lernet.config.redact.DiagnosticJournal
 import app.lernet.engine.net.UnderlyingNetworkPolicy
 import app.lernet.engine.redact.LerNetLog
 import io.nekohasekai.libbox.InterfaceUpdateListener
@@ -59,11 +62,15 @@ object DefaultNetworkMonitor {
         override fun onAvailable(network: Network) = synchronized(this@DefaultNetworkMonitor) {
             if (callback !== this) return@synchronized
             facts.available(network)
+            underlayNote("available")
             if (underlay.get() != network) clearUnderlay()
         }
 
         override fun onLost(network: Network) = synchronized(this@DefaultNetworkMonitor) {
-            if (callback === this && facts.lost(network)) clearUnderlay()
+            if (callback === this && facts.lost(network)) {
+                underlayNote("lost")
+                clearUnderlay()
+            }
         }
 
         override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) =
@@ -214,5 +221,9 @@ object DefaultNetworkMonitor {
         LerNetLog.i(TAG, "default underlay name=$name index=$index net=$network")
         runCatching { current?.updateDefaultInterface(name, index, expensive, false) }
             .onFailure { LerNetLog.w(TAG, "native underlay delivery failed", it) }
+    }
+
+    private fun underlayNote(code: String) {
+        LerNetLog.i(TAG, DiagnosticJournal.wire(DiagEvent.UNDERLAY_CALLBACK, DiagKind.EDGE, "code" to code))
     }
 }

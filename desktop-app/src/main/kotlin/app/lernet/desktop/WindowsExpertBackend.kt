@@ -1,6 +1,8 @@
 package app.lernet.desktop
 
-import app.lernet.config.redact.SecretRedactor
+import app.lernet.config.redact.DiagEvent
+import app.lernet.config.redact.DiagKind
+import app.lernet.config.redact.DiagnosticJournal
 import app.lernet.desktop.protection.ProtectionLease
 import app.lernet.engine.policy.ExitPhase
 import app.lernet.engine.policy.ExpertBackendEvent
@@ -302,10 +304,12 @@ internal class WindowsExpertBackend(
         repeat(180) {
             check(ticket == epoch.get()) { "Запуск был отменён" }
             try {
-                return physicalNetwork()
+                return physicalNetwork().also {
+                    log(DiagnosticJournal.wire(DiagEvent.UNDERLAY_WAIT, DiagKind.EDGE, "outcome" to "found"))
+                }
             } catch (failure: Exception) {
                 last = failure
-                log("Нет физического адаптера — ждём подключения сети…")
+                log(DiagnosticJournal.wire(DiagEvent.UNDERLAY_WAIT, DiagKind.STATE, "state" to "absent"))
                 delay(1_000)
             }
         }
@@ -360,17 +364,23 @@ internal class WindowsExpertBackend(
                             ready.complete(port)
                         } else {
                             try {
-                                log(SecretRedactor.redact(line.replace(token, "***")).take(4_000))
+                                log(line.replace(token, "***").take(4_000))
                             } catch (failure: Exception) {
-                                // A failed journal must not leave a live core with an undrained output pipe.
+                                // The line is already off the pipe. A file error must not kill the core.
+                                // Anything else still stops it: an undrained pipe must not be left open.
+                                if (!DiagnosticJournal.writerFailureKillsProcess(failure)) return@forEach
                                 child.destroy()
-                                throw IllegalStateException("Не удалось сохранить журнал ядра", failure)
+                                ready.completeExceptionally(IllegalStateException("Не удалось сохранить журнал ядра", failure))
+                                return@useLines
                             }
                         }
                     }
                 }
-                ready.completeExceptionally(IllegalStateException("Ядро завершилось до открытия управления"))
+                if (!ready.isDone) {
+                    ready.completeExceptionally(IllegalStateException("Ядро завершилось до открытия управления"))
+                }
             } catch (failure: Exception) {
+                runCatching { log(DiagnosticJournal.wire(DiagEvent.STDOUT_BROKEN, DiagKind.EDGE, "code" to "reader")) }
                 ready.completeExceptionally(IllegalStateException("Не удалось прочитать состояние ядра", failure))
             }
         }
@@ -411,6 +421,7 @@ internal class WindowsExpertBackend(
                 } catch (failure: Exception) {
                     if (epoch.get() != owner.epoch) break
                     if (!owner.process.isAlive) {
+                        log(DiagnosticJournal.wire(DiagEvent.PROCESS_EXIT, DiagKind.EDGE, "code" to "dead"))
                         mutableEvents.emit(
                             ExpertBackendEvent.TunnelLost(
                                 snapshot.ack.identity(),
@@ -437,6 +448,7 @@ internal class WindowsExpertBackend(
         check(actual == snapshot.ack) { "Ядро сообщило о другом туннеле или другой версии схемы" }
         if (body.nativeBoolean("running") != true) {
             val code = body.nativeString("stop_reason", 256)
+            log(DiagnosticJournal.wire(DiagEvent.PROCESS_EXIT, DiagKind.EDGE, "code" to "status_stop", "state" to code))
             val reason = code?.let(::nativeReason) ?: "Ядро не подтвердило работающий туннель"
             mutableEvents.emit(ExpertBackendEvent.TunnelLost(actual.identity(), reason))
             return false
@@ -457,9 +469,13 @@ internal class WindowsExpertBackend(
         val previousNetworkEpoch = nativeNetworkEpoch
         if (networkEpoch != null && previousNetworkEpoch != null && networkEpoch < previousNetworkEpoch) return true
         if (networkEpoch != null && previousNetworkEpoch != null && networkEpoch > previousNetworkEpoch) {
+            log(DiagnosticJournal.wire(DiagEvent.NET_EPOCH, DiagKind.EDGE, "state" to networkEpoch.toString()))
             mutableEvents.emit(ExpertBackendEvent.NetworkChanged(actual.identity(), actual.revision, networkEpoch))
         }
         nativeNetworkEpoch = networkEpoch ?: previousNetworkEpoch
+        if (underlay != null && underlay != underlayInterface) {
+            log(DiagnosticJournal.wire(DiagEvent.UNDERLAY_BOUND, DiagKind.EDGE, "state" to underlay.replace(' ', '_')))
+        }
         underlayInterface = underlay ?: underlayInterface
         val byTag = tagBindings
         val exits = (body["exits"] as? JsonArray).orEmpty().mapNotNull { entry ->

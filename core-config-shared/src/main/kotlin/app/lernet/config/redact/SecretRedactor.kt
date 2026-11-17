@@ -7,13 +7,13 @@ object SecretRedactor {
         )
     private val quotedSecrets =
         Regex(
-            """"(uuid|password|private_key|private-key|pbk|public_key|public-key|sid|short_id|token|auth)"\s*:\s*"[^"]*"""",
+            """"(uuid|password|private_key|private-key|pbk|public_key|public-key|sid|short_id|token|auth|subscription_url|subscriptionUrl)"\s*:\s*"[^"]*"""",
             RegexOption.IGNORE_CASE,
         )
     /** Share links of every protocol LerNET imports carry the key in the link itself. */
     private val shareUri = Regex("""\b(vless|vmess|trojan|ss|hysteria2|hy2|tuic)://[^\s"']+""", RegexOption.IGNORE_CASE)
     private val labeledSecrets =
-        Regex("""(?i)(?<![\"])\b(pbk|sid|short_id)\s*[:=]\s*([^\s\"',}]+)""")
+        Regex("""(?i)(?<![\"])\b(pbk|sid|short_id|subscription_url|subscriptionUrl)\s*[:=]\s*([^\s\"',}]+)""")
 
     fun redact(text: String): String {
         var out = quotedSecrets.replace(text) { match ->

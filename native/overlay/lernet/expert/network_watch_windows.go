@@ -127,6 +127,11 @@ func (s *Session) startPlatformNetworkWatch() {
 				pauseReason, refresh, stop, nextFingerprint := decideNetworkWatchTick(
 					previous, name, fingerprint, err, running, pending, captureBroken,
 				)
+				kind := "state"
+				if pauseReason != "" || refresh || stop {
+					kind = "edge"
+				}
+				emitDiag("net_watch", kind, "code="+pauseReason, "state="+watchState(refresh, stop, captureBroken))
 				if stop {
 					return
 				}

@@ -1,5 +1,8 @@
 package app.lernet.config.update
 
+import app.lernet.config.redact.DiagEvent
+import app.lernet.config.redact.DiagKind
+import app.lernet.config.redact.DiagnosticJournal
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,6 +23,7 @@ class UpdateMonitor(
     private val writeLastCheck: (Long) -> Unit,
     private val fetch: () -> ClientRelease = ReleaseUpdates::latest,
     private val now: () -> Long = System::currentTimeMillis,
+    private val note: (String) -> Unit = {},
 ) {
     private val busy = AtomicBoolean(false)
     private val mutable = MutableStateFlow(UpdateState(readAutomatic()))
@@ -41,10 +45,12 @@ class UpdateMonitor(
             writeLastCheck(time)
             val latest = withContext(Dispatchers.IO) { fetch() }
             val available = latest.takeIf { ReleaseUpdates.isNewer(it.version, currentVersion) }
+            note(DiagnosticJournal.wire(DiagEvent.UPDATE_RESULT, DiagKind.EDGE, "outcome" to if (available == null) "current" else "newer"))
             mutable.value = mutable.value.copy(release = available,
                 message = available?.let { "Доступен LerNET v${it.version}" } ?: "У вас актуальная версия LerNET v$currentVersion")
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) {
+        catch (failure: Exception) {
+            note(DiagnosticJournal.wire(DiagEvent.UPDATE_RESULT, DiagKind.EDGE, "outcome" to "fail"))
             mutable.value = mutable.value.copy(message = "Не удалось проверить обновления. Проверьте доступ к GitHub и повторите.")
         } finally {
             mutable.value = mutable.value.copy(checking = false)

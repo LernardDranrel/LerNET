@@ -147,6 +147,7 @@ class ExpertCoordinator @Inject constructor(
                     persistence = ExpertPolicyPersistence { activeSaved, draft -> workspace.persist(activeSaved, draft) },
                     scope = scope,
                     clockMs = SystemClock::elapsedRealtime,
+                    onDiagnostic = { line -> app.lernet.engine.redact.LerNetLog.i("expert", line) },
                 )
                 runtime = created
                 adoptedInventory = bundle

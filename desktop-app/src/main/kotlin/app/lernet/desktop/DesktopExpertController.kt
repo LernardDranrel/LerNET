@@ -6,6 +6,10 @@ import app.lernet.config.policy.PolicyInventoryChange
 import app.lernet.config.policy.PolicyMigration
 import app.lernet.config.policy.PolicyWorkspaceRepository
 import app.lernet.config.policy.PolicyWorkspaceStore
+import app.lernet.config.redact.DiagEvent
+import app.lernet.config.redact.DiagKind
+import app.lernet.config.redact.DiagnosticJournal
+import app.lernet.config.redact.DiagnosticLevels
 import app.lernet.config.redact.SecretRedactor
 import app.lernet.config.transfer.TransferBundle
 import app.lernet.config.transfer.TransferCodec
@@ -179,6 +183,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                     snapshot.desiredEnabled, snapshot.phase, snapshot.errors,
                 ) && runCatching { WindowsPhysicalNetwork.select() }.isSuccess -> {
                     writeLog("Физический адаптер снова доступен — повторяем запуск Эксперта.")
+                    writeLog(DiagnosticJournal.wire(DiagEvent.START_RETRY, DiagKind.EDGE, "outcome" to "adapter"))
                     dispatch(UiIntent.Start)
                 }
             }
@@ -211,7 +216,8 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                         Unit
                     },
                     scope,
-                    clockMs = { System.nanoTime() / 1_000_000 }, initialDraft = workspace.draft
+                    clockMs = { System.nanoTime() / 1_000_000 }, initialDraft = workspace.draft,
+                    onDiagnostic = ::writeLog,
                 )
                 runtime = created
                 scope.launch {
@@ -561,6 +567,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
             }
         }
         protection.arm(plan, lease).getOrThrow()
+        writeLog(DiagnosticJournal.wire(DiagEvent.GUARD, DiagKind.EDGE, "outcome" to "arm"))
         activeGuardPlan = plan
     }
 
@@ -569,7 +576,13 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
         check(backend.identity == null && runtime?.state?.value?.tun == null) {
             "Ядро не подтвердило остановку. Системная защита сохранена; повтори остановку перед восстановлением сети."
         }
-        protection.recover().getOrThrow()
+        try {
+            protection.recover().getOrThrow()
+            writeLog(DiagnosticJournal.wire(DiagEvent.GUARD, DiagKind.EDGE, "outcome" to "revoke"))
+        } catch (failure: Exception) {
+            writeLog(DiagnosticJournal.wire(DiagEvent.GUARD, DiagKind.EDGE, "outcome" to "recovery_failed"))
+            throw failure
+        }
         writeGuardPreference(false)
         guardEnabled = false
         refreshProtection()
@@ -861,17 +874,10 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
 
     fun reportError(message: String) = showFailure(message, null)
 
+    private val expertJournal = DiagnosticJournal()
+
     private fun writeLog(message: String) {
-        synchronized(root) {
-            val file = root.resolve("expert.log")
-            if (Files.exists(file) && Files.size(file) > 5_000_000) {
-                Files.move(file, root.resolve("expert.log.1"), StandardCopyOption.REPLACE_EXISTING)
-            }
-            Files.writeString(
-                file, "${Instant.now()} ${SecretRedactor.redact(message)}\n",
-                java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND
-            )
-        }
+        writeExpertJournal(expertJournal, root, message, System.currentTimeMillis())
     }
 
     override fun close() {
@@ -913,4 +919,23 @@ internal class DesktopExpertStartGate(private val mutex: Mutex) {
 internal fun projectedRuntimeError(snapshot: ExpertRuntimeState?): String? = snapshot?.let {
     (it.errors + it.draftErrors + listOfNotNull(it.draftPersistenceError))
         .distinct().takeIf { messages -> messages.isNotEmpty() }?.joinToString("\n")
+}
+
+/** File rotation stays at 5_000_000 bytes and one previous file. A disk error is remembered, not thrown. */
+internal fun writeExpertJournal(journal: DiagnosticJournal, root: java.nio.file.Path, message: String, nowMs: Long) {
+    val line = journal.incoming(message, nowMs) ?: return
+    try {
+        val file = root.resolve("expert.log")
+        if (java.nio.file.Files.exists(file) && java.nio.file.Files.size(file) > 5_000_000) {
+            java.nio.file.Files.move(
+                file, root.resolve("expert.log.1"), java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+            )
+        }
+        java.nio.file.Files.writeString(
+            file, line + "\n",
+            java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND,
+        )
+    } catch (_: java.io.IOException) {
+        journal.noteDrop()
+    }
 }

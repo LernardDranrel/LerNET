@@ -22,12 +22,15 @@ import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import java.util.prefs.Preferences
 
+internal var desktopDiagnostic: (String) -> Unit = {}
+
 internal object DesktopUpdates {
     private val preferences by lazy { Preferences.userRoot().node("app/lernet/updates") }
     private val version by lazy { DesktopUpdates::class.java.getResourceAsStream("/lernet-version.txt")!!.bufferedReader().use { it.readText().trim() } }
     val monitor by lazy { UpdateMonitor(version,
         { preferences.getBoolean("automatic", true) }, { preferences.putBoolean("automatic", it) },
-        { preferences.getLong("lastCheck", 0) }, { preferences.putLong("lastCheck", it) }) }
+        { preferences.getLong("lastCheck", 0) }, { preferences.putLong("lastCheck", it) },
+        note = { desktopDiagnostic(it) }) }
     val installed: Boolean by lazy {
         runCatching { java.nio.file.Path.of(ProcessHandle.current().info().command().orElse(""))
             .toAbsolutePath().parent?.resolve("unins000.exe")?.let(Files::isRegularFile) == true }.getOrDefault(false)

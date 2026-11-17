@@ -41,6 +41,10 @@ import app.lernet.engine.policy.MachineState
 import app.lernet.engine.policy.ManualFailoverGroup
 import app.lernet.engine.policy.PolicyCommand
 import app.lernet.engine.policy.PolicyEvent
+import app.lernet.config.redact.DiagEvent
+import app.lernet.config.redact.DiagKind
+import app.lernet.config.redact.DiagnosticJournal
+import app.lernet.config.redact.DiagnosticLevels
 import app.lernet.engine.policy.ReconnectSettings
 import app.lernet.engine.redact.LerNetLog
 import app.lernet.routing.RouteCompiler
@@ -355,6 +359,7 @@ class ConnectionController(
             dispatch(PolicyEvent.EngineFailed(ConnectionCause.InvalidRouteTree(listOf(error.message ?: "compile"))))
             return
         }
+        DiagnosticLevels.apply(logLevel)
         val effectiveLog = if (logLevel == "warn" || logLevel == "error") "info" else logLevel
         HandshakeKey.fromOutboundJson(outbound.singBoxJson)?.let { outboundKeys[outbound.id] = it }
         val standby = if (standbyRefused) emptyList() else standbyCandidates(outbound.id)
@@ -687,6 +692,7 @@ class ConnectionController(
     }
 
     private fun execute(command: PolicyCommand) {
+        LerNetLog.i(TAG, linkDecision(command))
         when (command) {
             is PolicyCommand.StartEngine -> {
                 engineReady = false
@@ -1460,6 +1466,22 @@ class ConnectionController(
             channel = channel,
             pipeSilentCount = silent,
             pipeTunnelCount = flags.size,
+        )
+    }
+
+    private fun linkDecision(command: PolicyCommand): String {
+        val (outcome, code, attempt) = when (command) {
+            is PolicyCommand.StartEngine -> Triple("start", command.reason, null)
+            is PolicyCommand.StopEngine -> Triple("stop", command.reason.javaClass.simpleName, null)
+            is PolicyCommand.ScheduleRetry -> Triple("retry", command.reason, command.attempt.toString())
+            PolicyCommand.RequestCheck -> Triple("check", null, null)
+            is PolicyCommand.HoldCheck -> Triple("hold", null, null)
+            is PolicyCommand.ProbeGroup -> Triple("probe", null, null)
+            is PolicyCommand.ShowBanner -> Triple("banner", null, null)
+        }
+        return DiagnosticJournal.wire(
+            DiagEvent.LINK_DECISION, DiagKind.EDGE,
+            "outcome" to outcome, "code" to code, "attempt" to attempt,
         )
     }
 

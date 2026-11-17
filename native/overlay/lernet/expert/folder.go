@@ -323,10 +323,12 @@ func (f *folderGate) failedEpoch(tag string, epoch int64) {
 
 func (f *folderGate) fallback(ctx context.Context) adapter.Outbound {
 	m := adapter.ContextFrom(ctx)
-	if m == nil || m.LerNETProtected || m.LerNETFallback != "direct" {
-		return nil
+	var out adapter.Outbound
+	if m != nil && !m.LerNETProtected && m.LerNETFallback == "direct" {
+		out = f.direct
 	}
-	return f.direct
+	emitFallback(m != nil && m.LerNETProtected, out)
+	return out
 }
 
 func (f *folderGate) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {

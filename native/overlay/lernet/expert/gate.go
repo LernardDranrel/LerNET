@@ -419,10 +419,12 @@ type probeContextKey struct{}
 
 func (g *exitGate) fallback(ctx context.Context) adapter.Outbound {
 	metadata := adapter.ContextFrom(ctx)
-	if metadata == nil || metadata.LerNETProtected || metadata.LerNETFallback != "direct" {
-		return nil
+	var out adapter.Outbound
+	if metadata != nil && !metadata.LerNETProtected && metadata.LerNETFallback == "direct" {
+		out = g.direct
 	}
-	return g.direct
+	emitFallback(metadata != nil && metadata.LerNETProtected, out)
+	return out
 }
 
 func (g *exitGate) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {

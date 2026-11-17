@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import app.lernet.config.model.DnsPolicy
+import app.lernet.config.redact.DiagnosticLevels
 import app.lernet.engine.RunMode
 import app.lernet.engine.compile.EngineDefaults
 import app.lernet.engine.log.JournalCeiling
@@ -91,7 +92,7 @@ class SettingsStore(private val context: Context) {
             ),
             failoverEnabled = this[FAILOVER] ?: false,
             failoverGroupId = this[FAILOVER_GROUP],
-            logLevel = this[LOG_LEVEL] ?: "warn",
+            logLevel = DiagnosticLevels.apply(this[LOG_LEVEL] ?: "warn").let { this[LOG_LEVEL] ?: "warn" },
             dismissedBannerKey = this[BANNER],
             journalMaxMb = JournalCeiling.mb(this[JOURNAL_MB] ?: JournalCeiling.DEFAULT_MB),
             engineDefaults = EngineDefaults(

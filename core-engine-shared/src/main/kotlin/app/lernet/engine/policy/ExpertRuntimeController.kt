@@ -1,5 +1,8 @@
 package app.lernet.engine.policy
 
+import app.lernet.config.redact.DiagEvent
+import app.lernet.config.redact.DiagKind
+import app.lernet.config.redact.DiagnosticJournal
 import app.lernet.config.redact.SecretRedactor
 import app.lernet.routing.RoutePlatform
 import app.lernet.routing.policy.ExitLifecyclePolicy
@@ -53,6 +56,7 @@ class ExpertRuntimeController(
     private val nextRecheckMs: (Long) -> Long = { atLeast -> RecheckJitter.nextMs(atLeastMs = atLeast) },
     private val maintenanceIntervalMs: Long? = 1_000,
     private val wallClockMs: () -> Long = { System.currentTimeMillis() },
+    private val onDiagnostic: (String) -> Unit = {},
 ) {
     private val mutex = Mutex()
     private val session = PolicyApplySession(initial, platform).also { it.edit(initialDraft) }
@@ -260,6 +264,7 @@ class ExpertRuntimeController(
             mutex.withLock {
                 if (generation == negotiationGeneration) {
                     mutableState.value = mutableState.value.copy(phase = ExpertSessionPhase.FAILED)
+                    note(DiagEvent.START_RESULT, DiagKind.EDGE, "outcome" to "fail", "code" to "capabilities")
                     reportFailure("Не удалось проверить возможности ядра", failure)
                 }
             }
@@ -274,13 +279,15 @@ class ExpertRuntimeController(
                     errors = errorsWithPersistence(listOf("Ядро не подтвердило постоянный TUN и независимые выходы.")),
                 )
                 reason(ExpertReasonLevel.ERROR, "Эксперт недоступен: перезапуск обычного VPN не сохраняет общий TUN.")
+                note(DiagEvent.START_RESULT, DiagKind.EDGE, "outcome" to "fail", "code" to "capabilities")
                 return
             }
             val program = PolicyProgramCompiler.compile(session.saved, inventory, platform)
             if (!program.isValid) {
                 mutableState.value = mutableState.value.copy(
-                    phase = ExpertSessionPhase.STOPPED, desiredEnabled = false, errors = errorsWithPersistence(program.errors.map { it.message }),
+                    phase = ExpertSessionPhase.STOPPED, desiredEnabled = false,                     errors = errorsWithPersistence(program.errors.map { it.message }),
                 )
+                note(DiagEvent.START_RESULT, DiagKind.EDGE, "outcome" to "fail", "code" to "compile")
                 return
             }
             mutableState.value = mutableState.value.copy(
@@ -304,6 +311,7 @@ class ExpertRuntimeController(
                         phase = ExpertSessionPhase.FAILED, tun = identity, errors = errorsWithPersistence(listOf(error)),
                     )
                     reason(ExpertReasonLevel.ERROR, error)
+                    note(DiagEvent.START_RESULT, DiagKind.EDGE, "outcome" to "fail", "code" to "revision")
                     publish()
                     false
                 } else {
@@ -324,6 +332,7 @@ class ExpertRuntimeController(
                         directNetwork = null,
                     )
                     reason(ExpertReasonLevel.INFO, "Общий TUN запущен. Ядро подтвердило версию ${ack.revision}.")
+                    note(DiagEvent.START_RESULT, DiagKind.EDGE, "outcome" to "ready", "code" to ack.revision.toString())
                     reportInactiveProtections(candidate.second)
                     publish()
                     beginMaintenance()
@@ -353,6 +362,10 @@ class ExpertRuntimeController(
                         if (startupStopUnconfirmed) "Состояние TUN не подтверждено; повтори «Остановить»" else "Общий TUN не запущен",
                         failure,
                     )
+                    note(
+                        DiagEvent.START_RESULT, DiagKind.EDGE, "outcome" to "fail",
+                        "code" to if (startupStopUnconfirmed) "uncertain" else "start",
+                    )
                     publish()
                 }
             }
@@ -372,6 +385,7 @@ class ExpertRuntimeController(
                 session.tunnelStopped()
                 mutableState.value = mutableState.value.copy(phase = ExpertSessionPhase.STOPPING)
                 reason(ExpertReasonLevel.WARNING, "Запуск прерван. Освобождаем созданный обработчик сети.")
+                note(DiagEvent.START_CANCEL, DiagKind.EDGE, "outcome" to "cancel")
                 publish()
                 true
             }
@@ -988,7 +1002,10 @@ class ExpertRuntimeController(
                 }
             }
             is ExpertBackendEvent.UserTraffic -> lifecycles[event.key]?.traffic(event.flowId, clockMs())
-            is ExpertBackendEvent.FlowClosed -> lifecycles[event.key]?.closeFlow(event.flowId, clockMs())
+            is ExpertBackendEvent.FlowClosed -> {
+                note(DiagEvent.FLOW_KEEP, DiagKind.EDGE, "outcome" to "close")
+                lifecycles[event.key]?.closeFlow(event.flowId, clockMs())
+            }
             is ExpertBackendEvent.Health -> updateHealth(event.key, event.result)
             is ExpertBackendEvent.NetworkChanged -> {
                 if (event.epoch < 0 || lastNativeNetworkEpoch?.let { event.epoch <= it } == true) return@withLock
@@ -1007,6 +1024,12 @@ class ExpertRuntimeController(
             }
             is ExpertBackendEvent.Observation -> {
                 if (((event.identity ?: mutableState.value.tun) to event.connection.id) in clearedConnectionIds) return@withLock
+                val identity = event.identity ?: mutableState.value.tun
+                val opened = mutableState.value.connections.none { it.id == event.connection.id && it.identity == identity }
+                note(
+                    DiagEvent.FLOW_KEEP, if (opened) DiagKind.EDGE else DiagKind.STATE,
+                    "outcome" to if (opened) "open" else "update", "domain" to event.connection.domain,
+                )
                 val safe = event.connection.copy(
                     application = event.connection.application?.let(SecretRedactor::redact),
                     destination = SecretRedactor.redact(event.connection.destination),
@@ -1070,7 +1093,11 @@ class ExpertRuntimeController(
                 event.exits.forEach(::recordNativeExit)
             }
             is ExpertBackendEvent.FolderSelectionsSnapshot -> {
-                mutableState.value = mutableState.value.copy(actualFolderSelections = event.selections.toMap())
+                val next = event.selections.toMap()
+                if (next != mutableState.value.actualFolderSelections) {
+                    note(DiagEvent.FOLDER_SELECT, DiagKind.EDGE, "outcome" to "selected", "code" to next.size.toString())
+                }
+                mutableState.value = mutableState.value.copy(actualFolderSelections = next)
             }
             is ExpertBackendEvent.RetiredCleanupSnapshot -> recordRetiredCleanup(event.failures)
         }
@@ -1377,6 +1404,10 @@ class ExpertRuntimeController(
         return knownExpertNativeFailureExplanation(message)
             ?: app.lernet.engine.text.UserText.of(failure, "Ядро не выполнило команду. Подробности — в журнале.")
     }
+    private fun note(event: DiagEvent, kind: DiagKind, vararg fields: Pair<String, String?>) {
+        onDiagnostic(DiagnosticJournal.wire(event, kind, "session" to generation.toString(), *fields))
+    }
+
     private fun reason(level: ExpertReasonLevel, message: String) {
         val entry = ExpertReason(++reasonSequence, clockMs(), level, SecretRedactor.redact(message))
         mutableState.value = mutableState.value.copy(reasons = (mutableState.value.reasons + entry).takeLast(MAX_REASONS))

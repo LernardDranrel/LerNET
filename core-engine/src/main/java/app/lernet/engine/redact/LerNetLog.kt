@@ -1,7 +1,8 @@
 package app.lernet.engine.redact
 
 import android.util.Log
-import app.lernet.config.redact.SecretRedactor
+import app.lernet.config.redact.DiagnosticJournal
+import app.lernet.config.redact.DiagnosticLevels
 import app.lernet.engine.log.LogRingBuffer
 
 interface LogPersist {
@@ -33,17 +34,22 @@ object LerNetLog {
         message: String,
         error: Throwable?,
     ) {
-        val safe = SecretRedactor.redact(message)
+        val now = System.currentTimeMillis()
+        val safe = when {
+            message.startsWith("LERNET_DIAG ") || message.startsWith("LERNET_NETWORK ") ->
+                DiagnosticJournal.process.incoming(message, now) ?: return
+            else -> DiagnosticJournal.process.text(DiagnosticLevels.current, message, keepAddress = false, now)
+        }
         buffer.append(level, tag, safe)
         persist?.onLine("$level $tag $safe")
         if (error != null) {
-            val stack = SecretRedactor.redact(error.stackTraceToString())
+            val stack = DiagnosticJournal.process.text(DiagnosticLevels.current, error.stackTraceToString(), false, now)
             buffer.append(level, tag, stack)
             persist?.onLine("$level $tag $stack")
         }
         when {
             error == null -> Log.println(androidLevel, tag, safe)
-            else -> Log.println(androidLevel, tag, "$safe\n${SecretRedactor.redact(error.stackTraceToString())}")
+            else -> Log.println(androidLevel, tag, "$safe\n${DiagnosticJournal.process.text(DiagnosticLevels.current, error.stackTraceToString(), false, now)}")
         }
     }
 }

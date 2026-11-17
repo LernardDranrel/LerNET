@@ -2,6 +2,9 @@ package app.lernet.vpn
 
 import app.lernet.config.redact.SecretRedactor
 import app.lernet.engine.EngineEvent
+import app.lernet.config.redact.DiagEvent
+import app.lernet.config.redact.DiagKind
+import app.lernet.config.redact.DiagnosticJournal
 import app.lernet.engine.compile.DnsQueryLog
 import app.lernet.engine.compile.DnsQueryRecord
 import app.lernet.engine.live.LiveConn
@@ -146,7 +149,17 @@ internal class LibboxStatusClient(
                     server = query.dnsServer,
                 ),
             )
-            LerNetLog.i(TAG, line)
+            val failed = query.failed || !query.error.isNullOrBlank()
+            LerNetLog.i(
+                TAG,
+                DiagnosticJournal.wire(
+                    DiagEvent.DNS_DECISION,
+                    if (failed) DiagKind.EDGE else DiagKind.STATE,
+                    "outcome" to if (failed) "fail" else "ok",
+                    "code" to query.rcode.toString(),
+                    "domain" to query.domain,
+                ),
+            )
             emit(EngineEvent.LogLine(line))
             if (!query.failed && query.error.isNullOrBlank()) {
                 emit(EngineEvent.DnsAlive(answers))

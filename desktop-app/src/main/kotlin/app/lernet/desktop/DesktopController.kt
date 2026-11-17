@@ -8,6 +8,10 @@ import app.lernet.desktop.protection.SimpleTunnelGuard
 
 import app.lernet.config.net.OkHttpTextFetcher
 import app.lernet.config.model.DnsPolicy
+import app.lernet.config.redact.DiagEvent
+import app.lernet.config.redact.DiagKind
+import app.lernet.config.redact.DiagnosticJournal
+import app.lernet.config.redact.DiagnosticLevels
 import app.lernet.config.transfer.TransferBundle
 import app.lernet.config.transfer.TransferCodec
 import app.lernet.config.parse.GuessedMode
@@ -144,7 +148,7 @@ class DesktopController(
         if (loaded.isFailure) state else DesktopSubscriptions.adoptAll(state).also { adopted ->
             if (adopted != state) runCatching { store.save(adopted) }
         }
-    }
+    }.also { DiagnosticLevels.apply(it.logLevel) }
     private val mutable = MutableStateFlow(
         DesktopUiState(
             saved = opened,
@@ -174,6 +178,9 @@ class DesktopController(
                 if (SimpleRecovery.releasesGuard(process.state.value.failure)) releaseGuard()
             }
         }
+    }
+    init {
+        desktopDiagnostic = { line -> runCatching { tunnel.logDiagnostic(line) } }
     }
     val tracer = WindowsTracer()
     private val coreApi = LocalCoreApi()
@@ -539,8 +546,11 @@ class DesktopController(
             OutboundProbe.check(profile, saved, executable, store.workDirectory())
         }.getOrElse { OutboundProbeResult(message = app.lernet.engine.text.UserText.of(it, "Не удалось проверить связь через VPN")) }
         if (result.latencyMs == null) {
+            tunnel.logDiagnostic(DiagnosticJournal.wire(DiagEvent.PROBE_RESULT, DiagKind.EDGE, "outcome" to "fail"))
             tunnel.logDiagnostic("Конфиг «${profile.name}»: ${result.message}")
             result.diagnostics.forEach(tunnel::logDiagnostic)
+        } else {
+            tunnel.logDiagnostic(DiagnosticJournal.wire(DiagEvent.PROBE_RESULT, DiagKind.EDGE, "outcome" to "ok"))
         }
         return result
     }
@@ -548,7 +558,7 @@ class DesktopController(
     private fun observeEndpointRoute(profile: StoredProfile?) {
         val endpoint = runCatching { profile?.selectedOutbound?.singBoxJson?.let { OutboundPatch.read(it).server } }.getOrNull().orEmpty()
         val route = EndpointRouteObservation.read(endpoint)
-        if (route.detail.isNotBlank()) tunnel.logDiagnostic(route.detail)
+        if (route.detail.isNotBlank()) tunnel.logDiagnostic("event=hop_check " + route.detail, keepAddress = true)
         mutable.update { current ->
             if (current.saved.selectedProfileId == profile?.id) current.copy(networkWarning = route.warning) else current
         }
@@ -586,8 +596,14 @@ class DesktopController(
                 val bundle = app.lernet.config.transfer.TransferCodec.decode(raw)
                 check(change { DesktopTransfer.merge(it, raw) }) { "Не удалось сохранить импортированные данные" }
                 "Добавлено папок: ${bundle.groups.size}, конфигов: ${bundle.profiles.size}, правил: ${bundle.rules.size}"
-            }.onSuccess { summary -> mutable.update { it.copy(busy = false, message = summary) } }
-                .onFailure { error -> mutable.update { it.copy(busy = false, message = app.lernet.engine.text.UserText.withReason("Импорт не выполнен", error)) } }
+            }.onSuccess { summary ->
+                tunnel.logDiagnostic(DiagnosticJournal.wire(DiagEvent.IMPORT_RESULT, DiagKind.EDGE, "outcome" to "ok"))
+                mutable.update { it.copy(busy = false, message = summary) }
+            }
+                .onFailure { error ->
+                    tunnel.logDiagnostic(DiagnosticJournal.wire(DiagEvent.IMPORT_RESULT, DiagKind.EDGE, "outcome" to "fail"))
+                    mutable.update { it.copy(busy = false, message = app.lernet.engine.text.UserText.withReason("Импорт не выполнен", error)) }
+                }
         }
     }
 
@@ -635,7 +651,10 @@ class DesktopController(
             subscriptionUpdater.prepare(url, DesktopSubscriptions.configs(state.value.saved, url))
         }.getOrElse { return "Подписку не удалось обновить: " + app.lernet.engine.text.UserText.of(it, "ошибка чтения") }
         when (prepared) {
-            is app.lernet.config.subscription.SubscriptionUpdater.Prepared.Failed -> prepared.message
+            is app.lernet.config.subscription.SubscriptionUpdater.Prepared.Failed -> {
+                tunnel.logDiagnostic(DiagnosticJournal.wire(DiagEvent.SUB_REFRESH, DiagKind.EDGE, "outcome" to "fail"))
+                prepared.message
+            }
             is app.lernet.config.subscription.SubscriptionUpdater.Prepared.Ready -> {
                 var added = emptyList<String>()
                 val ok = change { saved ->
@@ -643,8 +662,10 @@ class DesktopController(
                 }
                 if (ok) {
                     subscriptionUpdater.applied(prepared, added)
+                    tunnel.logDiagnostic(DiagnosticJournal.wire(DiagEvent.SUB_REFRESH, DiagKind.EDGE, "outcome" to "ok"))
                     prepared.message
                 } else {
+                    tunnel.logDiagnostic(DiagnosticJournal.wire(DiagEvent.SUB_REFRESH, DiagKind.EDGE, "outcome" to "fail"))
                     "Подписку не удалось сохранить".also { subscriptionUpdater.failedToSave(url, it) }
                 }
             }
@@ -932,9 +953,15 @@ class DesktopController(
     /** Empty pair returns to random credentials; applies on the next connection. */
     fun setProxyCredentials(username: String, password: String): Boolean {
         val user = username.trim()
-        if (user.isEmpty() && password.isEmpty()) return change { it.copy(proxyUsername = "", proxyPassword = "") }
-        if (!LocalProxyAccess.valid(user) || !LocalProxyAccess.valid(password)) return false
-        return change { it.copy(proxyUsername = user, proxyPassword = password) }
+        val cleared = user.isEmpty() && password.isEmpty()
+        if (!cleared && (!LocalProxyAccess.valid(user) || !LocalProxyAccess.valid(password))) return false
+        val ok = change {
+            it.copy(proxyUsername = if (cleared) "" else user, proxyPassword = if (cleared) "" else password)
+        }
+        if (ok) {
+            tunnel.logDiagnostic(DiagnosticJournal.wire(DiagEvent.PROXY_CRED, DiagKind.EDGE, "outcome" to if (cleared) "cleared" else "set"))
+        }
+        return ok
     }
     fun setCrashGuard(enabled: Boolean) = change { it.copy(crashGuard = enabled) }
 
@@ -1711,6 +1738,7 @@ class DesktopController(
             }
             mutable.update { current -> current.copy(saved = next,
                 networkWarning = if (current.saved.selectedProfileId != next.selectedProfileId) "" else current.networkWarning) }
+            DiagnosticLevels.apply(next.logLevel)
             return true
         }
     }

@@ -1,11 +1,12 @@
 package app.lernet.ui.settings
 
+import android.content.Context
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.clickable
-import android.content.Context
+import app.lernet.engine.redact.LerNetLog
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,7 +26,9 @@ private object AndroidUpdates {
             val prefs = context.applicationContext.getSharedPreferences("client-updates", Context.MODE_PRIVATE)
             UpdateMonitor(BuildConfig.VERSION_NAME,
                 { prefs.getBoolean("automatic", true) }, { prefs.edit().putBoolean("automatic", it).apply() },
-                { prefs.getLong("lastCheck", 0) }, { prefs.edit().putLong("lastCheck", it).apply() })
+                { prefs.getLong("lastCheck", 0) }, { prefs.edit().putLong("lastCheck", it).apply() },
+                note = { LerNetLog.i("update", it) },
+            )
         }.also { instance = it }
     }
 }

@@ -1,5 +1,9 @@
 package app.lernet.desktop
 
+import app.lernet.config.redact.DiagEvent
+import app.lernet.config.redact.DiagKind
+import app.lernet.config.redact.DiagnosticJournal
+import app.lernet.config.redact.DiagnosticLevels
 import app.lernet.config.redact.SecretRedactor
 import app.lernet.engine.policy.PolicyControlCapabilities
 import java.nio.file.Files
@@ -141,6 +145,8 @@ class WindowsBoxProcess internal constructor(
                         clearProcess(running)
                         if (!desired || generation.get() != ticket) return@thread
                         if (isTunPermissionFailure(lastFatal.get())) {
+                            admit(DiagEvent.PROCESS_EXIT, DiagKind.EDGE, "code" to code.toString(), "session" to ticket.toString())
+                            admit(DiagEvent.START_RESULT, DiagKind.EDGE, "outcome" to "permission", "session" to ticket.toString())
                             mutable.update {
                                 it.copy(
                                     status = TunnelStatus.FAILED,
@@ -154,6 +160,15 @@ class WindowsBoxProcess internal constructor(
                             return@thread
                         }
                         attempt++
+                        val runId = runCatching { running.pid().toString() }.getOrNull()
+                        admit(
+                            DiagEvent.PROCESS_EXIT, DiagKind.EDGE, "code" to code.toString(),
+                            "run" to runId, "session" to ticket.toString(),
+                        )
+                        admit(
+                            DiagEvent.CORE_RECONNECT, DiagKind.EDGE, "outcome" to "again",
+                            "attempt" to attempt.toString(), "run" to runId, "session" to ticket.toString(),
+                        )
                         // Plain words as on the phone; the raw core line and exit code stay in the technical journal.
                         val reason = lastFatal.get()?.let { " · " + app.lernet.engine.text.CoreFailureWords.title(it) }.orEmpty()
                         logDiagnostic("core exited (code $code)" + lastFatal.get()?.let { ": " + SecretRedactor.redact(it).take(180) }.orEmpty())
@@ -243,12 +258,14 @@ class WindowsBoxProcess internal constructor(
         stop()
     }
 
+    private val sessionJournal = DiagnosticJournal()
+
     /** Keep failed preflight details alongside the regular core journal and in the diagnostics tab. */
-    fun logDiagnostic(message: String) {
+    fun logDiagnostic(message: String, keepAddress: Boolean = false) {
         val safeMessage = SecretRedactor.redact(message).replace('\r', ' ').replace('\n', ' ').take(2048)
         val line = "${OffsetDateTime.now()} [preflight] $safeMessage"
         mutable.update { it.copy(logs = (it.logs + line).takeLast(400)) }
-        runCatching { appendJournal(line) }
+        runCatching { appendJournal(safeMessage, keepAddress) }
     }
 
     /**
@@ -269,19 +286,31 @@ class WindowsBoxProcess internal constructor(
         header.trimEnd() + "\n\n" + SecretRedactor.redact(body.ifBlank { "Журнал пуст: подключений в этой установке ещё не было.\n" })
     }
 
-    private fun appendJournal(line: String) = synchronized(journalLock) {
+    private fun admit(event: DiagEvent, kind: DiagKind, vararg fields: Pair<String, String?>) {
+        appendJournal(DiagnosticJournal.wire(event, kind, *fields), keepAddress = false)
+    }
+
+    private fun appendJournal(line: String, keepAddress: Boolean = false) {
+        synchronized(journalLock) {
         Files.createDirectories(directory)
         val current = directory.resolve("session.log")
         val previous = directory.resolve("session.log.1")
         val limit = journalMaxMb.coerceIn(1, 500).toLong() * 1024 * 1024
         val segmentLimit = limit / 2
-        val bytes = (SecretRedactor.redact(line).take(8192) + "\n").toByteArray(Charsets.UTF_8)
+        val now = System.currentTimeMillis()
+        val stored = when {
+            line.startsWith("LERNET_DIAG ") || line.startsWith("LERNET_NETWORK ") ->
+                sessionJournal.incoming(line, now) ?: return@synchronized
+            else -> sessionJournal.text(DiagnosticLevels.current, line, keepAddress, now)
+        }
+        val bytes = (stored.take(8192) + "\n").toByteArray(Charsets.UTF_8)
         retainTail(current, segmentLimit)
         retainTail(previous, segmentLimit)
         if (Files.exists(current) && Files.size(current) + bytes.size > segmentLimit) {
             Files.move(current, previous, StandardCopyOption.REPLACE_EXISTING)
         }
         Files.write(current, bytes, StandardOpenOption.CREATE, StandardOpenOption.APPEND)
+        }
     }
 
     private fun retainTail(path: Path, maxBytes: Long) {
