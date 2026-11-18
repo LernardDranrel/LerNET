@@ -48,6 +48,7 @@ class WindowsBoxProcess internal constructor(
 ) : AutoCloseable {
     /** Raw core log lines for passive checks (the block detector). Never blocks the reader. */
     @Volatile var lineListener: ((String) -> Unit)? = null
+    private var userStopPending = false
     constructor(directory: Path) : this(directory, { executable, configFile ->
         ProcessBuilder(executable.toString(), "run", "-c", configFile.toString())
             .directory(directory.toFile()).redirectErrorStream(true).start()
@@ -203,6 +204,12 @@ class WindowsBoxProcess internal constructor(
         Unit
     }
 
+    /** UI switch, before the process is destroyed. Close and failures do not use this. */
+    fun noteUserStop() {
+        userStopPending = true
+        admit(DiagEvent.PROCESS_EXIT, DiagKind.EDGE, "outcome" to "user_stop", "stage" to "ui")
+    }
+
     /** False means shutdown is still pending or could not be confirmed; callers must not acquire another TUN. */
     fun stop(waitForExit: Boolean = false): Boolean = synchronized(processLock) {
         desired = false
@@ -216,6 +223,7 @@ class WindowsBoxProcess internal constructor(
                     running.waitFor(1, TimeUnit.SECONDS)
                 }
                 val stopped = !running.isAlive
+                if (userStopPending) noteCleanup(stopped)
                 synchronized(processLock) {
                     if (stopped && process === running) {
                         process = null
@@ -242,7 +250,13 @@ class WindowsBoxProcess internal constructor(
         }
         runningLaunch = null
         mutable.update { it.copy(status = TunnelStatus.STOPPED, message = "Отключено", reconnectAttempt = 0) }
+        if (userStopPending) noteCleanup(true)
         true
+    }
+
+    private fun noteCleanup(stopped: Boolean) {
+        userStopPending = false
+        admit(DiagEvent.PROCESS_EXIT, DiagKind.EDGE, "outcome" to "cleanup", "code" to if (stopped) "ok" else "fail", "stage" to "ui")
     }
 
     internal fun captureRunningLaunch(): WindowsLaunchSnapshot? = synchronized(processLock) {

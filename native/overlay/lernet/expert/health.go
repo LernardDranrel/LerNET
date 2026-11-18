@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"net"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -88,6 +89,61 @@ func (g *exitGate) healthOptions() HealthOptions {
 	return g.healthSchedule
 }
 
+// classifyHealth decides what one finished probe means.
+// recover is true only when this failure is past the threshold: the caller
+// then has to run recovery and log that result separately. An ok line is not recovery.
+func classifyHealth(hasLatency bool, reason string, failures, threshold int, needsRecovery bool) (kind, outcome, code string, recover bool) {
+	if hasLatency {
+		return "state", "ok", "", false
+	}
+	if !needsRecovery {
+		return "state", "skip", reason, false
+	}
+	if failures < threshold {
+		return "state", "below", reason, false
+	}
+	return "edge", "attempt", reason, true
+}
+
+func probeHost(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return parsed.Hostname()
+}
+
+func noteHealth(kind, outcome, code, stage, state, domain string, mono int64) {
+	fields := make([]string, 0, 6)
+	if outcome != "" {
+		fields = append(fields, "outcome="+outcome)
+	}
+	if code != "" {
+		fields = append(fields, "code="+diagToken(code))
+	}
+	if stage != "" {
+		fields = append(fields, "stage="+stage)
+	}
+	if state != "" {
+		fields = append(fields, "state="+state)
+	}
+	if domain != "" {
+		fields = append(fields, "domain="+diagToken(domain))
+	}
+	if mono > 0 {
+		fields = append(fields, "mono="+itoa64(mono))
+	}
+	emitDiag("health_gate", kind, fields...)
+}
+
+func noteRecovery(err error, state string) {
+	if err != nil {
+		noteHealth("edge", "fail", ErrorCode(err), "recover", state, "", 0)
+		return
+	}
+	noteHealth("edge", "ok", "", "recover", state, "", 0)
+}
+
 // A dead multiplexed transport is rebuilt independently. Closing only this
 // exit's handles makes affected applications retry; unrelated exits/TUN stay.
 func (g *exitGate) checkHealth() {
@@ -104,40 +160,41 @@ func (g *exitGate) checkHealth() {
 	g.mu.Unlock()
 	go func() {
 		defer func() { g.mu.Lock(); g.healthChecking = false; g.mu.Unlock() }()
+		started := time.Now()
 		result := probeGate(g.ctx, g, g.probeURL, schedule.ActiveProbeTimeoutMs)
+		measured := time.Since(started).Milliseconds()
+		host := probeHost(g.probeURL)
 		g.mu.Lock()
 		if g.closed || g.phase != "ready" || g.networkEpoch != epoch || g.transportGeneration != transportGeneration {
 			g.mu.Unlock()
-			emitDiag("health_gate", "edge", "outcome=stale")
+			noteHealth("edge", "stale", "", "https", "", host, measured)
 			return
 		}
+		kind, outcome, code, recover := classifyHealth(result.HTTPSLatencyMs != nil, result.Reason, g.healthFailures, schedule.FailedChecksBeforeRecovery, probeNeedsRecovery(result))
+		failures := g.healthFailures
+		state := "f" + itoa(failures)
 		if result.HTTPSLatencyMs != nil {
 			latency := *result.HTTPSLatencyMs
 			g.healthFailures = 0
 			g.mu.Unlock()
-			emitDiag("health_gate", "state", "outcome=ok", "mono="+itoa64(latency))
+			noteHealth(kind, outcome, code, "https", "", host, latency)
 			return
 		}
-		if !probeNeedsRecovery(result) {
-			reason := diagToken(result.Reason)
+		if !recover {
 			g.mu.Unlock()
-			emitDiag("health_gate", "state", "outcome=skip", "code="+reason)
+			noteHealth(kind, outcome, code, "https", state, host, measured)
 			return
 		}
-		if g.healthFailures < schedule.FailedChecksBeforeRecovery {
-			failures := g.healthFailures
-			threshold := schedule.FailedChecksBeforeRecovery
-			reason := diagToken(result.Reason)
-			g.mu.Unlock()
-			emitDiag("health_gate", "state", "outcome=below", "code="+reason, "state=f"+itoa(failures), "stage=t"+itoa(threshold))
-			return
-		}
-		failures := g.healthFailures
 		g.healthFailures = 0
 		g.lastError = "tunnel_health_failed"
 		g.mu.Unlock()
-		emitDiag("health_gate", "edge", "outcome=recover", "code=tunnel_health_failed", "state=f"+itoa(failures))
-		_ = g.recoverAt(g.ctx, transportGeneration)
-		_ = probeGate(g.ctx, g, g.probeURL, schedule.ActiveProbeTimeoutMs)
+		noteHealth(kind, outcome, code, "https", state, host, measured)
+		noteRecovery(g.recoverAt(g.ctx, transportGeneration), state)
+		again := probeGate(g.ctx, g, g.probeURL, schedule.ActiveProbeTimeoutMs)
+		if again.HTTPSLatencyMs != nil {
+			noteHealth("state", "ok", "", "https", state, host, *again.HTTPSLatencyMs)
+			return
+		}
+		noteHealth("edge", "fail", again.Reason, "https", state, host, 0)
 	}()
 }

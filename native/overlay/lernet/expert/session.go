@@ -610,7 +610,11 @@ func (s *Session) setNetworkReasonLocked(code string) {
 		s.underlay.Store(nil)
 	}
 	if changed {
-		fmt.Printf("LERNET_NETWORK reason=%s retained_tun=true\n", code)
+		shown := code
+		if shown == "" {
+			shown = "pause_cleared"
+		}
+		fmt.Printf("LERNET_NETWORK reason=%s retained_tun=true\n", shown)
 	}
 }
 

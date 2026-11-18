@@ -315,6 +315,8 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
             UiIntent.Stop -> {
                 simple.sessionMarks.expertStopped()
                 startGate.requestStop()
+                flushExpertJournal(expertJournal, root, System.currentTimeMillis())
+                writeLog(DiagnosticJournal.wire(DiagEvent.PROCESS_EXIT, DiagKind.EDGE, "outcome" to "user_stop", "stage" to "ui"))
                 null
             }
             else -> null
@@ -374,7 +376,14 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                         refreshProtection()
                     }
                     UiIntent.Stop -> {
-                        controller.handle(RuntimeIntent.Stop)
+                        val stopped = runCatching { controller.handle(RuntimeIntent.Stop) }
+                        writeLog(DiagnosticJournal.wire(
+                            DiagEvent.PROCESS_EXIT, DiagKind.EDGE,
+                            "outcome" to "cleanup",
+                            "code" to if (stopped.isSuccess) "ok" else "fail",
+                            "stage" to "ui",
+                        ))
+                        stopped.getOrThrow()
                         refreshProtection()
                     }
                     UiIntent.Refresh -> Unit // handled before ensureRuntime
@@ -922,8 +931,16 @@ internal fun projectedRuntimeError(snapshot: ExpertRuntimeState?): String? = sna
 }
 
 /** File rotation stays at 5_000_000 bytes and one previous file. A disk error is remembered, not thrown. */
+internal fun flushExpertJournal(journal: DiagnosticJournal, root: java.nio.file.Path, nowMs: Long) {
+    journal.drain(nowMs).forEach { line -> appendExpertLine(journal, root, line) }
+}
+
 internal fun writeExpertJournal(journal: DiagnosticJournal, root: java.nio.file.Path, message: String, nowMs: Long) {
     val line = journal.incoming(message, nowMs) ?: return
+    appendExpertLine(journal, root, line)
+}
+
+private fun appendExpertLine(journal: DiagnosticJournal, root: java.nio.file.Path, line: String) {
     try {
         val file = root.resolve("expert.log")
         if (java.nio.file.Files.exists(file) && java.nio.file.Files.size(file) > 5_000_000) {

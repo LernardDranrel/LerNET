@@ -1644,6 +1644,7 @@ class DesktopController(
 
     fun disconnect() {
         sessionMarks.vpnStopped()
+        tunnel.noteUserStop()
         synchronized(connectLock) {
             desiredConnection = false
             connectGeneration.incrementAndGet()

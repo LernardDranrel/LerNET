@@ -21,10 +21,10 @@ import (
 // comes back Up before DHCP installs 0.0.0.0/0 (or defaults only exist on TUN),
 // still select an Up physical adapter so NetworkChangedToAt can rebind and
 // reinstall capture — matching WindowsPhysicalNetwork's PowerShell selection.
-func physicalNetworkSnapshot(ctx context.Context) (string, string, error) {
+func physicalNetworkSnapshot(ctx context.Context) (string, string, ifaceMark, error) {
 	adapters, err := winipcfg.GetAdaptersAddresses(windows.AF_UNSPEC, winipcfg.GAAFlagIncludeGateways)
 	if err != nil {
-		return "", "", err
+		return "", "", ifaceMark{}, err
 	}
 	physical := make(map[winipcfg.LUID]*winipcfg.IPAdapterAddresses)
 	var facts []string
@@ -50,7 +50,7 @@ func physicalNetworkSnapshot(ctx context.Context) (string, string, error) {
 	for _, family := range []winipcfg.AddressFamily{windows.AF_INET, windows.AF_INET6} {
 		routes, err := winipcfg.GetIPForwardTable2(family)
 		if err != nil {
-			return "", "", err
+			return "", "", ifaceMark{}, err
 		}
 		for _, route := range routes {
 			if route.DestinationPrefix.PrefixLength != 0 {
@@ -93,7 +93,7 @@ func physicalNetworkSnapshot(ctx context.Context) (string, string, error) {
 	}
 	routes, err := operationalCaptureRoutes(ctx)
 	if err != nil {
-		return "", "", err
+		return "", "", ifaceMark{}, err
 	}
 	for _, route := range routes {
 		if !route.owned {
@@ -102,11 +102,22 @@ func physicalNetworkSnapshot(ctx context.Context) (string, string, error) {
 	}
 	sort.Strings(facts)
 	digest := sha256.Sum256([]byte(strings.Join(facts, "\n")))
-	return selected, hex.EncodeToString(digest[:]), nil
+	var mark ifaceMark
+	if selected != "" {
+		for _, adapter := range physical {
+			if adapter.FriendlyName() != selected {
+				continue
+			}
+			mark = ifaceMark{Index: adapter.IfIndex, Kind: ifaceKind(uint32(adapter.IfType)), Up: adapter.OperStatus == winipcfg.IfOperStatusUp}
+			break
+		}
+	}
+	return selected, hex.EncodeToString(digest[:]), mark, nil
 }
 
 func (s *Session) startPlatformNetworkWatch() {
-	_, previous, _ := physicalNetworkSnapshot(s.ctx)
+	_, previous, previousMark, _ := physicalNetworkSnapshot(s.ctx)
+	var attempt int
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
@@ -116,7 +127,10 @@ func (s *Session) startPlatformNetworkWatch() {
 				return
 			case <-ticker.C:
 				// Failed reads/refreshes pause egress; they never destroy ingress.
-				name, fingerprint, err := physicalNetworkSnapshot(s.ctx)
+				name, fingerprint, mark, err := physicalNetworkSnapshot(s.ctx)
+				if err != nil {
+					mark = previousMark
+				}
 				s.stateMu.Lock()
 				ack, running, pending := s.ack, s.running, s.networkReason != ""
 				s.stateMu.Unlock()
@@ -124,36 +138,49 @@ func (s *Session) startPlatformNetworkWatch() {
 				if err == nil && name != "" && running && fingerprint == previous && !pending {
 					captureBroken = s.checkPlatformIngress(true) != nil
 				}
+				if err == nil {
+					if move := ifaceMove(previousMark, mark); move != "" {
+						emitDiag("net_watch", "edge", "outcome=changed", "code="+move, "state="+mark.token())
+					}
+					previousMark = mark
+				}
 				pauseReason, refresh, stop, nextFingerprint := decideNetworkWatchTick(
 					previous, name, fingerprint, err, running, pending, captureBroken,
 				)
-				kind := "state"
-				if pauseReason != "" || refresh || stop {
-					kind = "edge"
-				}
-				emitDiag("net_watch", kind, "code="+pauseReason, "state="+watchState(refresh, stop, captureBroken))
 				if stop {
+					emitDiag("net_watch", "edge", "outcome=stop", "code=not_running", "state="+mark.token())
 					return
 				}
 				if pauseReason != "" {
+					emitDiag("net_watch", "edge", "outcome=pause", "code="+pauseReason, "state="+mark.token())
 					s.mu.Lock()
 					s.setNetworkReasonLocked(pauseReason)
 					if pauseReason == "expert_underlay_unavailable" && fingerprint != previous {
 						s.mux.ResetNetwork()
+						emitDiag("net_epoch", "edge", "outcome=reset", "state="+itoa64(s.mux.networkEpoch.Load()), "code=underlay_lost")
 					}
 					s.mu.Unlock()
 					previous = nextFingerprint
 					continue
 				}
 				if !refresh {
+					emitDiag("net_watch", "state", "outcome=hold", "code=unchanged", "state="+mark.token())
 					continue
 				}
 				// Repair returning interfaces' new routes before testing capture.
 				// Do not require a prior TUN-identity probe: that gate left Expert
 				// waiting while Ethernet traffic already bypassed the TUN.
-				if s.NetworkChangedToAt(ack.InstanceID, ack.InterfaceID, ack.Revision, name) == nil {
-					previous = fingerprint
+				attempt++
+				why := refreshWhy(previous, fingerprint, pending, captureBroken)
+				emitDiag("net_watch", "edge", "outcome=refresh", "code="+why, "state="+mark.token(), "attempt="+itoa(attempt))
+				refreshErr := s.NetworkChangedToAt(ack.InstanceID, ack.InterfaceID, ack.Revision, name)
+				if refreshErr != nil {
+					emitDiag("net_watch", "edge", "outcome=fail", "code="+diagToken(ErrorCode(refreshErr)), "state="+mark.token(), "attempt="+itoa(attempt))
+					continue
 				}
+				previous = fingerprint
+				emitDiag("underlay_bound", "edge", "outcome=ok", "state="+mark.token(), "attempt="+itoa(attempt))
+				emitDiag("net_epoch", "edge", "outcome=reset", "state="+itoa64(s.mux.networkEpoch.Load()), "attempt="+itoa(attempt))
 			}
 		}
 	}()

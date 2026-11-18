@@ -5,9 +5,12 @@ import java.io.IOException
 /**
  * Admission of one automatic journal line.
  * In: a known level, a known event, and only fields the caller already has.
- * Out: the line to write, or null when a repeated state is held.
+ * Out: the line to write, or null when an identical repeat is held.
  * A stored level outside info/debug/error is warn, the same rule as the existing setting help.
  * An unknown event or an unknown wire key is refused: nothing from that line is written.
+ * An empty network reason is a pause clear, not a broken line.
+ * Identical automatic text and identical fallback/hold states are counted.
+ * The first line, a change, a result and an error stay. [drain] prints the held counts.
  */
 enum class DiagLevel { WARN, INFO, DEBUG }
 
@@ -86,10 +89,29 @@ class DiagnosticJournal {
     private val gate = Any()
     private val lastAt = LinkedHashMap<Key, Long>()
     private val held = LinkedHashMap<Group, Int>()
+    private val lastFact = LinkedHashMap<Group, Pair<DiagLevel, DiagFact>>()
+    private var textBody: String? = null
+    private var textAt = 0L
+    private var textSkip = 0
     private var drops = 0
 
     fun noteDrop() {
         synchronized(gate) { drops++ }
+    }
+
+    /** Held repeats, oldest group first. Cleared so a later line does not print them again. */
+    fun drain(nowMs: Long): List<String> = synchronized(gate) {
+        val lines = mutableListOf<String>()
+        if (textSkip > 0 && textBody != null) {
+            lines += renderText(textBody!!, textSkip, 0, nowMs)
+            textSkip = 0
+        }
+        for (group in held.keys.toList()) {
+            val skip = held.remove(group) ?: continue
+            val saved = lastFact[group] ?: continue
+            lines += render(saved.first, saved.second, skip, 0)
+        }
+        lines
     }
 
     /** Null means the line is a repeated state and was counted on its group. */
@@ -105,7 +127,9 @@ class DiagnosticJournal {
         val skip = held.remove(group) ?: 0
         val dropped = drops.also { drops = 0 }
         lastAt[key] = nowMs
+        lastFact[group] = level to fact
         trim(lastAt)
+        trim(lastFact)
         render(level, fact, skip, dropped)
     }
 
@@ -116,7 +140,21 @@ class DiagnosticJournal {
             val fact = parseDiag(trimmed) ?: return renderRejected(nowMs)
             return admit(DiagnosticLevels.current, fact.copy(rcvMs = fact.rcvMs ?: nowMs), nowMs)
         }
-        return text(DiagnosticLevels.current, trimmed, keepAddress = false, nowMs = nowMs)
+        return automaticText(DiagnosticLevels.current, trimmed, nowMs)
+    }
+
+    /** Identical automatic lines inside the window are counted. Explicit [text] is not. */
+    private fun automaticText(level: DiagLevel, raw: String, nowMs: Long): String? = synchronized(gate) {
+        val body = privacy(level, raw, keepAddress = false)
+        if (body == textBody && nowMs - textAt < WINDOW_MS) {
+            textSkip++
+            return null
+        }
+        val skip = textSkip.also { textSkip = 0 }
+        val dropped = drops.also { drops = 0 }
+        textBody = body
+        textAt = nowMs
+        renderText(body, skip, dropped, nowMs)
     }
 
     fun text(level: DiagLevel, raw: String, keepAddress: Boolean, nowMs: Long): String = synchronized(gate) {
@@ -186,7 +224,14 @@ private fun parseNetwork(line: String): DiagFact? {
     if (!line.startsWith("LERNET_NETWORK ")) return null
     val reason = line.substringAfter("reason=", missingDelimiterValue = "").substringBefore(' ')
     if (!line.contains("reason=") || !tokenOk(reason, allowEmpty = true)) return null
-    return DiagFact(DiagEvent.NET_REASON, DiagKind.EDGE, state = reason.ifEmpty { null })
+    val cleared = reason.isEmpty() || reason == "pause_cleared"
+    return DiagFact(
+        DiagEvent.NET_REASON,
+        DiagKind.EDGE,
+        outcome = if (cleared) "clear" else null,
+        code = if (cleared) "pause_cleared" else null,
+        state = if (cleared) null else reason,
+    )
 }
 
 private fun parseDiag(line: String): DiagFact? {
@@ -259,6 +304,12 @@ private fun render(level: DiagLevel, fact: DiagFact, skip: Int, dropped: Int): S
 private fun StringBuilder.field(name: String, value: String?) {
     if (value.isNullOrEmpty()) return
     append(" $name=${privacy(DiagLevel.DEBUG, value, keepAddress = true)}")
+}
+
+private fun renderText(body: String, skip: Int, dropped: Int, nowMs: Long): String {
+    val held = if (skip > 0) " skip=$skip" else ""
+    val drop = if (dropped > 0) " dropped=$dropped" else ""
+    return "rcv=$nowMs$held$drop $body"
 }
 
 private fun renderRejected(nowMs: Long): String = "rcv=$nowMs event=diag_rejected code=bad_fact"

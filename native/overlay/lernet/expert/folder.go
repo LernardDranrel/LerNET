@@ -486,14 +486,18 @@ func (f *folderGate) checkHealth() {
 	}
 	go func() {
 		gate, err := f.registry.gate(tag)
+		started := time.Now()
 		result := ProbeResult{Reason: "exit_unavailable"}
 		if err == nil {
 			result = probeGate(f.ctx, gate, f.options.ProbeURL, budget)
 		}
+		measured := time.Since(started).Milliseconds()
+		host := probeHost(f.options.ProbeURL)
 		f.mu.Lock()
 		if f.selected != tag || f.networkEpoch != epoch {
 			f.healthChecking = false
 			f.mu.Unlock()
+			noteHealth("edge", "stale", "", "https", "", host, measured)
 			return
 		}
 		if result.HTTPSLatencyMs != nil {
@@ -502,21 +506,27 @@ func (f *folderGate) checkHealth() {
 			}
 			f.healthChecking = false
 			f.mu.Unlock()
+			noteHealth("state", "ok", "", "https", "", host, *result.HTTPSLatencyMs)
 			return
 		}
 		if result.Reason == "exit_sleeping" || result.Reason == "operation_cancelled" || result.Reason == "exit_transport_changed" {
+			reason := result.Reason
 			f.healthChecking = false
 			f.mu.Unlock()
+			noteHealth("state", "skip", reason, "https", "", host, measured)
 			return
 		}
 		if gate != nil && !gate.matchesGeneration(result.transportGeneration) {
 			f.healthChecking = false
 			f.mu.Unlock()
+			noteHealth("edge", "stale", "", "https", "", host, measured)
 			return
 		}
 		if !probeNeedsRecovery(result) {
+			reason := result.Reason
 			f.healthChecking = false
 			f.mu.Unlock()
+			noteHealth("state", "skip", reason, "https", "", host, measured)
 			return
 		}
 		threshold := f.options.FailedChecksBeforeRecovery
@@ -524,9 +534,11 @@ func (f *folderGate) checkHealth() {
 			threshold = 2
 		}
 		f.failures++
+		failures := f.failures
 		if f.failures < threshold {
 			f.healthChecking = false
 			f.mu.Unlock()
+			noteHealth("state", "below", result.Reason, "https", "f"+itoa(failures), host, measured)
 			return
 		}
 		sample := f.health[tag]
@@ -535,9 +547,25 @@ func (f *folderGate) checkHealth() {
 		sample.failedUntil = time.Now().Add(time.Duration(f.options.CooldownMs) * time.Millisecond)
 		f.health[tag] = sample
 		f.mu.Unlock()
+		state := "f" + itoa(failures)
+		noteHealth("edge", "attempt", result.Reason, "https", state, host, measured)
 		// Restart the dead pool and prove HTTPS again before reporting healthy.
-		if gate != nil && gate.recoverAt(f.ctx, result.transportGeneration) == nil {
+		recovered := false
+		if gate == nil {
+			noteHealth("edge", "fail", "exit_unavailable", "recover", state, "", 0)
+		} else if err := gate.recoverAt(f.ctx, result.transportGeneration); err != nil {
+			noteRecovery(err, state)
+		} else {
+			noteRecovery(nil, state)
+			recovered = true
+		}
+		if recovered {
 			result = probeGate(f.ctx, gate, f.options.ProbeURL, budget)
+			if result.HTTPSLatencyMs != nil {
+				noteHealth("state", "ok", "", "https", state, host, *result.HTTPSLatencyMs)
+			} else {
+				noteHealth("edge", "fail", result.Reason, "https", state, host, 0)
+			}
 		}
 		f.mu.Lock()
 		f.healthChecking = false

@@ -35,6 +35,7 @@ object DefaultNetworkMonitor {
     private val underlay = AtomicReference<Network?>(null)
     private val tunName = AtomicReference<String?>(null)
     private val fingerprint = AtomicReference<String?>(null)
+    private val underlayToken = AtomicReference("none")
     private val mutableChanges = MutableStateFlow(0L)
 
     /** Emits only actual underlay changes; repeated capabilities callbacks do not invalidate probes. */
@@ -68,7 +69,8 @@ object DefaultNetworkMonitor {
 
         override fun onLost(network: Network) = synchronized(this@DefaultNetworkMonitor) {
             if (callback === this && facts.lost(network)) {
-                underlayNote("lost", DiagKind.EDGE)
+                val token = underlayToken.getAndSet("none")
+                underlayNote("lost", DiagKind.EDGE, token)
                 clearUnderlay()
             }
         }
@@ -213,6 +215,9 @@ object DefaultNetworkMonitor {
         }
         if (fingerprint.getAndSet(nextFingerprint) != nextFingerprint) {
             mutableChanges.update { it + 1 }
+            val token = "${transportToken(caps)}:$index:up"
+            underlayToken.set(token)
+            underlayNote("bound", DiagKind.EDGE, token)
             val privateDns = if (Build.VERSION.SDK_INT >= 28 && link.isPrivateDnsActive == true) {
                 link.privateDnsServerName ?: "системный автоматический режим"
             } else {
@@ -226,7 +231,14 @@ object DefaultNetworkMonitor {
             .onFailure { LerNetLog.w(TAG, "native underlay delivery failed", it) }
     }
 
-    private fun underlayNote(code: String, kind: DiagKind) {
-        LerNetLog.i(TAG, DiagnosticJournal.wire(DiagEvent.UNDERLAY_CALLBACK, kind, "code" to code))
+    private fun underlayNote(code: String, kind: DiagKind, state: String? = null) {
+        LerNetLog.i(TAG, DiagnosticJournal.wire(DiagEvent.UNDERLAY_CALLBACK, kind, "code" to code, "state" to state))
     }
+}
+
+private fun transportToken(caps: NetworkCapabilities): String = when {
+    caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+    caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
+    caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
+    else -> "other"
 }

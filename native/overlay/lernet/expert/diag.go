@@ -3,6 +3,7 @@ package expert
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/sagernet/sing-box/adapter"
 )
@@ -43,23 +44,6 @@ func diagToken(value string) string {
 	return value
 }
 
-func watchState(refresh, stop, captureBroken bool) string {
-	state := ""
-	if refresh {
-		state += "refresh"
-	}
-	if stop {
-		state += "stop"
-	}
-	if captureBroken {
-		state += "capture"
-	}
-	if state == "" {
-		return "idle"
-	}
-	return state
-}
-
 func itoa(value int) string {
 	return itoa64(int64(value))
 }
@@ -86,6 +70,21 @@ func itoa64(value int64) string {
 	return string(digits[i:])
 }
 
+var (
+	fallbackMu          sync.Mutex
+	fallbackLastOutcome string
+	fallbackLastCode    string
+)
+
+// fallbackKind is edge on the first decision and on every change.
+// The same outcome and code again is state, so the journal can count copies.
+func fallbackKind(previousOutcome, previousCode, outcome, code string) string {
+	if previousOutcome == outcome && previousCode == code && previousOutcome != "" {
+		return "state"
+	}
+	return "edge"
+}
+
 func emitFallback(protected bool, out adapter.Outbound) {
 	outcome := "block"
 	if out != nil {
@@ -95,5 +94,9 @@ func emitFallback(protected bool, out adapter.Outbound) {
 	if protected {
 		code = "protected"
 	}
-	emitDiag("fallback", "edge", "outcome="+outcome, "code="+code)
+	fallbackMu.Lock()
+	kind := fallbackKind(fallbackLastOutcome, fallbackLastCode, outcome, code)
+	fallbackLastOutcome, fallbackLastCode = outcome, code
+	fallbackMu.Unlock()
+	emitDiag("fallback", kind, "outcome="+outcome, "code="+code)
 }

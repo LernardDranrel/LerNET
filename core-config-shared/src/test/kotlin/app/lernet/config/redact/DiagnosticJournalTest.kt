@@ -100,10 +100,13 @@ class DiagnosticJournalTest {
         assertThat(network).contains("rcv=40")
         val empty = journal.incoming("LERNET_NETWORK reason= retained_tun=true", 41)!!
         assertThat(empty).contains("event=net_reason")
+        assertThat(empty).contains("outcome=clear")
+        assertThat(empty).contains("code=pause_cleared")
         assertThat(empty).doesNotContain("state=")
-        val health = journal.incoming("LERNET_DIAG ev=health_gate kind=edge outcome=recover code=tunnel_health_failed", 42)!!
+        val health = journal.incoming("LERNET_DIAG ev=health_gate kind=edge outcome=attempt code=https_probe_timeout stage=https state=f2", 42)!!
         assertThat(health).contains("event=health_gate")
-        assertThat(health).contains("outcome=recover")
+        assertThat(health).contains("outcome=attempt")
+        assertThat(health).doesNotContain("outcome=ok")
         val rejected = journal.incoming("LERNET_DIAG ev=health_gate kind=edge payload=private-body", 43)!!
         assertThat(rejected).contains("event=diag_rejected")
         assertThat(rejected).doesNotContain("private-body")
@@ -188,5 +191,98 @@ class DiagnosticJournalTest {
             journal.admit(DiagLevel.WARN, DiagFact(DiagEvent.NET_WATCH, DiagKind.EDGE, state = "n$index"), index.toLong())
         }
         assertThat(journal.admit(DiagLevel.WARN, DiagFact(DiagEvent.NET_REASON, DiagKind.EDGE, state = "up"), 400)).contains("event=net_reason")
+    }
+
+    @Test fun pauseClearIsReadableAndIdenticalAutomaticLinesCollapse() {
+        val cleared = journal.incoming("LERNET_NETWORK reason=pause_cleared retained_tun=true", 1)!!
+        assertThat(cleared).contains("outcome=clear")
+        assertThat(cleared).contains("code=pause_cleared")
+        val first = journal.incoming("outbound packet tun-in", 2)!!
+        assertThat(first).contains("tun-in")
+        assertThat(journal.incoming("outbound packet tun-in", 3)).isNull()
+        assertThat(journal.incoming("outbound packet tun-in", 4)).isNull()
+        val changed = journal.incoming("dns no clean servers", 5)!!
+        assertThat(changed).contains("skip=2")
+        assertThat(changed).contains("dns no clean servers")
+    }
+
+    @Test fun ethernetReturnChainReadsInOrderWithoutCallingAFailureARecovery() {
+        val wire = listOf(
+            "LERNET_DIAG ev=net_watch kind=edge outcome=changed code=lost state=none",
+            "LERNET_DIAG ev=net_watch kind=edge outcome=pause code=expert_underlay_unavailable state=none",
+            "LERNET_DIAG ev=net_watch kind=edge outcome=changed code=appear state=ethernet:14:up",
+            "LERNET_DIAG ev=net_watch kind=edge outcome=refresh code=fingerprint state=ethernet:14:up attempt=3",
+            "LERNET_DIAG ev=underlay_bound kind=edge outcome=ok state=ethernet:14:up attempt=3",
+            "LERNET_DIAG ev=net_epoch kind=edge outcome=reset state=21 attempt=3",
+            "LERNET_NETWORK reason=pause_cleared retained_tun=true",
+            "LERNET_DIAG ev=net_watch kind=state outcome=hold code=unchanged state=ethernet:14:up",
+            "LERNET_DIAG ev=health_gate kind=state outcome=ok stage=https mono=40 domain=probe.example",
+            "LERNET_DIAG ev=health_gate kind=edge outcome=attempt code=https_probe_timeout stage=https state=f2 mono=9000 domain=probe.example",
+            "LERNET_DIAG ev=health_gate kind=edge outcome=fail code=operation_timeout stage=recover state=f2",
+            "LERNET_DIAG ev=process_exit kind=edge outcome=user_stop stage=ui",
+            "LERNET_DIAG ev=process_exit kind=edge outcome=cleanup code=ok stage=ui",
+        )
+        val previous = DiagnosticLevels.current
+        DiagnosticLevels.apply("warn")
+        val lines = try {
+            wire.mapIndexed { index, line -> journal.incoming(line, 1_000L + index)!! }
+        } finally {
+            DiagnosticLevels.current = previous
+        }
+        assertThat(lines[0]).contains("code=lost")
+        assertThat(lines[1]).contains("outcome=pause")
+        assertThat(lines[2]).contains("code=appear")
+        assertThat(lines[2]).contains("state=ethernet:14:up")
+        assertThat(lines[3]).contains("outcome=refresh")
+        assertThat(lines[3]).contains("attempt=3")
+        assertThat(lines[4]).contains("event=underlay_bound")
+        assertThat(lines[4]).contains("attempt=3")
+        assertThat(lines[5]).contains("outcome=reset")
+        assertThat(lines[5]).contains("state=21")
+        assertThat(lines[6]).contains("outcome=clear")
+        assertThat(lines[7]).contains("outcome=hold")
+        assertThat(lines[8]).doesNotContain("probe.example")
+        DiagnosticLevels.apply("info")
+        val infoHealth = try {
+            DiagnosticJournal().incoming(wire[8], 2)!!
+        } finally {
+            DiagnosticLevels.apply("warn")
+        }
+        assertThat(infoHealth).contains("domain=probe.example")
+        assertThat(lines[8]).contains("stage=https")
+        assertThat(lines[8]).contains("mono=40")
+        assertThat(lines[9]).contains("outcome=attempt")
+        assertThat(lines[9]).contains("code=https_probe_timeout")
+        assertThat(lines[9]).doesNotContain("outcome=ok")
+        assertThat(lines[10]).contains("outcome=fail")
+        assertThat(lines[10]).contains("stage=recover")
+        assertThat(lines.map { it.substringAfter("event=").substringBefore(' ') }).containsExactly(
+            "net_watch", "net_watch", "net_watch", "net_watch", "underlay_bound", "net_epoch",
+            "net_reason", "net_watch", "health_gate", "health_gate", "health_gate", "process_exit", "process_exit",
+        ).inOrder()
+        assertThat(lines.indexOfFirst { it.contains("outcome=user_stop") })
+            .isLessThan(lines.indexOfFirst { it.contains("outcome=cleanup") })
+    }
+
+    @Test fun repeatedFallbackIsCountedUntilTheDecisionChanges() {
+        val block = "LERNET_DIAG ev=fallback kind=state outcome=block code=protected"
+        assertThat(journal.incoming(block, 0)).isNotNull()
+        assertThat(journal.incoming(block, 1_000)).isNull()
+        assertThat(journal.incoming(block, 2_000)).isNull()
+        val changed = journal.incoming("LERNET_DIAG ev=fallback kind=edge outcome=direct code=open", 3_000)!!
+        assertThat(changed).contains("skip=2")
+        assertThat(changed).contains("outcome=direct")
+    }
+
+    @Test fun drainPrintsHeldRepeatsBeforeTheStopLine() {
+        journal.incoming("outbound packet tun-in", 0)
+        journal.incoming("outbound packet tun-in", 1)
+        val held = journal.drain(2)
+        assertThat(held).hasSize(1)
+        assertThat(held.single()).contains("skip=1")
+        assertThat(held.single()).contains("tun-in")
+        val stop = journal.incoming("LERNET_DIAG ev=process_exit kind=edge outcome=user_stop stage=ui", 3)!!
+        assertThat(stop).contains("outcome=user_stop")
+        assertThat(stop).doesNotContain("skip=")
     }
 }

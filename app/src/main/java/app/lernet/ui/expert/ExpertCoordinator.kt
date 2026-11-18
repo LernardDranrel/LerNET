@@ -5,6 +5,9 @@ import android.net.Uri
 import android.os.SystemClock
 import app.lernet.R
 import app.lernet.config.policy.ExternalExitRequest
+import app.lernet.config.redact.DiagEvent
+import app.lernet.config.redact.DiagKind
+import app.lernet.config.redact.DiagnosticJournal
 import app.lernet.config.policy.PolicyInventoryChange
 import app.lernet.config.policy.PolicyMigration
 import app.lernet.config.policy.PolicyWorkspace
@@ -250,7 +253,21 @@ class ExpertCoordinator @Inject constructor(
         scope.launch(Dispatchers.IO) {
             try {
                 if (intent == ExpertIntent.Stop) {
-                    runtime?.handle(intent)
+                    LerNetLog.i(
+                        "LerNET.Expert",
+                        DiagnosticJournal.wire(DiagEvent.PROCESS_EXIT, DiagKind.EDGE, "outcome" to "user_stop", "stage" to "ui"),
+                    )
+                    val stopped = runCatching { runtime?.handle(intent) }
+                    LerNetLog.i(
+                        "LerNET.Expert",
+                        DiagnosticJournal.wire(
+                            DiagEvent.PROCESS_EXIT, DiagKind.EDGE,
+                            "outcome" to "cleanup",
+                            "code" to if (stopped.isSuccess) "ok" else "fail",
+                            "stage" to "ui",
+                        ),
+                    )
+                    stopped.getOrThrow()
                     return@launch
                 }
                 mutex.withLock {
