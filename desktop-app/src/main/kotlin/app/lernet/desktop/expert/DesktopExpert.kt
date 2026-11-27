@@ -22,7 +22,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -54,6 +53,7 @@ import app.lernet.ui.controls.ExpertTemplatePicker
 import app.lernet.ui.controls.TemplateAction
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 
 internal enum class ExpertPage(val title: String) {
     OVERVIEW("Пульт"),
@@ -75,10 +75,9 @@ fun DesktopExpert(
     state: ExpertUiState,
     onIntent: (ExpertIntent) -> Unit,
     modifier: Modifier = Modifier,
-    frameAnimateIn: Boolean = true,
     configLibrary: (@Composable (Modifier) -> Unit)? = null,
     appSettings: (@Composable (Modifier) -> Unit)? = null,
-    /** VPN|Эксперт strip — lives only in the right column so the sidebar reaches the window top. */
+    /** Global mode switch and tunnel status provided by the desktop window. */
     topChrome: @Composable () -> Unit = {},
     onCopyProfile: ((String) -> Unit)? = null,
     onRenameFolder: ((String, String) -> Unit)? = null,
@@ -114,7 +113,7 @@ fun DesktopExpert(
         },
     ) {
         // m3 / N1, N6: sections in the left column; flush to the window top (same nesting as VPN DesktopScreen).
-        DesktopWorkspaceSidebar({ onIntent(ExpertIntent.OpenNetworkObservation) }) {
+        if (page != ExpertPage.ROUTES) DesktopWorkspaceSidebar({ onIntent(ExpertIntent.OpenNetworkObservation) }, expertBrand = true) {
             Column(Modifier.semantics { contentDescription = "Разделы Эксперта" }) {
                 ExpertNavPages.forEach { item ->
                     WorkspaceNavigationItem(item.title, page == item, { openPage(item) }, badge = navBadge(item, state))
@@ -131,105 +130,107 @@ fun DesktopExpert(
             }
         }
         Column(Modifier.weight(1f).fillMaxHeight()) {
-            topChrome()
-            app.lernet.ui.controls.ExpertFramedBox(
-                app.lernet.ui.controls.ExpertFrameSpec.Windows,
-                Modifier.weight(1f).fillMaxWidth(),
-                lit = if (state.phase == ExpertPhase.RUNNING) 1f else 0.35f,
-                animateIn = frameAnimateIn && !state.reducedMotion,
-            ) {
-        Column(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (state.workspaceReady) {
-                    val choices = remember(state.templateChoices) { state.templateChoices.map { it.id to it.name } }
-                    Box(Modifier.weight(1f)) {
-                        ExpertTemplatePicker(
-                            choices, state.selectedTemplateId,
-                            enabled = !state.busy && state.phase !in setOf(ExpertPhase.STARTING, ExpertPhase.STOPPING),
-                            onChange = onTemplateChange, modifier = Modifier.widthIn(max = 350.dp), protectedId = state.appliedTemplateId,
-                        )
-                    }
-                } else Spacer(Modifier.weight(1f))
-                ExpertWorkspaceMenu(state, onIntent) { confirmation = ExpertIntent.RestoreAppliedToDraft }
-            }
-            if (state.workspaceReady && (state.hasDraftChanges ||
-                    (state.phase == ExpertPhase.RUNNING && state.appliedRevision != null && state.hasUnappliedChanges))) {
-                DraftActions(state, validation, onIntent) { confirmation = it }
-            }
-            if (page == ExpertPage.APP_SETTINGS) {
-                Text("Общие настройки VPN и Эксперта", color = ExpertColors.muted)
-            }
-            // One banner only: while the workspace gate is up, workspaceError owns the message
-            // (bbda1d1 wrote the same failure into both error and workspaceError → dual banners + empty gap).
-            if (state.workspaceReady) {
-                state.error?.let { ExpertMessage("Операция не завершена", it, error = true) }
-            }
-            state.notice?.let { ExpertMessage("Состояние сети", it) }
-            if (state.busy) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                    Text("Ждём ответа ядра…", color = ExpertColors.muted)
-                }
-            }
-            if (!state.workspaceReady) {
-                // Top-aligned: Center + weight(1f) left a huge empty hole above the only banner (live screenshot).
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
-                    Column(
-                        Modifier.fillMaxWidth().padding(top = 8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        if (state.workspaceError == null) {
-                            CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
-                            Text("Читаем настройки и конфиги…", color = ExpertColors.muted)
-                        } else {
-                            ExpertMessage("Рабочая область не загрузилась", state.workspaceError, error = true)
-                            OutlinedButton(onClick = { onIntent(ExpertIntent.Refresh) }) { Text("Повторить") }
+            androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val smallHeader = maxWidth < 735.dp
+                Row(Modifier.fillMaxWidth().background(androidx.compose.ui.graphics.Color(0xFF0D1420)).padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (page == ExpertPage.ROUTES) {
+                        ExpertSectionMenu(page, openPage, configLibrary != null, appSettings != null, smallHeader) {
+                            onIntent(ExpertIntent.OpenNetworkObservation)
                         }
                     }
-                }
-            } else pageStates.SaveableStateProvider("${state.selectedTemplateId}/${page.name}") {
-                when (page) {
-                    ExpertPage.OVERVIEW -> ExpertLiveOverview(
-                        state, onIntent, Modifier.weight(1f), { confirmation = it }, openPage = openPage,
-                        editRule = { id -> requestedDeviceRule = id; openPage(ExpertPage.ROUTES) },
-                    )
-                    ExpertPage.ROUTES -> ExpertRoutes(state, onIntent, Modifier.weight(1f),
-                        requestedDeviceRule = requestedDeviceRule, onRuleOpened = { requestedDeviceRule = null })
-                    ExpertPage.PREVIEW -> ExpertRoutePreview(
-                        state, Modifier.weight(1f), onIntent, { openPage(ExpertPage.ROUTES) }, recordedFlow = recordedFlow,
-                        showRecordedPath = recordedPathOnly, requestToken = previewRequest,
-                    )
-                    ExpertPage.EXITS -> ExpertExits(
-                        state, onIntent, Modifier.weight(1f),
-                        openRoutes = { openPage(ExpertPage.ROUTES) },
-                        onCopyProfile = onCopyProfile,
-                        onRenameFolder = onRenameFolder,
-                        onDeleteFolder = onDeleteFolder,
-                        onRefreshSubscription = onRefreshSubscription,
-                    )
-                    ExpertPage.EVENTS -> ExpertEvents(
-                        state, onIntent, Modifier.weight(1f),
-                        simulate = {
-                            recordedFlow = it
-                            recordedPathOnly = false
-                            previewRequest++
-                            openPage(ExpertPage.PREVIEW)
-                        },
-                        showPath = {
-                            recordedFlow = it
-                            recordedPathOnly = true
-                            previewRequest++
-                            openPage(ExpertPage.PREVIEW)
-                        },
-                    )
-                    ExpertPage.PROTECTION -> ExpertProtectionPage(state, onIntent, Modifier.weight(1f)) { confirmation = it }
-                    ExpertPage.LIBRARY -> configLibrary?.invoke(Modifier.weight(1f).fillMaxWidth())
-                    ExpertPage.APP_SETTINGS -> appSettings?.invoke(Modifier.weight(1f).fillMaxWidth())
+                    Box(Modifier.weight(1f).clipToBounds()) { topChrome() }
+                    if (state.workspaceReady) {
+                        val choices = remember(state.templateChoices) { state.templateChoices.map { it.id to it.name } }
+                        ExpertTemplatePicker(choices, state.selectedTemplateId, onChange = onTemplateChange, compact = true,
+                            enabled = !state.busy && state.phase !in setOf(ExpertPhase.STARTING, ExpertPhase.STOPPING),
+                            modifier = Modifier.widthIn(max = if (smallHeader) 130.dp else 165.dp), protectedId = state.appliedTemplateId)
+                    }
+                    ExpertWorkspaceMenu(state, onIntent, smallHeader) { confirmation = ExpertIntent.RestoreAppliedToDraft }
                 }
             }
-        }
-        }
+            androidx.compose.material3.HorizontalDivider(color = ExpertColors.border)
+            Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (page != ExpertPage.ROUTES && state.workspaceReady) {
+                    Text(page.title, color = ExpertColors.text, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
+                }
+                if (state.workspaceReady && (state.hasDraftChanges ||
+                        (state.phase == ExpertPhase.RUNNING && state.appliedRevision != null && state.hasUnappliedChanges))) {
+                    DraftActions(state, validation, onIntent) { confirmation = it }
+                }
+                if (page == ExpertPage.APP_SETTINGS) {
+                    Text("Общие настройки VPN и Эксперта", color = ExpertColors.muted)
+                }
+                // One banner only: while the workspace gate is up, workspaceError owns the message
+                // (bbda1d1 wrote the same failure into both error and workspaceError → dual banners + empty gap).
+                if (state.workspaceReady) {
+                    state.error?.let { ExpertMessage("Операция не завершена", it, error = true) }
+                }
+                state.notice?.let { ExpertMessage("Состояние сети", it) }
+                if (state.busy) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                        Text("Ждём ответа ядра…", color = ExpertColors.muted)
+                    }
+                }
+                if (!state.workspaceReady) {
+                    // Top-aligned: Center + weight(1f) left a huge empty hole above the only banner (live screenshot).
+                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                        Column(
+                            Modifier.fillMaxWidth().padding(top = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            if (state.workspaceError == null) {
+                                CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
+                                Text("Читаем настройки и конфиги…", color = ExpertColors.muted)
+                            } else {
+                                ExpertMessage("Рабочая область не загрузилась", state.workspaceError, error = true)
+                                OutlinedButton(onClick = { onIntent(ExpertIntent.Refresh) }) { Text("Повторить") }
+                            }
+                        }
+                    }
+                } else pageStates.SaveableStateProvider("${state.selectedTemplateId}/${page.name}") {
+                    when (page) {
+                        ExpertPage.OVERVIEW -> ExpertLiveOverview(
+                            state, onIntent, Modifier.weight(1f), { confirmation = it }, openPage = openPage,
+                            editRule = { id -> requestedDeviceRule = id; openPage(ExpertPage.ROUTES) },
+                        )
+                        ExpertPage.ROUTES -> ExpertRoutes(state, onIntent, Modifier.weight(1f),
+                            requestedDeviceRule = requestedDeviceRule, onRuleOpened = { requestedDeviceRule = null })
+                        ExpertPage.PREVIEW -> ExpertRoutePreview(
+                            state, Modifier.weight(1f), onIntent, { openPage(ExpertPage.ROUTES) }, recordedFlow = recordedFlow,
+                            showRecordedPath = recordedPathOnly, requestToken = previewRequest,
+                        )
+                        ExpertPage.EXITS -> ExpertExits(
+                            state, onIntent, Modifier.weight(1f),
+                            openRoutes = { openPage(ExpertPage.ROUTES) },
+                            onCopyProfile = onCopyProfile,
+                            onRenameFolder = onRenameFolder,
+                            onDeleteFolder = onDeleteFolder,
+                            onRefreshSubscription = onRefreshSubscription,
+                        )
+                        ExpertPage.EVENTS -> ExpertEvents(
+                            state, onIntent, Modifier.weight(1f),
+                            simulate = {
+                                recordedFlow = it
+                                recordedPathOnly = false
+                                previewRequest++
+                                openPage(ExpertPage.PREVIEW)
+                            },
+                            showPath = {
+                                recordedFlow = it
+                                recordedPathOnly = true
+                                previewRequest++
+                                openPage(ExpertPage.PREVIEW)
+                            },
+                        )
+                        ExpertPage.PROTECTION -> ExpertProtectionPage(state, onIntent, Modifier.weight(1f)) { confirmation = it }
+                        ExpertPage.LIBRARY -> configLibrary?.invoke(Modifier.weight(1f).fillMaxWidth())
+                        ExpertPage.APP_SETTINGS -> appSettings?.invoke(Modifier.weight(1f).fillMaxWidth())
+                    }
+                }
+            }
         }
     }
     when (confirmation) {
@@ -293,11 +294,37 @@ fun DesktopExpert(
 }
 
 @Composable
-private fun ExpertWorkspaceMenu(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, restoreDraft: () -> Unit) {
+private fun ExpertSectionMenu(page: ExpertPage, go: (ExpertPage) -> Unit, library: Boolean, settings: Boolean, compact: Boolean, network: () -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Row(Modifier.clip(RoundedCornerShape(7.dp)).clickable(role = androidx.compose.ui.semantics.Role.Button) { expanded = true }
+            .semantics { contentDescription = "Разделы Эксперта" }.padding(5.dp),
+            horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(28.dp).background(ExpertColors.blue, RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) {
+                Text("L", color = ExpertColors.background, fontSize = 18.sp, fontWeight = FontWeight.Black)
+            }
+            if (!compact) Text("LerNET", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = ExpertColors.text)
+            Text("Разделы ▾", fontSize = 12.sp, color = ExpertColors.muted)
+        }
+        DropdownMenu(expanded, { expanded = false }) {
+            val pages = ExpertNavPages + ExpertPage.PROTECTION + listOfNotNull(ExpertPage.LIBRARY.takeIf { library },
+                ExpertPage.APP_SETTINGS.takeIf { settings })
+            pages.forEach { item ->
+                DropdownMenuItem(text = { Text(item.title) }, trailingIcon = { if (page == item) Text("✓") },
+                    onClick = { expanded = false; go(item) })
+            }
+            androidx.compose.material3.HorizontalDivider()
+            DropdownMenuItem(text = { Text("Анализ сети") }, onClick = { expanded = false; network() })
+        }
+    }
+}
+
+@Composable
+private fun ExpertWorkspaceMenu(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, compact: Boolean, restoreDraft: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { menu = true }) {
-            Text("Инструменты ▾")
+            if (compact) Text("⋯", Modifier.semantics { contentDescription = "Инструменты" }) else Text("Инструменты ▾")
         }
         DropdownMenu(menu, onDismissRequest = { menu = false }) {
             if (state.appliedRevision != null && (state.hasDraftChanges || state.hasUnappliedChanges)) {

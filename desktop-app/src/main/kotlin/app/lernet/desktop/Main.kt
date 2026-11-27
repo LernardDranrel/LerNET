@@ -3,7 +3,9 @@
 package app.lernet.desktop
 
 import app.lernet.ui.controls.ProfileSelector
-import app.lernet.ui.controls.ConnectionHeader
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.graphics.Brush
 import app.lernet.engine.text.HomeWords
 import app.lernet.engine.text.ImportWords
 import app.lernet.engine.text.JournalWords
@@ -293,7 +295,7 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
                             if (showExpert && expert != null && expertUi != null) {
                                 val splash = rememberDesktopExpertSplash()
                                 Box(Modifier.fillMaxSize()) {
-                                DesktopExpert(expertUi, onTemplateChange = expert::changeTemplate, frameAnimateIn = !splash.firstEntry, topChrome = {
+                                DesktopExpert(expertUi, onTemplateChange = expert::changeTemplate, topChrome = {
                                     DesktopModeTabs(true, { expertTab = it },
                                         status = workspaceStatus(expertUi, tunnel, ui),
                                         reducedMotion = expertUi?.reducedMotion == true,
@@ -1077,16 +1079,23 @@ internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, changingCon
     var attentionOpen by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
         Column(Modifier.widthIn(max = 680.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            ConnectionHeader(
-                status = statusTitle,
-                tone = statusTone,
-                active = active,
-                actionLabel = if (holding || (failed && !active)) null else if (active) "Отключить" else "Подключить",
-                enabled = true,
-                onToggle = { if (active) controller.disconnect() else controller.connect() },
-                modifier = Modifier.testTag("home_center"),
-                detail = detail?.takeIf { it.isNotBlank() && it != statusTitle && !failed },
-            )
+            // Audit H1/H2 (mockup 1): the button and the state without a frame or a title.
+            Column(Modifier.fillMaxWidth().testTag("home_center"), horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Orange while LerNET holds the tunnel, also when replies are jammed or every server is silent (as the phone).
+                ConnectionPower(active = active, holding = holding || linkHold != null,
+                    connected = tunnel.status == TunnelStatus.RUNNING && !changingConnection, failed = failed, onClick = {
+                        if (active) controller.disconnect() else controller.connect()
+                    })
+                Text(statusTitle, style = MaterialTheme.typography.titleLarge, color = statusTone, fontWeight = FontWeight.SemiBold,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.testTag("home_state"))
+                // Holding: «Выключить VPN» is in the report; failed: the error card has «Повторить» (as the phone).
+                if (!holding && !(failed && !active)) Text(if (active) HomeWords.TAP_DISCONNECT else HomeWords.TAP_CONNECT, color = muted, fontSize = 13.sp)
+                detail?.takeIf { it.isNotBlank() && it != statusTitle && !failed }?.let {
+                    Text(it, color = muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                }
+            }
             HomeProfileLine(saved, selected, group, proxyMode, confirmedProfileSelection(saved, tunnel, controller::select),
                 onRules = { onOpenRules(routeOwner(selected)) })
             if (attention.isNotEmpty()) {
@@ -1480,6 +1489,48 @@ private fun SegmentedChoice(choices: List<Pair<String, String>>, selected: Strin
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ConnectionPower(active: Boolean, holding: Boolean = false, connected: Boolean = active, failed: Boolean = false, onClick: () -> Unit) {
+    // Green only once connected; connecting stays blue and a failure is red, like on the phone.
+    val accent by animateColorAsState(if (holding) hold else if (connected) green else if (failed && !active) desktopColors.error else blue, tween(250), label = "power-color")
+    val interactions = remember { MutableInteractionSource() }
+    val hovered by interactions.collectIsHoveredAsState()
+    val pressed by interactions.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) .90f else if (hovered) .955f else 1f, tween(160), label = "power-depth")
+    val elevation by animateDpAsState(if (pressed) 0.dp else if (hovered) 2.dp else 9.dp, tween(160), label = "power-shadow")
+    val glow by animateFloatAsState(if (pressed) .12f else if (hovered) .20f else .30f, tween(180), label = "power-glow")
+    Column(Modifier.width(130.dp).hoverable(interactions)
+        .clickable(interactionSource = interactions, indication = null, role = Role.Button, onClick = onClick)
+        .semantics { contentDescription = if (active) "Отключить VPN" else "Подключить VPN" },
+        horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(112.dp).graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+            translationY = if (pressed) 3.dp.toPx() else if (hovered) 1.dp.toPx() else 0f
+            shadowElevation = elevation.toPx()
+            shape = CircleShape
+        }.clip(CircleShape)
+            .background(Brush.radialGradient(listOf(accent.copy(alpha = glow), Color(0xFF152238), Color(0xFF0D1522)))),
+            contentAlignment = Alignment.Center) {
+            Canvas(Modifier.fillMaxSize()) {
+                val center = Offset(size.width / 2f, size.height / 2f)
+                drawCircle(accent.copy(alpha = .17f), radius = size.minDimension * .47f, center = center,
+                    style = Stroke(1.dp.toPx()))
+                drawCircle(accent.copy(alpha = if (hovered) .42f else .65f), radius = size.minDimension * .39f, center = center,
+                    style = Stroke(2.6.dp.toPx()))
+                val radius = 16.dp.toPx()
+                drawArc(accent, startAngle = -45f, sweepAngle = 270f, useCenter = false,
+                    topLeft = Offset(center.x - radius, center.y - radius),
+                    size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
+                    style = Stroke(4.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                drawLine(accent, Offset(center.x, center.y - 22.dp.toPx()), Offset(center.x, center.y + 3.dp.toPx()),
+                    strokeWidth = 4.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
     }
 }
 

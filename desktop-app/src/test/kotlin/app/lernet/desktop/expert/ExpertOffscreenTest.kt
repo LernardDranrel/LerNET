@@ -15,6 +15,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import app.lernet.config.policy.ExternalExitKind
@@ -41,6 +42,70 @@ import org.junit.Test
 /** Renders pure Compose content to an image; no Window, controller, VPN or adapter is instantiated. */
 @OptIn(ExperimentalComposeUiApi::class)
 class ExpertOffscreenTest {
+    @Test
+    fun `deep path stays readable at entry and the explicit fit includes the last node`() {
+        val rules = (1..60).map { level ->
+            PolicyNode("r$level", parentId = if (level == 1) null else "r${level - 1}", title = "Уровень $level")
+        }
+        val branches = DesktopRuleBranches(PolicyTree(PolicyScope.Device, rules))
+        assertThat(branches.path("r60").map { it.id }).containsExactlyElementsIn(rules.map { it.id }).inOrder()
+        assertThat(branches.visible("r59", emptySet()).single().id).isEqualTo("r60")
+        val size = androidx.compose.ui.unit.IntSize(760, 480)
+        val bounds = androidx.compose.ui.geometry.Rect(0f, 0f, 16800f, 62f)
+        val first = androidx.compose.ui.geometry.Rect(0f, 0f, 216f, 62f)
+        val last = first.translate(androidx.compose.ui.geometry.Offset(16584f, 0f))
+        val map = app.lernet.desktop.RouteMapOverview(mapOf("root" to first, "r60" to last), emptyList(), "root", "r60", false)
+        val entry = map.fit(bounds, size, 1f, readable = true)
+        assertThat(entry.zoom).isAtLeast(.9f)
+        assertThat(entry.project(last.center, 1f).x).isAtLeast(0f)
+        assertThat(entry.project(last.center, 1f).x).isAtMost(size.width.toFloat())
+        val whole = map.fit(bounds, size, 1f, readable = false)
+        assertThat(whole.project(first.topLeft, 1f).x).isAtLeast(0f)
+        assertThat(whole.project(last.bottomRight, 1f).x).isAtMost(size.width.toFloat())
+    }
+
+    @Test
+    fun `desktop map starts at readable scale and search opens the correct nested rule`() {
+        val domains = RuleConditions(blocks = listOf(ConditionBlock(ConditionKind.DOMAIN, listOf("office.example"))))
+        val rules = listOf(
+            PolicyNode("work", title = "Работа", conditions = domains),
+            PolicyNode("in", parentId = "work", title = "Единый вход", conditions = domains),
+            PolicyNode("foreign", sortIndex = 1, title = "Локальная сеть", conditions = domains),
+            PolicyNode("other", parentId = "foreign", title = "Единый вход", conditions = domains),
+        )
+        val intents = mutableListOf<ExpertIntent>()
+        val state = ExpertUiState(NetworkPolicy(device = PolicyTree(PolicyScope.Device, rules)), reducedMotion = true)
+        val scene = ImageComposeScene(1166, 724, Density(1f)) {
+            MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
+                DesktopExpert(state, intents::add, topChrome = { app.lernet.desktop.DesktopModeTabs(true, {}) })
+            }
+        }
+        try {
+            repeat(3) { scene.render(0).close() }
+            click(scene, "Схема")
+            val root = nodes(scene).first { "Начало схемы" in texts(it) }
+            val branch = nodes(scene).first { "Работа" in texts(it) && "Вложенные правила · 1" in texts(it) }
+            assertThat(branch.boundsInRoot.left).isGreaterThan(root.boundsInRoot.right)
+            assertThat(branch.boundsInRoot.width).isAtLeast(190f)
+            assertThat(nodes(scene).none { "Единый вход" in texts(it) }).isTrue()
+            val fold = nodes(scene).first { "Раскрыть · Работа" in it.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty() }
+            fold.config[SemanticsActions.OnClick].action!!.invoke()
+            screenshot(scene, "map-expanded")
+            assertThat(nodes(scene).any { "Единый вход" in texts(it) }).isTrue()
+            val search = nodes(scene).first { it.config.getOrNull(SemanticsActions.SetText) != null }
+            search.config[SemanticsActions.SetText].action!!.invoke(AnnotatedString("Единый вход"))
+            repeat(3) { scene.render(0).close() }
+            val hit = nodes(scene).single { "Вся схема › Локальная сеть" in texts(it) && "Единый вход" in texts(it) }
+            hit.config[SemanticsActions.OnClick].action!!.invoke()
+            screenshot(scene, "map-search-focus")
+            assertThat(nodes(scene).any { "Редактировать" in texts(it) }).isTrue()
+            assertThat(nodes(scene).none { "Работа" in texts(it) }).isTrue()
+            assertThat(intents).isEmpty()
+        } finally {
+            scene.close()
+        }
+    }
+
     @Test
     fun `all desktop expert pages render without starting network`() {
         val intents = mutableListOf<ExpertIntent>()
@@ -89,6 +154,7 @@ class ExpertOffscreenTest {
             assertThat(nodes(scene).any { texts(it).contains("Общий") }).isTrue()
             // v3 sections (m3): «Выходы» became «Конфиги», connections live in «События», protection is «Защита и DNS».
             listOf("Схема", "Проверка пути", "Конфиги", "События", "Защита и DNS").forEach { title ->
+                openExpertNavigation(scene)
                 val navigation = nodes(scene).first {
                     texts(it).contains(title) && it.config.getOrNull(SemanticsActions.OnClick) != null
                 }
@@ -104,6 +170,9 @@ class ExpertOffscreenTest {
                     }
                 )
                 if (title == "Схема") {
+                    assertThat(nodes(scene).any { "Схема правил" in texts(it) }).isTrue()
+                    click(scene, "Граф ▾")
+                    click(scene, "Полная схема и каналы")
                     assertThat(
                         nodes(scene).count { node ->
                             node.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty().any {
@@ -456,4 +525,18 @@ class ExpertOffscreenTest {
 
     private fun texts(node: SemanticsNode): List<String> =
         node.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text }
+}
+
+/** The wide map keeps the same destinations under the brand menu. Other pages use the sidebar. */
+@OptIn(ExperimentalComposeUiApi::class)
+internal fun openExpertNavigation(scene: ImageComposeScene): Boolean {
+    fun find(node: SemanticsNode): SemanticsNode? {
+        if (node.config.getOrNull(SemanticsProperties.Text).orEmpty().any { it.text == "Разделы ▾" } &&
+            node.config.getOrNull(SemanticsActions.OnClick) != null) return node
+        return node.children.firstNotNullOfOrNull(::find)
+    }
+    val menu = scene.semanticsOwners.firstNotNullOfOrNull { find(it.rootSemanticsNode) } ?: return false
+    menu.config[SemanticsActions.OnClick].action!!.invoke()
+    repeat(3) { scene.render(0).close() }
+    return true
 }

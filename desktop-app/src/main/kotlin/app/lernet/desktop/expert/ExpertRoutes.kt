@@ -3,9 +3,11 @@ package app.lernet.desktop.expert
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -15,16 +17,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.window.Dialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -56,12 +58,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.lernet.desktop.RouteCanvasTransform
 import app.lernet.desktop.RouteEditorCanvas
-import app.lernet.desktop.RouteEditorInspector
 import app.lernet.desktop.RouteEditorNodeActions
 import app.lernet.desktop.RouteEditorNodeFace
 import app.lernet.desktop.RouteEditorPositioned
 import app.lernet.desktop.RouteEditorView
-import app.lernet.desktop.RouteEditorViewToggle
 import app.lernet.desktop.routeEditorDrag
 import app.lernet.desktop.routeEditorStateSaver
 import app.lernet.routing.RouteLayoutNode
@@ -86,12 +86,23 @@ internal fun ExpertRoutes(
     requestedDeviceRule: String? = null,
     onRuleOpened: () -> Unit = {},
 ) {
-    val tree = PolicyBranchEditing.displayTree(ExpertPolicyEditing.tree(state.draft, state.selectedScope))
+    val tree = remember(state.draft, state.selectedScope) {
+        PolicyBranchEditing.displayTree(ExpertPolicyEditing.tree(state.draft, state.selectedScope))
+    }
     val rootOtherwise = tree.nodes.first { it.parentId == null && !it.detached && PolicyOtherwise.isOtherwise(it) }
+    val branches = remember(tree.nodes) { DesktopRuleBranches(tree) }
     var view by rememberSaveable { mutableStateOf(RouteEditorView.SCHEME) }
-    var ownerMenu by remember { mutableStateOf(false) }
-    var selectedId by rememberSaveable(state.selectedScope) { mutableStateOf<String?>(null) }
-    var rootSelected by rememberSaveable(state.selectedScope) { mutableStateOf(true) }
+    var fullMap by rememberSaveable(state.selectedScope) { mutableStateOf(false) }
+    var focusId by rememberSaveable(state.selectedScope) { mutableStateOf<String?>(null) }
+    var expandedIds by rememberSaveable(state.selectedScope) { mutableStateOf(emptyList<String>()) }
+    var collapsedOrigin by rememberSaveable(state.selectedScope) { mutableStateOf(false) }
+    var cameraRequest by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    var mapMenu by remember { mutableStateOf(false) }
+    var inspectorOpen by rememberSaveable { mutableStateOf(false) }
+    var query by remember(state.selectedScope) { mutableStateOf("") }
+    var searching by remember { mutableStateOf(false) }
+    val searchFocus = remember { FocusRequester() }
+    var selectedId by rememberSaveable(state.selectedScope) { mutableStateOf(branches.children[null]?.firstOrNull()?.id) }
     var editing by rememberSaveable(state.selectedScope, stateSaver = routeEditorStateSaver<PolicyNode?>()) {
         mutableStateOf<PolicyNode?>(null)
     }
@@ -104,7 +115,14 @@ internal fun ExpertRoutes(
     var pendingPolicy by remember { mutableStateOf<ExpertDraftSubmission?>(null) }
     var pendingCompletion by remember { mutableStateOf<(() -> Unit)?>(null) }
     val focus = remember { FocusRequester() }
-    val selected = tree.nodes.firstOrNull { it.id == selectedId }
+    val selected = branches.byId[selectedId]
+    fun go(id: String?, selectId: String? = id) {
+        focusId = id
+        expandedIds = emptyList()
+        collapsedOrigin = false
+        selectedId = selectId
+        cameraRequest++
+    }
     LaunchedEffect(requestedDeviceRule, state.selectedScope) {
         if (requestedDeviceRule == null) return@LaunchedEffect
         if (state.selectedScope != PolicyScope.Device) {
@@ -112,13 +130,13 @@ internal fun ExpertRoutes(
         } else {
             tree.nodes.find { it.id == requestedDeviceRule }?.let {
                 selectedId = it.id
-                rootSelected = false
                 editing = it
             }
             onRuleOpened()
         }
     }
     val graphProblem = remember(tree) { ExpertPolicyEditing.graphProblem(tree) }
+    val actualFocus = focusId?.takeIf { it in branches.byId }
     fun editPolicy(updated: app.lernet.routing.policy.NetworkPolicy) = onIntent(ExpertIntent.EditPolicy(updated))
     fun commitEditor(updated: app.lernet.routing.policy.NetworkPolicy, onComplete: () -> Unit) {
         if (updated == state.draft && state.error == null) {
@@ -158,192 +176,189 @@ internal fun ExpertRoutes(
             otherwise = true,
         )
     }
-    Column(
-        modifier.focusRequester(focus).focusable().onPreviewKeyEvent { event ->
-            if (event.type == KeyEventType.KeyDown &&
-                event.key in setOf(Key.Delete, Key.Backspace) &&
-                selected != null &&
-                !PolicyOtherwise.isOtherwise(selected) &&
-                editing == null &&
-                deleting == null &&
-                editingChannel == null &&
-                !folderSettings &&
-                !profileSettings
-            ) {
+    val nodeSelect: (PolicyNode) -> Unit = { node -> selectedId = node.id; inspectorOpen = true }
+    fun selectRoot() { selectedId = null; inspectorOpen = true }
+    fun changeFocus(id: String?) {
+        go(id, branches.children[id]?.firstOrNull()?.id ?: id)
+        fullMap = false
+        view = RouteEditorView.SCHEME
+    }
+    BoxWithConstraints(modifier.focusRequester(focus).onPreviewKeyEvent { event ->
+        when {
+            event.type != KeyEventType.KeyDown || searching || editing != null || deleting != null || editingChannel != null -> false
+            event.key == Key.Slash -> { searchFocus.requestFocus(); true }
+            event.key == Key.Delete && selected != null && !PolicyOtherwise.isOtherwise(selected) && !folderSettings && !profileSettings -> {
                 deleting = selected
                 true
-            } else {
-                false
             }
-        },
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box {
-                    OutlinedButton(onClick = { ownerMenu = true }) { Text(ExpertPolicyEditing.scopeName(state.selectedScope, state) + " ▾") }
-                    DropdownMenu(expanded = ownerMenu, onDismissRequest = { ownerMenu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Всё устройство", fontWeight = FontWeight.SemiBold) },
-                            onClick = {
-                                ownerMenu = false
-                                onIntent(ExpertIntent.SelectScope(PolicyScope.Device))
-                            },
-                        )
-                        state.folders.forEach { folder ->
-                            DropdownMenuItem(
-                                text = { Text("Папка: ${folder.name}", fontWeight = FontWeight.SemiBold) },
-                                onClick = {
-                                    ownerMenu = false
-                                    onIntent(ExpertIntent.SelectScope(PolicyScope.Folder(folder.id)))
-                                },
-                            )
-                            state.profiles.filter { it.folderId == folder.id }.forEach { profile ->
-                                DropdownMenuItem(
-                                    text = { Text(profile.name, Modifier.padding(start = 18.dp)) },
-                                    onClick = {
-                                        ownerMenu = false
-                                        onIntent(ExpertIntent.SelectScope(PolicyScope.Profile(profile.id)))
-                                    },
-                                )
-                            }
-                        }
-                        state.profiles.filter {
-                            it.folderId == null ||
-                                state.folders.none { folder ->
-                                    folder.id == it.folderId
+            else -> false
+        }
+    }.focusable()) {
+        val small = maxWidth < 480.dp
+        val narrow = maxWidth < 790.dp
+        val inspectorWidth = if (maxWidth < 1060.dp) 218.dp else 262.dp
+        val effectiveView = if (graphProblem == null) view else RouteEditorView.LIST
+        val selectFromSearch: (PolicyNode) -> Unit = { node ->
+            query = ""
+            go(branches.path(node.id).dropLast(1).lastOrNull()?.id, node.id)
+            fullMap = false
+            view = RouteEditorView.SCHEME
+            inspectorOpen = true
+            focus.requestFocus()
+        }
+        val inspector: @Composable (Modifier) -> Unit = { panelModifier ->
+            val node = selected
+            val children = branches.children[node?.id].orEmpty()
+            RuleInspector(node?.let(::policyNodeTitle) ?: "Весь трафик",
+                if (children.isNotEmpty()) "Выбранная ветка" else "Выбранное правило", panelModifier,
+                if (narrow) ({ inspectorOpen = false }) else null) {
+                if (node != null) {
+                    InspectorValue("Условие", ExpertPolicyEditing.conditionSummary(node))
+                    if (children.isEmpty()) InspectorValue("Направить через", ExpertPolicyEditing.targetName(node.target, state))
+                    ExpertPolicyEditing.inactiveReason(node, tree, state)?.let { InspectorValue("Состояние", it) }
+                }
+                if (children.isNotEmpty()) InspectorValue("Внутри", "Правил · ${children.size}")
+                if (node == null) InspectorValue("По умолчанию", ExpertPolicyEditing.targetName(rootOtherwise.target, state))
+                HorizontalDivider(color = ExpertColors.border)
+                if (node != null && children.isNotEmpty() && node.id != actualFocus) {
+                    MapButton("В фокус", { changeFocus(node.id); inspectorOpen = false }, primary = true)
+                }
+                MapButton(if (node == null) "Настроить ИНАЧЕ" else "Редактировать",
+                    { editing = node ?: rootOtherwise; inspectorOpen = false }, primary = node != null && children.isEmpty())
+                if (node == null || canAddPolicyChild(node)) {
+                    MapButton("+ Дочернее правило", { newNode(node); inspectorOpen = false })
+                }
+                if (node != null) {
+                    val referencedScope = when (val target = node.target) {
+                        is PolicyTarget.Profile -> target.routeScope
+                        is PolicyTarget.Folder -> target.routeScope
+                        else -> null
+                    }
+                    if (referencedScope != null) MapButton("Открыть дочернюю схему", { onIntent(ExpertIntent.SelectScope(referencedScope)) })
+                    var more by remember(node.id) { mutableStateOf(false) }
+                    if (!PolicyOtherwise.isOtherwise(node) || canAddMissingOtherwise(tree, node)) Box {
+                        MapButton("Действия ▾", { more = true })
+                        DropdownMenu(more, { more = false }) {
+                            if (canAddMissingOtherwise(tree, node)) DropdownMenuItem(text = { Text("Добавить ИНАЧЕ") },
+                                onClick = { more = false; newOtherwise(node); inspectorOpen = false })
+                            if (!PolicyOtherwise.isOtherwise(node)) {
+                                listOf(-1 to "Выше", 1 to "Ниже").forEach { (delta, label) ->
+                                    DropdownMenuItem(text = { Text(label) }, enabled = canMovePolicyNode(tree, node, delta),
+                                        onClick = { more = false; editPolicy(ExpertPolicyEditing.moveNode(state.draft, tree.scope, node.id, delta)) })
                                 }
-                        }.forEach { profile ->
-                            DropdownMenuItem(
-                                text = { Text(profile.name) },
-                                onClick = {
-                                    ownerMenu = false
-                                    onIntent(ExpertIntent.SelectScope(PolicyScope.Profile(profile.id)))
-                                },
-                            )
-                        }
-                    }
-                }
-                RouteEditorViewToggle(view) { view = it }
-                OutlinedButton(
-                    onClick = {
-                        editingChannel = PolicyChannel(
-                            UUID.randomUUID().toString(), "", tree.scope,
-                            target = if (tree.scope == PolicyScope.Device) PolicyTarget.Direct else PolicyTarget.CurrentExit
-                        )
-                    },
-                    enabled = !state.busy,
-                ) { Text("Новый канал") }
-                if (state.selectedScope is PolicyScope.Folder) TextButton(onClick = { folderSettings = true }) { Text("Политика папки") }
-                if (state.selectedScope is PolicyScope.Profile) TextButton(onClick = { profileSettings = true }) { Text("Холодный старт") }
-            }
-            Button(onClick = { newNode() }, enabled = !state.busy) { Text("Добавить правило") }
-        }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "ИНАЧЕ — последний путь на каждой развилке. Его можно продолжить дочерними условиями.", Modifier.weight(1f),
-                color = ExpertColors.muted, fontSize = 13.sp
-            )
-            TextButton(onClick = {
-                selectedId = rootOtherwise.id
-                rootSelected = false
-            }) { Text("Выбрать ИНАЧЕ") }
-        }
-        Text(
-            "Сначала проверяются ветки по порядку, затем ИНАЧЕ. Условия родителя и ребёнка объединяются через И. " +
-                "Каналы с одним идентификатором — один выход; название служит только подписью.",
-            color = ExpertColors.muted, fontSize = 12.sp,
-        )
-        val nodeSelect: (PolicyNode) -> Unit = {
-            selectedId = it.id
-            rootSelected = false
-            if (view == RouteEditorView.LIST || graphProblem != null) focus.requestFocus()
-        }
-        graphProblem?.let { ExpertMessage("Схема показана списком", it, warning = true) }
-        Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(Modifier.weight(1f).fillMaxHeight()) {
-                when (if (graphProblem != null) RouteEditorView.LIST else view) {
-                    RouteEditorView.SCHEME -> ExpertGraph(
-                        tree, state, selectedId, Modifier.fillMaxSize(), nodeSelect,
-                        { editingChannel = it }, {
-                            selectedId = null
-                            rootSelected = true
-                        },
-                        addChild = { newNode(it) },
-                        addRoot = { newNode() },
-                        highlightedNodeIds = highlightedNodeIds,
-                        selectedRoot = rootSelected,
-                        updateLayout = { points, clear -> onIntent(ExpertIntent.UpdateLayout(tree.scope, points, clear)) },
-                    )
-                    RouteEditorView.LIST -> ExpertRouteList(
-                        tree, state, selectedId, Modifier.fillMaxSize(), nodeSelect,
-                        { editing = it }, { newNode(it) }, { deleting = it }, { editingChannel = it },
-                        rootSelect = {
-                            selectedId = null
-                            rootSelected = true
-                        }, addRoot = { newNode() }
-                    )
-                }
-            }
-            RouteEditorInspector("ПРАВИЛО", Modifier.width(302.dp).fillMaxHeight()) {
-                if (rootSelected) {
-                    Text("Весь трафик", color = ExpertColors.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Проверка условий → ИНАЧЕ", color = ExpertColors.blue)
-                    OutlinedButton(onClick = { editing = rootOtherwise }) { Text("Настроить ИНАЧЕ") }
-                    OutlinedButton(onClick = { newNode() }) { Text("+ Дочернее правило") }
-                } else if (selected == null) {
-                    Text("Выбери блок на схеме или строку в списке", color = ExpertColors.text, fontSize = 16.sp)
-                    Text(
-                        "Перетаскивай блоки на схеме. Свойства, порядок и целевой выход доступны здесь.",
-                        color = ExpertColors.muted, fontSize = 12.sp,
-                    )
-                }
-                selected?.let { node ->
-                    Text(policyNodeTitle(node), color = ExpertColors.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                    Text(ExpertPolicyEditing.conditionSummary(node), color = ExpertColors.muted, fontSize = 12.sp)
-                    Text(policyNodeTargetLabel(node, tree, state), color = ExpertColors.blue, fontSize = 13.sp)
-                    ExpertPolicyEditing.inactiveReason(node, tree, state)?.let { Text(it, color = ExpertColors.muted, fontSize = 12.sp) }
-                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedButton(onClick = { editing = node }) { Text("Свойства") }
-                        if (canAddPolicyChild(node)) OutlinedButton(onClick = { newNode(node) }) { Text("+ Дочернее правило") }
-                        if (canAddMissingOtherwise(tree, node)) {
-                            OutlinedButton(onClick = { newOtherwise(node) }) { Text("+ Ветка ИНАЧЕ") }
-                        }
-                        if (!PolicyOtherwise.isOtherwise(node)) {
-                            OutlinedButton(enabled = canMovePolicyNode(tree, node, -1), onClick = {
-                                editPolicy(
-                                    ExpertPolicyEditing.moveNode(
-                                        state.draft, tree.scope, node.id,
-                                        -1
-                                    )
-                                )
-                            }) { Text("Выше") }
-                            OutlinedButton(enabled = canMovePolicyNode(tree, node, 1), onClick = {
-                                editPolicy(ExpertPolicyEditing.moveNode(state.draft, tree.scope, node.id, 1))
-                            }) { Text("Ниже") }
-                            OutlinedButton(onClick = {
-                                editPolicy(
-                                    ExpertPolicyEditing.putNode(
-                                        state.draft, tree.scope,
-                                        node.copy(enabled = !node.enabled)
-                                    )
-                                )
-                            }) {
-                                Text(if (node.enabled) "Выключить ветку" else "Включить ветку")
+                                DropdownMenuItem(text = { Text(if (node.enabled) "Выключить ветку" else "Включить ветку") },
+                                    onClick = { more = false; editPolicy(ExpertPolicyEditing.putNode(state.draft, tree.scope, node.copy(enabled = !node.enabled))) })
+                                DropdownMenuItem(text = { Text("Удалить", color = ExpertColors.red) },
+                                    onClick = { more = false; deleting = node; inspectorOpen = false })
                             }
-                            TextButton(onClick = { deleting = node }) { Text("Удалить · Delete", color = ExpertColors.red) }
-                        }
-                        val referencedScope = when (val target = node.target) {
-                            is PolicyTarget.Profile -> target.routeScope
-                            is PolicyTarget.Folder -> target.routeScope
-                            PolicyTarget.Direct, PolicyTarget.Block, PolicyTarget.CurrentExit, is PolicyTarget.Channel -> null
-                        }
-                        referencedScope?.let { scope ->
-                            OutlinedButton(onClick = { onIntent(ExpertIntent.SelectScope(scope)) }) { Text("Открыть дочернюю схему") }
                         }
                     }
                 }
+                HorizontalDivider(color = ExpertColors.border)
+                InspectorTrail(branches.path(node?.id)) { changeFocus(it); inspectorOpen = false }
             }
+        }
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            val title: @Composable () -> Unit = {
+                Column {
+                    Text("Маршрутизация", color = ExpertColors.muted, fontSize = 12.sp)
+                    Text("Схема правил", color = ExpertColors.text, fontSize = if (narrow) 24.sp else 30.sp,
+                        lineHeight = 34.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            if (small) title()
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (!small) Box(Modifier.weight(1f)) { title() }
+                MapSearch(branches, if (small) Modifier.weight(1f) else Modifier.width(if (narrow) 155.dp else 205.dp),
+                    searchFocus, query, { query = it }, { searching = it }, selectFromSearch)
+                val parent = branches.byId[actualFocus]
+                MapButton(if (narrow) "+ Правило" else "+ Добавить правило", { newNode(parent) },
+                    primary = true, enabled = !state.busy && (parent == null || canAddPolicyChild(parent)))
+            }
+            graphProblem?.let { ExpertMessage("Схема показана списком", it, warning = true) }
+            Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Surface(Modifier.weight(1f).fillMaxHeight(), shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, ExpertColors.border), color = ExpertColors.panel) {
+                    Column(Modifier.fillMaxSize().padding(1.dp)) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp),
+                            horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                            MapBreadcrumbs(branches.path(actualFocus), ::changeFocus, Modifier.weight(1f))
+                            if (!fullMap && graphProblem == null && effectiveView == RouteEditorView.SCHEME && !narrow) {
+                                val expandable = remember(branches, actualFocus) {
+                                    branches.visible(actualFocus, branches.children.keys.filterNotNull().toSet())
+                                        .mapNotNull { it.id.takeIf(branches.children::containsKey) }
+                                }
+                                if (expandable.isNotEmpty()) {
+                                    val opened = !collapsedOrigin && expandedIds.containsAll(expandable)
+                                    MapButton(if (opened) "Свернуть всё" else "Раскрыть всё", {
+                                        expandedIds = if (opened) emptyList() else expandable
+                                        collapsedOrigin = false
+                                        if (opened) selectedId = actualFocus
+                                        cameraRequest++
+                                    })
+                                }
+                            }
+                            Box {
+                                MapButton(when { effectiveView == RouteEditorView.LIST -> "Список ▾"; fullMap -> "Полная схема ▾"; else -> "Граф ▾" },
+                                    { mapMenu = true })
+                                DropdownMenu(mapMenu, { mapMenu = false }) {
+                                    DropdownMenuItem(text = { Text("Граф веток") }, enabled = graphProblem == null,
+                                        onClick = { mapMenu = false; fullMap = false; view = RouteEditorView.SCHEME })
+                                    DropdownMenuItem(text = { Text("Списком") }, onClick = { mapMenu = false; view = RouteEditorView.LIST })
+                                    DropdownMenuItem(text = { Text("Полная схема и каналы") }, enabled = graphProblem == null,
+                                        onClick = { mapMenu = false; fullMap = true; view = RouteEditorView.SCHEME; go(null) })
+                                    HorizontalDivider()
+                                    DropdownMenuItem(text = { Text("Упорядочить узлы") }, enabled = tree.positions.isNotEmpty() && !state.busy,
+                                        onClick = { mapMenu = false; onIntent(ExpertIntent.UpdateLayout(tree.scope, emptyMap(), true)); cameraRequest++ })
+                                    DropdownMenuItem(text = { Text("Новый канал") }, enabled = !state.busy, onClick = {
+                                        mapMenu = false
+                                        editingChannel = PolicyChannel(UUID.randomUUID().toString(), "", tree.scope,
+                                            target = if (tree.scope == PolicyScope.Device) PolicyTarget.Direct else PolicyTarget.CurrentExit)
+                                    })
+                                    if (state.selectedScope is PolicyScope.Folder) DropdownMenuItem(text = { Text("Политика папки") }, onClick = { mapMenu = false; folderSettings = true })
+                                    if (state.selectedScope is PolicyScope.Profile) DropdownMenuItem(text = { Text("Холодный старт") }, onClick = { mapMenu = false; profileSettings = true })
+                                }
+                            }
+                            ScopePicker(state) { onIntent(ExpertIntent.SelectScope(it)) }
+                        }
+                        HorizontalDivider(color = ExpertColors.border)
+                        Box(Modifier.weight(1f).fillMaxWidth()) {
+                            when {
+                                effectiveView == RouteEditorView.LIST -> ExpertRouteList(tree, state, selectedId, Modifier.fillMaxSize(),
+                                    nodeSelect, { editing = it }, { newNode(it) }, { deleting = it }, { editingChannel = it }, ::selectRoot, { newNode() })
+                                fullMap -> ExpertGraph(tree, state, selectedId, Modifier.fillMaxSize(), nodeSelect, { editingChannel = it },
+                                    ::selectRoot, { newNode(it) }, { newNode() }, highlightedNodeIds = highlightedNodeIds, selectedRoot = selected == null,
+                                    updateLayout = { points, clear -> onIntent(ExpertIntent.UpdateLayout(tree.scope, points, clear)) })
+                                else -> ExpertBranchMap(tree, branches, state, actualFocus, selectedId, expandedIds.toSet(), collapsedOrigin, cameraRequest,
+                                    select = { if (it == null) selectRoot() else nodeSelect(it) },
+                                    fold = { id ->
+                                        if (id == actualFocus) {
+                                            if (!collapsedOrigin) selectedId = actualFocus
+                                            collapsedOrigin = !collapsedOrigin
+                                        } else if (id != null) {
+                                            val closing = id in expandedIds
+                                            if (closing && branches.path(selectedId).any { it.id == id }) selectedId = id
+                                            expandedIds = if (closing) expandedIds - id else expandedIds + id
+                                        }
+                                    },
+                                    move = { key, point -> onIntent(ExpertIntent.UpdateLayout(tree.scope, mapOf(key to point), false)) },
+                                    modifier = Modifier.fillMaxSize())
+                            }
+                        }
+                        HorizontalDivider(color = ExpertColors.border)
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Правил в схеме · ${tree.nodes.size}", Modifier.weight(1f), color = ExpertColors.muted, fontSize = 12.sp)
+                            if (actualFocus != null) MapButton("Вся схема", { changeFocus(null) })
+                            if (narrow) MapButton("Свойства", { inspectorOpen = true })
+                        }
+                    }
+                }
+                if (!narrow) inspector(Modifier.width(inspectorWidth).wrapContentHeight())
+            }
+        }
+        if (narrow && inspectorOpen && editing == null && deleting == null) {
+            Dialog(onDismissRequest = { inspectorOpen = false }) { inspector(Modifier.widthIn(max = 390.dp).fillMaxWidth()) }
         }
     }
     editing?.let { node ->

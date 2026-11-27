@@ -54,7 +54,7 @@ class DesktopExpertV2Test {
     }
 
     @Test
-    fun `bottom menu switches pages and the frame does not start networking`() {
+    fun `sidebar and the map section menu switch pages without starting networking`() {
         val intents = mutableListOf<ExpertIntent>()
         val state = ExpertUiState(
             NetworkPolicy(), administrator = true, reducedMotion = true,
@@ -66,7 +66,7 @@ class DesktopExpertV2Test {
             MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
                 androidx.compose.material3.Surface(color = desktopColors.background, contentColor = desktopColors.onBackground) {
                     DesktopExpert(
-                        state, intents::add, frameAnimateIn = false,
+                        state, intents::add,
                         topChrome = { DesktopModeTabs(true, {}, reducedMotion = true) },
                     )
                 }
@@ -82,8 +82,9 @@ class DesktopExpertV2Test {
             assertThat(vpnTab.boundsInRoot.left).isAtLeast(196f)
             // N1: the sections live in the left column (196 dp), not in a strip at the bottom.
             listOf("Схема" to "schema", "Конфиги" to "configs", "Проверка пути" to "rules", "События" to "events").forEach { (title, file) ->
+                val inMenu = openExpertNavigation(scene)
                 val tab = nodes(scene).first { title in texts(it) && it.config.getOrNull(SemanticsActions.OnClick) != null }
-                assertThat(tab.boundsInRoot.right).isAtMost(196f)
+                assertThat(tab.boundsInRoot.right).isAtMost(if (inMenu) 1440f else 196f)
                 tab.config[SemanticsActions.OnClick].action!!.invoke()
                 screenshot(scene, "windows-expert-v2-$file")
             }
@@ -142,7 +143,7 @@ class DesktopExpertV2Test {
             MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
                 androidx.compose.material3.Surface(color = desktopColors.background, contentColor = desktopColors.onBackground) {
                     DesktopExpert(
-                        state, {}, frameAnimateIn = false,
+                        state, {},
                         onCopyProfile = {},
                         onRefreshSubscription = {},
                     )
@@ -181,7 +182,7 @@ class DesktopExpertV2Test {
         val scene = ImageComposeScene(1440, 900, Density(1f)) {
             MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
                 androidx.compose.material3.Surface(color = desktopColors.background, contentColor = desktopColors.onBackground) {
-                    DesktopExpert(state, {}, frameAnimateIn = false)
+                    DesktopExpert(state, {})
                 }
             }
         }

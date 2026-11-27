@@ -52,12 +52,12 @@ import app.lernet.config.policy.ExternalExitKind
 import app.lernet.engine.policy.ExitPhase
 
 internal object ExpertColors {
-    val background = Color(0xFF0B1019)
-    val panel = Color(0xFF151D2B)
-    val border = Color(0xFF31405B)
+    val background = Color(0xFF111824)
+    val panel = Color(0xFF18212F)
+    val border = Color(0xFF344358)
     val text = Color(0xFFF5F7FB)
     val muted = Color(0xFFA8B5CB)
-    val blue = Color(0xFF91ABFF)
+    val blue = Color(0xFFB1C6FF)
     val green = Color(0xFF80DEBE)
     val amber = Color(0xFFF5C16C)
     val red = Color(0xFFFFB4AB)

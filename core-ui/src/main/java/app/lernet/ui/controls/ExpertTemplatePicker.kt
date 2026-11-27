@@ -50,6 +50,7 @@ fun ExpertTemplatePicker(
     onChange: suspend (TemplateAction) -> String?,
     modifier: Modifier = Modifier,
     protectedId: String? = null,
+    compact: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     val current = choices.firstOrNull { it.first == selectedId }?.second
@@ -90,8 +91,11 @@ fun ExpertTemplatePicker(
             Box(Modifier.weight(1f)) {
                 OutlinedButton(
                     { choosing = true }, enabled = available,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("expert_template_picker"),
-                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = if (compact) 32.dp else 48.dp)
+                        .semantics { contentDescription = "Выбрать шаблон" }.testTag("expert_template_picker"),
+                    contentPadding = if (compact) androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        else androidx.compose.material3.ButtonDefaults.ContentPadding,
+                    shape = if (compact) androidx.compose.foundation.shape.RoundedCornerShape(7.dp) else MaterialTheme.shapes.medium,
                 ) {
                     Text("Шаблон", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(current ?: "…", Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -114,10 +118,15 @@ fun ExpertTemplatePicker(
                         choosing = false
                         openDialog(TemplateDialog.CREATE)
                     })
+                    if (compact) DropdownMenuItem(text = { Text("Действия с шаблонами…") }, onClick = {
+                        choosing = false
+                        pickRemoval = false
+                        managing = true
+                    })
                 }
             }
             Box {
-                TextButton(
+                if (!compact) TextButton(
                     { managing = true; pickRemoval = false }, enabled = available,
                     modifier = Modifier.heightIn(min = 48.dp).widthIn(min = 48.dp)
                         .semantics { contentDescription = "Действия с шаблонами" }.testTag("expert_template_actions"),

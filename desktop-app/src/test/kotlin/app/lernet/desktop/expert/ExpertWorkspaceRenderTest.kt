@@ -48,11 +48,12 @@ class ExpertWorkspaceRenderTest {
                 assertThat(heading.boundsInRoot.right).isAtMost(width - 22f)
                 // The v3 sections (m3): the same five as the phone, then «Защита и DNS» under «Настройки».
                 listOf("Схема", "Конфиги", "Проверка пути", "События", "Защита и DNS").forEach { title ->
+                    val inMenu = openExpertNavigation(scene)
                     val navigation = nodes(scene).first {
                         title in texts(it) && it.config.getOrNull(SemanticsActions.OnClick) != null
                     }
-                    assertThat(navigation.boundsInRoot.left).isAtLeast(14f)
-                    assertThat(navigation.boundsInRoot.right).isAtMost(182f)
+                    assertThat(navigation.boundsInRoot.left).isAtLeast(if (inMenu) 0f else 14f)
+                    assertThat(navigation.boundsInRoot.right).isAtMost(if (inMenu) width.toFloat() else 182f)
                     navigation.config[SemanticsActions.OnClick].action!!.invoke()
                     screenshot(scene, "workspace-$width-${title.hashCode()}")
                 }

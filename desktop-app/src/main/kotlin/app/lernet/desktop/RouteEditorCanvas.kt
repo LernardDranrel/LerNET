@@ -110,8 +110,8 @@ internal data class RouteCanvasTransform(val zoom: Float = 1f, val pan: Offset =
 
     fun canvasDelta(screenDelta: Offset, density: Float): Offset = screenDelta / (density * zoom)
 
-    fun zoomAt(requested: Float, anchor: Offset): RouteCanvasTransform {
-        val next = requested.coerceIn(.35f, 1.5f)
+    fun zoomAt(requested: Float, anchor: Offset, minimum: Float = .35f, maximum: Float = 1.5f): RouteCanvasTransform {
+        val next = requested.coerceIn(minimum, maximum)
         return copy(zoom = next, pan = anchor - (anchor - pan) * (next / zoom))
     }
 
@@ -141,6 +141,7 @@ internal fun RouteEditorCanvas(
     bounds: Rect,
     modifier: Modifier = Modifier,
     onArrange: (() -> Unit)? = null,
+    overview: RouteMapOverview? = null,
     connections: DrawScope.(RouteCanvasTransform) -> Unit,
     content: @Composable BoxScope.(RouteCanvasTransform) -> Unit,
 ) {
@@ -156,21 +157,42 @@ internal fun RouteEditorCanvas(
     var fitted by rememberSaveable(owner) { mutableStateOf(false) }
     val focus = remember(owner) { FocusRequester() }
     LaunchedEffect(owner) { focus.requestFocus() }
-    LaunchedEffect(owner, viewport, bounds, fitted) {
+    fun fit(readable: Boolean = false) = overview?.fit(bounds, viewport, density, readable)
+        ?: RouteCanvasTransform.fit(bounds, viewport, density)
+    LaunchedEffect(owner, viewport, bounds, fitted, overview?.dragging) {
+        if (overview?.dragging == true) fitted = true
         if (!fitted && viewport.width > 0 && viewport.height > 0) {
-            transform = RouteCanvasTransform.fit(bounds, viewport, density)
-            fitted = true
+            transform = fit(readable = true)
+            if (overview == null) fitted = true
         }
     }
     fun zoom(requested: Float, anchor: Offset = Offset(viewport.width / 2f, viewport.height / 2f)) {
-        transform = transform.zoomAt(requested, anchor)
+        transform = if (overview == null) transform.zoomAt(requested, anchor)
+        else transform.zoomAt(requested, anchor, minOf(.25f, fit().zoom), 2.2f)
         fitted = true
     }
+    fun fitAll() {
+        transform = fit()
+        fitted = true
+    }
+    val wheelZoom by rememberUpdatedState<(Float, Offset) -> Unit> { delta, at -> zoom(transform.zoom - delta * .08f, at) }
     Box(
-        modifier.clipToBounds().background(Color(0xFF101724)).onSizeChanged { viewport = it }
+        modifier.clipToBounds().background(if (overview == null) Color(0xFF101724) else Color(0xFF131C29)).onSizeChanged { viewport = it }
             .focusRequester(focus)
             .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown || !event.isCtrlPressed) {
+                if (event.type != KeyEventType.KeyDown) {
+                    false
+                } else if (!event.isCtrlPressed && overview != null && event.key in listOf(Key.DirectionUp, Key.DirectionDown, Key.DirectionLeft, Key.DirectionRight)) {
+                    val delta = when (event.key) {
+                        Key.DirectionLeft -> Offset(48f, 0f)
+                        Key.DirectionRight -> Offset(-48f, 0f)
+                        Key.DirectionUp -> Offset(0f, 48f)
+                        else -> Offset(0f, -48f)
+                    }
+                    transform = transform.copy(pan = transform.pan + delta * density)
+                    fitted = true
+                    true
+                } else if (!event.isCtrlPressed) {
                     false
                 } else {
                     when (event.key) {
@@ -183,7 +205,7 @@ internal fun RouteEditorCanvas(
                             true
                         }
                         Key.Zero, Key.NumPad0 -> {
-                            transform = RouteCanvasTransform.fit(bounds, viewport, density)
+                            fitAll()
                             true
                         }
                         else -> false
@@ -194,7 +216,7 @@ internal fun RouteEditorCanvas(
                     while (true) {
                         val event = awaitPointerEvent()
                         if (event.type == PointerEventType.Scroll) {
-                            event.changes.firstOrNull()?.let { zoom(transform.zoom - it.scrollDelta.y * .08f, it.position) }
+                            event.changes.firstOrNull()?.let { wheelZoom(it.scrollDelta.y, it.position) }
                             event.changes.forEach { it.consume() }
                         }
                     }
@@ -205,12 +227,25 @@ internal fun RouteEditorCanvas(
             Modifier.fillMaxSize().pointerInput(owner) {
                 detectDragGestures { change, amount ->
                     change.consume()
+                    fitted = true
                     transform = transform.copy(pan = transform.pan + amount)
                 }
             }
         ) {
             val grid = 28.dp.toPx() * transform.zoom
-            if (grid > 12f) {
+            if (overview != null) {
+                val step = 20.dp.toPx()
+                val startY = transform.pan.y % step
+                var x = transform.pan.x % step
+                while (x < size.width) {
+                    var y = startY
+                    while (y < size.height) {
+                        drawCircle(Color(0xFF28384D), .9.dp.toPx(), Offset(x, y))
+                        y += step
+                    }
+                    x += step
+                }
+            } else if (grid > 12f) {
                 var x = transform.pan.x % grid
                 while (x < size.width) {
                     drawLine(Color(0xFF3B4961).copy(alpha = .22f), Offset(x, 0f), Offset(x, size.height), 1f)
@@ -225,7 +260,13 @@ internal fun RouteEditorCanvas(
             connections(transform)
         }
         content(transform)
-        Surface(Modifier.align(Alignment.TopEnd).padding(10.dp), color = Color(0xFF151D2B), shape = RoundedCornerShape(12.dp)) {
+        if (overview != null) {
+            RouteMapControls(overview, bounds, viewport, transform, onZoom = { zoom(transform.zoom * it) }, onFit = ::fitAll) { point ->
+                val center = Offset(viewport.width / 2f, viewport.height / 2f)
+                transform = transform.copy(pan = center - point * (density * transform.zoom))
+                fitted = true
+            }
+        } else Surface(Modifier.align(Alignment.TopEnd).padding(10.dp), color = Color(0xFF151D2B), shape = RoundedCornerShape(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 TextButton(onClick = { zoom(transform.zoom - .15f) }) { Text("−") }
                 Text("${(transform.zoom * 100).roundToInt()}%", color = Color(0xFFA1AEC4), fontSize = 12.sp)

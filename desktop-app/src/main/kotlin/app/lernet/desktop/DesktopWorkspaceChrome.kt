@@ -52,7 +52,8 @@ internal fun DesktopModeTabs(
     onStatusClick: (() -> Unit)? = null,
 ) {
     // N19: one segmented button (M3 / Fluent), the same component as on the phone.
-    Box(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxWidth().height(if (expert) 46.dp else 52.dp).padding(horizontal = if (expert) 8.dp else 24.dp),
+        contentAlignment = if (expert) Alignment.CenterStart else Alignment.Center) {
         Surface(
             color = MaterialTheme.colorScheme.surface,
             shape = RoundedCornerShape(12.dp),
@@ -66,7 +67,8 @@ internal fun DesktopModeTabs(
                         tween(if (reducedMotion) 0 else 160),
                     )
                     Box(
-                        Modifier.width(140.dp).height(34.dp).clip(RoundedCornerShape(9.dp)).background(fill)
+                        Modifier.width(if (expert) 72.dp else 140.dp).height(if (expert) 29.dp else 34.dp)
+                            .clip(RoundedCornerShape(8.dp)).background(fill)
                             .selectable(selected, role = Role.Tab, onClick = { onSelect(mode) }),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -86,13 +88,15 @@ internal fun DesktopModeTabs(
                 StatusTone.HOLD -> androidx.compose.ui.graphics.Color(0xFFF1CC80)
                 StatusTone.NEUTRAL -> MaterialTheme.colorScheme.onSurfaceVariant
             }
+            Box(Modifier.fillMaxWidth().padding(start = if (expert) 160.dp else 0.dp), contentAlignment = Alignment.CenterEnd) {
             Text(
                 "● ${status.text}",
-                Modifier.align(Alignment.CenterEnd).widthIn(max = 300.dp)
+                Modifier.widthIn(max = 300.dp)
                     .then(if (onStatusClick != null) Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onStatusClick) else Modifier)
                     .padding(horizontal = 6.dp, vertical = 4.dp),
                 color = color, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
+            }
         }
     }
 }
@@ -102,6 +106,7 @@ internal fun DesktopWorkspaceSidebar(
     onOpenNetwork: () -> Unit,
     width: androidx.compose.ui.unit.Dp = 196.dp,
     title: String = "LerNET",
+    expertBrand: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
@@ -111,10 +116,11 @@ internal fun DesktopWorkspaceSidebar(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.size(34.dp).background(androidx.compose.ui.graphics.Color.Black, RoundedCornerShape(9.dp)),
+                Modifier.size(34.dp).background(if (expertBrand) app.lernet.desktop.expert.ExpertColors.blue else androidx.compose.ui.graphics.Color.Black, RoundedCornerShape(9.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Text("L", color = androidx.compose.ui.graphics.Color.White, fontSize = 19.sp, fontWeight = FontWeight.Black)
+                Text("L", color = if (expertBrand) app.lernet.desktop.expert.ExpertColors.background else androidx.compose.ui.graphics.Color.White,
+                    fontSize = 19.sp, fontWeight = FontWeight.Black)
             }
             Spacer(Modifier.width(10.dp))
             Column {
