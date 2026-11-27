@@ -57,8 +57,13 @@ object AlwaysOnOffer {
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
             .build()
-        runCatching { manager.notify(NOTIFICATION_ID, notification) }
-            .onFailure { LerNetLog.w(TAG, "always-on offer failed: ${it.javaClass.simpleName}") }
+        try {
+            manager.notify(NOTIFICATION_ID, notification)
+        } catch (_: SecurityException) {
+            LerNetLog.w(TAG, "always-on offer not shown: notification permission denied")
+        } catch (failure: RuntimeException) {
+            LerNetLog.w(TAG, "always-on offer failed: ${failure.javaClass.simpleName}")
+        }
     }
 
     fun cancel(context: Context) {
