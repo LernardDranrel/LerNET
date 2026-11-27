@@ -350,7 +350,12 @@ class ExpertOffscreenTest {
             appliedId = null
             repeat(3) { scene.render(0).close() }
             assertThat(nodes(scene).any { "В сети — предыдущая схема" in texts(it) }).isTrue()
-            click(scene, "Инструменты ▾")
+            val tools = nodes(scene).single { node ->
+                "Инструменты" in node.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty() &&
+                    node.config.getOrNull(SemanticsActions.OnClick) != null
+            }
+            tools.config[SemanticsActions.OnClick].action!!.invoke()
+            repeat(3) { scene.render(0).close() }
             click(scene, "Скопировать действующую схему в черновик…")
             assertThat(nodes(scene).any { "Заменить черновик шаблона?" in texts(it) }).isTrue()
         } finally {
