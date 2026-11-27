@@ -158,7 +158,7 @@ class PolicyMigrationTest {
             val initial = PolicyMigration.migrate(legacy)
             store.save(initial)
             store.save(initial)
-            val future = PolicyWorkspaceCodec.encode(initial).replace("\"version\": 1", "\"version\": 99")
+            val future = PolicyWorkspaceCodec.encode(initial).replaceFirst("\"version\": 1", "\"version\": 99")
             Files.write(file, future.toByteArray(Charsets.UTF_8))
             assertThrows(UnsupportedPolicyVersion::class.java) { store.load() }
             assertThrows(UnsupportedPolicyVersion::class.java) { store.save(initial) }

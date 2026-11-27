@@ -151,6 +151,8 @@ class ExpertAndroidEngine @Inject constructor(
         workspace.set(snapshot)
     }
 
+    internal fun restoreCandidate(editor: PolicyWorkspace): PolicyWorkspace? = restartJournal.restoreCandidate(editor)
+
     /** The coordinator distinguishes a system restart from an explicit user authorization. */
     fun authorizeStart(automatic: Boolean) {
         automaticStart.set(automatic)
@@ -190,7 +192,7 @@ class ExpertAndroidEngine @Inject constructor(
         }
         require(assembled.isValid) { assembled.errors.joinToString("; ") }
         val fingerprint = restartFingerprint(source, defaults, assembled)
-        if (restoring && !withContext(Dispatchers.IO) { restartJournal.matches(fingerprint) }) {
+        if (restoring && !withContext(Dispatchers.IO) { restartJournal.matches(fingerprint, source.selectedTemplateId) }) {
             val explanation = context.getString(R.string.expert_platform_restart_blocked)
             mutableRestoreWarning.value = explanation
             throw IllegalStateException(explanation)
@@ -254,7 +256,7 @@ class ExpertAndroidEngine @Inject constructor(
                 exitTags = assembled.exitTags
                 tagBindings.putAll(exitTags.entries.associate { it.value to it.key })
                 appliedSnapshot = NativeAppliedSnapshot(session, actual, tun!!, owned, assembled.exitTags)
-                promoteRestartEligibility(fingerprint, actual.revision)
+                promoteRestartEligibility(fingerprint, actual.revision, source.selectedTemplateId)
                 startPolling()
                 ExpertTunnelAck(tun!!, actual.revision)
             }
@@ -359,7 +361,7 @@ class ExpertAndroidEngine @Inject constructor(
         tagBindings.putAll(exitTags.entries.associate { it.value to it.key })
         exitGenerations.clear()
         appliedSnapshot = NativeAppliedSnapshot(session, actual, expected, serviceTun!!, assembled.exitTags)
-        promoteRestartEligibility(fingerprint, actual.revision)
+        promoteRestartEligibility(fingerprint, actual.revision, source.selectedTemplateId)
         ExpertTunnelAck(expected, actual.revision)
     }
 
@@ -391,8 +393,8 @@ class ExpertAndroidEngine @Inject constructor(
         }
     }
 
-    private suspend fun promoteRestartEligibility(fingerprint: String, revision: Long) {
-        val durable = withContext(NonCancellable + Dispatchers.IO) { restartJournal.promoteActualAck(fingerprint, revision) }
+    private suspend fun promoteRestartEligibility(fingerprint: String, revision: Long, templateId: String) {
+        val durable = withContext(NonCancellable + Dispatchers.IO) { restartJournal.promoteActualAck(fingerprint, revision, templateId) }
         if (!durable) {
             // The native ACK remains truthful. Only future automatic restoration is denied.
             mutableRestoreWarning.value = context.getString(R.string.expert_platform_restart_promotion_failed)

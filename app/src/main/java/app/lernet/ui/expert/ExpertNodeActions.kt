@@ -33,36 +33,52 @@ internal fun ExpertNodeActions(
     node: PolicyNode?, tree: PolicyTree, onEdit: () -> Unit, onAdd: () -> Unit,
     onOtherwise: () -> Unit, onMove: (Int) -> Unit, onDelete: () -> Unit,
 ) {
-    var expanded by remember(tree.scope, node?.id) { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         TextButton(onEdit, Modifier.weight(1f)) {
             Icon(LerNetSymbols.edit(), contentDescription = null)
             Spacer(Modifier.width(4.dp))
             Text(stringResource(R.string.expert_selected_properties))
         }
-        Box {
-            IconButton({ expanded = true }) {
-                Icon(LerNetSymbols.more(), contentDescription = stringResource(R.string.expert_node_options))
+        ExpertNodeMenu(node, tree, onAdd, onOtherwise, onMove, onDelete)
+    }
+}
+
+@Composable
+internal fun ExpertNodeMenu(
+    node: PolicyNode?, tree: PolicyTree, onAdd: () -> Unit, onOtherwise: () -> Unit,
+    onMove: (Int) -> Unit, onDelete: () -> Unit, onEdit: (() -> Unit)? = null, onChannel: (() -> Unit)? = null,
+) {
+    var expanded by remember(tree.scope, node?.id) { mutableStateOf(false) }
+    Box {
+        IconButton({ expanded = true }) {
+            Icon(LerNetSymbols.more(), contentDescription = stringResource(R.string.expert_node_options))
+        }
+        DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
+            if (onEdit != null) {
+                DropdownMenuItem(text = { Text(stringResource(R.string.expert_selected_properties)) },
+                    onClick = { expanded = false; onEdit() })
             }
-            DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.route_add_child)) },
-                    enabled = node == null || ExpertEdits.canAddChild(node),
-                    onClick = { expanded = false; onAdd() },
-                )
-                if (node != null && canAddMissingOtherwise(tree, node)) {
-                    DropdownMenuItem(text = { Text(stringResource(R.string.expert_add_otherwise)) },
-                        onClick = { expanded = false; onOtherwise() })
+            if (onChannel != null) {
+                DropdownMenuItem(text = { Text(stringResource(R.string.expert_channel_incoming)) },
+                    onClick = { expanded = false; onChannel() })
+            }
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.route_add_child)) },
+                enabled = node == null || ExpertEdits.canAddChild(node),
+                onClick = { expanded = false; onAdd() },
+            )
+            if (node != null && canAddMissingOtherwise(tree, node)) {
+                DropdownMenuItem(text = { Text(stringResource(R.string.expert_add_otherwise)) },
+                    onClick = { expanded = false; onOtherwise() })
+            }
+            if (node != null && !PolicyOtherwise.isOtherwise(node)) {
+                listOf(-1 to R.string.expert_move_up, 1 to R.string.expert_move_down).forEach { (direction, label) ->
+                    DropdownMenuItem(text = { Text(stringResource(label)) },
+                        enabled = PolicyBranchEditing.canMoveNode(tree, node.id, direction),
+                        onClick = { expanded = false; onMove(direction) })
                 }
-                if (node != null && !PolicyOtherwise.isOtherwise(node)) {
-                    listOf(-1 to R.string.expert_move_up, 1 to R.string.expert_move_down).forEach { (direction, label) ->
-                        DropdownMenuItem(text = { Text(stringResource(label)) },
-                            enabled = PolicyBranchEditing.canMoveNode(tree, node.id, direction),
-                            onClick = { expanded = false; onMove(direction) })
-                    }
-                    DropdownMenuItem(text = { Text(stringResource(R.string.expert_remove)) },
-                        onClick = { expanded = false; onDelete() })
-                }
+                DropdownMenuItem(text = { Text(stringResource(R.string.expert_remove)) },
+                    onClick = { expanded = false; onDelete() })
             }
         }
     }

@@ -18,6 +18,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.onAllNodesWithText
@@ -28,11 +29,15 @@ import androidx.compose.ui.unit.dp
 import app.lernet.config.policy.ExternalExitKind
 import app.lernet.config.policy.ExternalExitProfiles
 import app.lernet.config.policy.ExternalExitRequest
+import app.lernet.config.policy.PolicyTemplateChoice
 import app.lernet.config.policy.VerifiedInterfaceBinding
 import app.lernet.config.transfer.TransferBundle
 import app.lernet.engine.policy.ExpertIntent
 import app.lernet.engine.policy.ExpertRuntimeState
 import app.lernet.engine.policy.ExpertSessionPhase
+import app.lernet.engine.policy.PolicyControlCapabilities
+import app.lernet.ui.controls.ExpertTemplatePicker
+import app.lernet.ui.controls.TemplateAction
 import app.lernet.routing.policy.NetworkPolicy
 import app.lernet.routing.policy.PolicyCanvasKeys
 import app.lernet.routing.policy.PolicyCanvasPoint
@@ -59,6 +64,59 @@ class ExpertScreenTest {
     private val bundle = TransferBundle(scope = "all", groups = emptyList(), profiles = emptyList(), rules = emptyList())
 
     @Test
+    @Config(qualifiers = "w360dp-h800dp-xxhdpi")
+    fun templateSwitchKeepsRunningPolicyUntilApply() {
+        val general = NetworkPolicy(revision = 4)
+        val work = general.copy(revision = 5)
+        val commands = mutableListOf<ExpertIntent>()
+        val snapshot = ExpertRuntimeState(
+            saved = general, phase = ExpertSessionPhase.RUNNING, desiredEnabled = true,
+            appliedPolicy = general, appliedRevision = general.revision,
+            capabilities = PolicyControlCapabilities(true, true, true),
+        )
+        val ui = androidx.compose.runtime.mutableStateOf(ExpertUiState(
+            snapshot, bundle, templates = listOf(PolicyTemplateChoice("general", "Общий"), PolicyTemplateChoice("work", "Рабочий")),
+            appliedTemplateId = "general",
+        ))
+        rule.setContent {
+            FixtureTheme {
+                ExpertScreen(ui.value, remember { SnackbarHostState() }, {}, commands::add, {}, {}, {}, false,
+                    onTemplateChange = { action ->
+                        assertThat(action).isEqualTo(TemplateAction.Select("work"))
+                        ui.value = ui.value.copy(selectedTemplateId = "work", runtime = snapshot.copy(saved = work, draft = work))
+                        null
+                    })
+            }
+        }
+        rule.onNodeWithTag("expert_template_picker").performClick()
+        rule.onNodeWithText("Рабочий").performClick()
+        rule.onNodeWithText("Сейчас работает «Общий»").assertIsDisplayed()
+        rule.runOnIdle { assertThat(commands).isEmpty() }
+        capture("android-expert-template-switch.png")
+        rule.onNodeWithText("Применить шаблон").performClick()
+        rule.runOnIdle { assertThat(commands).containsExactly(ExpertIntent.ApplySaved) }
+    }
+
+    @Test
+    fun templateCopyRetainsTheEnteredNameWhenSavingFails() {
+        rule.setContent {
+            FixtureTheme {
+                ExpertTemplatePicker(listOf("general" to "Общий"), "general", enabled = true,
+                    onChange = {
+                        assertThat(it).isEqualTo(TemplateAction.Create("Рабочий"))
+                        "Ошибка сохранения"
+                    })
+            }
+        }
+        rule.onNodeWithTag("expert_template_picker").performClick()
+        rule.onNodeWithText("Создать копию…").performClick()
+        rule.onNodeWithTag("expert_template_name").performTextInput("Рабочий")
+        rule.onNodeWithText("Создать").performClick()
+        rule.onNodeWithText("Ошибка сохранения").assertIsDisplayed()
+        rule.onNodeWithText("Рабочий").assertIsDisplayed()
+    }
+
+    @Test
     fun compactSchemaKeepsItsRootVisibleInSmallRemainingViewport() {
         rule.setContent {
             FixtureTheme {
@@ -67,8 +125,8 @@ class ExpertScreenTest {
                 }
             }
         }
-        rule.onNodeWithText("Начало схемы").assertIsDisplayed()
-        rule.onNodeWithContentDescription(rule.activity.getString(app.lernet.R.string.expert_schema_help)).assertIsDisplayed()
+        rule.onNodeWithTag("branch-map-open").assertIsDisplayed()
+        rule.onNodeWithTag("branch-search").assertIsDisplayed()
         capture("android-expert-schema-compact.png")
     }
 
@@ -127,7 +185,7 @@ class ExpertScreenTest {
                 ExpertRuleEditor(node, app.lernet.routing.policy.PolicyScope.Device, bundle, NetworkPolicy(), { committed = it; null }, {})
             }
         }
-        rule.onNodeWithText("✓ Готово").assertIsDisplayed().performClick()
+        rule.onNodeWithTag("expert_rule_save_draft").assertIsDisplayed().performClick()
         rule.runOnIdle { assertThat(committed?.id).isEqualTo("new-rule") }
         capture("android-expert-rule-editor.png", dialog = true)
     }

@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,6 +22,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.lernet.R
 
@@ -40,8 +40,8 @@ fun AppModeTabs(expert: Boolean, onVpn: () -> Unit, onExpert: () -> Unit, modifi
             .padding(3.dp).selectableGroup().semantics { contentDescription = description },
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        ModeSegment(stringResource(R.string.expert_tab_vpn), !expert, onVpn, Modifier.weight(1f))
-        ModeSegment(stringResource(R.string.expert_tab_expert), expert, onExpert, Modifier.weight(1f))
+        ModeSegment(stringResource(R.string.expert_tab_vpn), !expert, onVpn, Modifier.weight(.8f), 4.dp)
+        ModeSegment(stringResource(R.string.expert_tab_expert), expert, onExpert, Modifier.weight(1.2f), 4.dp)
     }
 }
 
@@ -61,13 +61,13 @@ fun LerSegmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, 
 }
 
 @Composable
-private fun ModeSegment(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier) {
+private fun ModeSegment(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier, horizontalPadding: Dp = 14.dp) {
     val scheme = MaterialTheme.colorScheme
     Box(
         modifier.heightIn(min = 40.dp).clip(RoundedCornerShape(50))
             .background(if (selected) scheme.secondaryContainer else scheme.background)
             .selectable(selected = selected, role = Role.Tab, onClick = { if (!selected) onClick() })
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .padding(horizontal = horizontalPadding, vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(

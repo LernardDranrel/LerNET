@@ -9,8 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -30,14 +28,13 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.lernet.R
 import app.lernet.config.model.Group
 import app.lernet.engine.ConnectionSnapshot
 import app.lernet.engine.ConnectionState
 import app.lernet.engine.TrafficDisplay
-import app.lernet.ui.components.LerNetLogo
+import app.lernet.ui.controls.ProfileSelector
 import app.lernet.ui.status.HopPathLine
 import app.lernet.ui.theme.LerNetOk
 
@@ -51,44 +48,23 @@ internal fun ProfileLine(
     onRules: (() -> Unit)?,
     proxyMode: Boolean = false,
 ) {
-    Card(
-        onClick = onChange,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        shape = MaterialTheme.shapes.large,
-        modifier = Modifier.fillMaxWidth().testTag("home_profile_line"),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            LerNetLogo(size = 32.dp)
-            Column(Modifier.weight(1f)) {
-                Text(
-                    name ?: stringResource(if (empty) R.string.empty_profiles else R.string.no_profile),
-                    style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
-                val subtitle = when {
-                    empty -> stringResource(R.string.empty_profiles_body)
-                    name == null -> stringResource(R.string.choose_profile)
-                    // Same order as Windows (HomeWords.profileSubtitle): folder or «без папки», autoswap, mode.
-                    else -> listOfNotNull(
-                        group?.let { stringResource(R.string.home_profile_folder, it.name) } ?: stringResource(R.string.home_profile_single),
-                        stringResource(R.string.home_profile_autoswap).takeIf { group?.autoFailover == true },
-                        stringResource(R.string.home_profile_proxy).takeIf { proxyMode },
-                    ).joinToString(" · ")
-                }
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = if (empty) 4 else 3, overflow = TextOverflow.Ellipsis) // «…· автосмена · режим прокси» was cut to «папка «Работа» · …»
-            }
-            if (onRules != null) {
-                TextButton(onRules, Modifier.heightIn(min = 48.dp).testTag("home_profile_rules")) {
-                    Text(stringResource(R.string.home_profile_rules))
-                }
-            }
-            TextButton(onChange, Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.home_change_profile)) }
-        }
+    val subtitle = when {
+        empty -> stringResource(R.string.empty_profiles_body)
+        name == null -> stringResource(R.string.choose_profile)
+        else -> listOfNotNull(
+            group?.let { stringResource(R.string.home_profile_folder, it.name) } ?: stringResource(R.string.home_profile_single),
+            stringResource(R.string.home_profile_autoswap).takeIf { group?.autoFailover == true },
+            stringResource(R.string.home_profile_proxy).takeIf { proxyMode },
+        ).joinToString(" · ")
     }
+    ProfileSelector(
+        name = name ?: stringResource(if (empty) R.string.empty_profiles else R.string.no_profile),
+        subtitle = subtitle,
+        changeLabel = stringResource(R.string.home_change_profile),
+        rulesLabel = stringResource(R.string.home_profile_rules),
+        onChoose = onChange,
+        onRules = onRules,
+    )
 }
 
 /**
@@ -211,7 +187,7 @@ internal fun LinkCard(state: HomeUiState, onIntent: (HomeIntent) -> Unit, hopSna
 @Composable
 private fun LinkRow(label: String, value: String, good: Boolean = false, bad: Boolean = false, tag: String? = null, onClick: (() -> Unit)? = null) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 44.dp)
+        Modifier.fillMaxWidth().heightIn(min = if (onClick != null) 48.dp else 34.dp)
             .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
             .then(if (tag != null) Modifier.testTag(tag) else Modifier)
             .padding(vertical = 6.dp),

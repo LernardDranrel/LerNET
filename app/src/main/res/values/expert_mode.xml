@@ -32,6 +32,11 @@
     <string name="expert_add_rule">Добавить правило</string>
     <string name="expert_add_child">Дочернее правило</string>
     <string name="expert_rule_editor">Правило</string>
+    <string name="expert_editor_heading">Редактор правила</string>
+    <string name="expert_editor_parent">Условие родителя · %1$s</string>
+    <string name="expert_editor_conditions">Условия</string>
+    <string name="expert_editor_save_draft">Сохранить в черновик</string>
+    <string name="expert_editor_hide_redirect">Скрыть перенаправление</string>
     <string name="expert_rule_title">Название правила</string>
     <string name="expert_rule_unnamed">Правило без названия</string>
     <string name="expert_rule_enabled">Правило включено</string>

@@ -10,6 +10,7 @@ import app.lernet.config.redact.DiagKind
 import app.lernet.config.redact.DiagnosticJournal
 import app.lernet.config.policy.PolicyInventoryChange
 import app.lernet.config.policy.PolicyMigration
+import app.lernet.config.policy.PolicyTemplateChoice
 import app.lernet.config.policy.PolicyWorkspace
 import app.lernet.config.policy.PolicyWorkspaceRepository
 import app.lernet.config.policy.PolicyWorkspaceStore
@@ -33,6 +34,7 @@ import app.lernet.vpn.DefaultNetworkMonitor
 import app.lernet.vpn.expert.AndroidExpertEnvironment
 import app.lernet.vpn.expert.AndroidExpertEnvironmentState
 import app.lernet.subscription.SubscriptionAutoRefresh
+import app.lernet.ui.controls.TemplateAction
 import app.lernet.vpn.expert.ExpertServiceRestorer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.atomic.AtomicLong
@@ -41,6 +43,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -63,6 +66,19 @@ data class ExpertUiState(
     val inventoryNotes: List<String> = emptyList(),
     val environment: AndroidExpertEnvironmentState? = null,
     val restoreWarning: String? = null,
+    val selectedTemplateId: String = PolicyWorkspace.DEFAULT_TEMPLATE_ID,
+    val templates: List<PolicyTemplateChoice> = listOf(PolicyTemplateChoice(PolicyWorkspace.DEFAULT_TEMPLATE_ID, PolicyWorkspace.DEFAULT_TEMPLATE_NAME)),
+    val appliedTemplateId: String? = null,
+)
+
+private fun ExpertUiState.withTemplates(workspace: PolicyWorkspace, snapshot: ExpertRuntimeState?) = copy(
+    selectedTemplateId = workspace.selectedTemplateId,
+    templates = workspace.templateChoices,
+    appliedTemplateId = when {
+        snapshot?.appliedPolicy == null -> null
+        snapshot.appliedPolicy == workspace.saved -> workspace.selectedTemplateId
+        else -> appliedTemplateId
+    },
 )
 
 /** Process-lifetime owner. Navigation never closes the Expert session or loses a durable draft. */
@@ -162,7 +178,12 @@ class ExpertCoordinator @Inject constructor(
                         } else {
                             before.environment
                         }
-                        mutableState.update { it.copy(runtime = snapshot, environment = inspected) }
+                        val appliedChanged = before.runtime?.appliedPolicy != snapshot.appliedPolicy
+                        val durable = if (appliedChanged) workspace.snapshot() else null
+                        mutableState.update {
+                            val ui = if (durable != null) it.withTemplates(durable, snapshot) else it
+                            ui.copy(runtime = snapshot, environment = inspected)
+                        }
                         app.lernet.vpn.expert.ExpertNotificationFeed.status.value =
                             app.lernet.vpn.expert.expertNotificationStatus(snapshot, DefaultNetworkMonitor.underlyingNetwork() != null)
                         if (snapshot.phase == ExpertSessionPhase.RUNNING && before.runtime?.phase != ExpertSessionPhase.RUNNING) {
@@ -219,7 +240,9 @@ class ExpertCoordinator @Inject constructor(
             }
             val notes = workspace.lastNotes
             val inspected = environment.inspect()
-            mutableState.update { it.copy(inventory = bundle, storageError = null, inventoryNotes = notes, environment = inspected) }
+            mutableState.update { it.withTemplates(saved, runtime?.state?.value).copy(
+                inventory = bundle, storageError = null, inventoryNotes = notes, environment = inspected,
+            ) }
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -234,15 +257,16 @@ class ExpertCoordinator @Inject constructor(
 
     fun connectedVpnProfileId(): String? = backend.connectedSimpleVpnProfileId()
 
-    fun startKeepingVpn(profileId: String, expected: NetworkPolicy) =
-        dispatch(ExpertIntent.Start, automaticStart = false, handover = profileId to expected)
+    fun startKeepingVpn(templateId: String, profileId: String, expected: NetworkPolicy) =
+        dispatch(ExpertIntent.Start, automaticStart = false, handover = profileId to expected, templateId = templateId)
 
-    fun dispatch(intent: ExpertIntent) = dispatch(intent, automaticStart = false)
+    fun dispatch(intent: ExpertIntent, templateId: String? = null) = dispatch(intent, automaticStart = false, templateId = templateId)
 
     private fun dispatch(
         intent: ExpertIntent,
         automaticStart: Boolean,
-        handover: Pair<String, NetworkPolicy>? = null
+        handover: Pair<String, NetworkPolicy>? = null,
+        templateId: String? = null,
     ) {
         if (intent == ExpertIntent.Start || intent == ExpertIntent.Stop) backend.noteModeIntent()
         val epoch = if (intent == ExpertIntent.Start || intent == ExpertIntent.Stop) desiredEpoch.incrementAndGet() else desiredEpoch.get()
@@ -271,6 +295,10 @@ class ExpertCoordinator @Inject constructor(
                     return@launch
                 }
                 mutex.withLock {
+                    if (templateId != null && workspace.snapshot().selectedTemplateId != templateId) {
+                        mutableMessages.emit(context.getString(R.string.expert_edit_conflict))
+                        return@launch
+                    }
                     if (intent == ExpertIntent.Start && epoch != desiredEpoch.get()) return@launch
                     if (intent == ExpertIntent.Start && handover != null) {
                         check(backend.connectedSimpleVpnProfileId() == handover.first) { "Simple VPN changed before handover" }
@@ -285,16 +313,24 @@ class ExpertCoordinator @Inject constructor(
                         require(desired.edit().putBoolean("desired", true).commit()) { "Session intent write failed" }
                         backend.authorizeStart(automaticStart)
                     }
-                    backend.updateWorkspace(workspace.snapshot())
+                    val editor = workspace.snapshot()
+                    val restore = if (automaticStart && intent == ExpertIntent.Start) backend.restoreCandidate(editor) else null
+                    backend.updateWorkspace(restore ?: editor)
                     val controller = runtime
-                    controller?.handle(intent)
+                    try {
+                        if (restore == null) controller?.handle(intent) else controller?.restore(restore.saved)
+                    } finally {
+                        backend.updateWorkspace(workspace.snapshot())
+                    }
+                    if (restore != null && controller?.state?.value?.appliedPolicy == restore.saved) {
+                        mutableState.update { it.copy(appliedTemplateId = restore.selectedTemplateId) }
+                    }
                     if (intent == ExpertIntent.Start &&
                         epoch == desiredEpoch.get() &&
                         controller?.state?.value?.phase == ExpertSessionPhase.FAILED
                     ) {
                         desired.edit().putBoolean("desired", false).commit()
                     }
-                    backend.updateWorkspace(workspace.snapshot())
                     val current = controller?.state?.value
                     if (intent in setOf(ExpertIntent.Start, ExpertIntent.ApplySaved) &&
                         current?.phase == ExpertSessionPhase.RUNNING &&
@@ -317,12 +353,55 @@ class ExpertCoordinator @Inject constructor(
 
     fun noteSimpleModeIntent() = backend.noteModeIntent()
 
-    suspend fun saveDraft(expected: NetworkPolicy, next: NetworkPolicy): String? = withContext(Dispatchers.IO) {
+    suspend fun changeTemplate(templateId: String, action: TemplateAction): String? = withContext(Dispatchers.IO) {
         try {
             awaitInitialized()
             mutex.withLock {
                 val controller = requireNotNull(runtime)
                 val current = controller.state.value
+                if (current.applying || current.phase in setOf(ExpertSessionPhase.STARTING, ExpertSessionPhase.STOPPING)) {
+                    return@withLock context.getString(R.string.expert_external_busy)
+                }
+                if (current.draftPersistenceError != null) return@withLock context.getString(R.string.expert_storage_error)
+                withContext(NonCancellable) {
+                    val before = workspace.snapshot()
+                    require(before.selectedTemplateId == templateId) { context.getString(R.string.expert_edit_conflict) }
+                    val applied = mutableState.value.withTemplates(before, current).appliedTemplateId
+                    val next = when (action) {
+                        is TemplateAction.Select -> workspace.selectTemplate(action.id)
+                        is TemplateAction.Create -> workspace.createTemplate(action.name)
+                        is TemplateAction.Rename -> workspace.renameTemplate(action.id, action.name)
+                        is TemplateAction.Delete -> {
+                            require(action.id != applied) { "Этот шаблон управляет сетью." }
+                            workspace.deleteTemplate(action.id)
+                        }
+                    }
+                    if (next.selectedTemplateId != before.selectedTemplateId) {
+                        automaticInventoryAllowed = false
+                        controller.handle(ExpertIntent.WorkspaceChanged(next.saved, next.draft, PolicyMigration.inventory(next.legacy)))
+                        backend.updateWorkspace(next)
+                    }
+                    mutableState.update { it.copy(appliedTemplateId = applied).withTemplates(next, controller.state.value) }
+                }
+                null
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: IllegalArgumentException) {
+            error.message ?: context.getString(R.string.expert_edit_conflict)
+        } catch (error: Exception) {
+            LerNetLog.e("LerNET.Expert", "Template update failed (${error.javaClass.simpleName})")
+            context.getString(R.string.expert_storage_error)
+        }
+    }
+
+    suspend fun saveDraft(templateId: String, expected: NetworkPolicy, next: NetworkPolicy): String? = withContext(Dispatchers.IO) {
+        try {
+            awaitInitialized()
+            mutex.withLock {
+                val controller = requireNotNull(runtime)
+                val current = controller.state.value
+                if (templateId != workspace.snapshot().selectedTemplateId) return@withLock context.getString(R.string.expert_edit_conflict)
                 if (current.applying || current.phase in setOf(ExpertSessionPhase.STARTING, ExpertSessionPhase.STOPPING)) {
                     return@withLock context.getString(R.string.expert_external_busy)
                 }
@@ -344,12 +423,14 @@ class ExpertCoordinator @Inject constructor(
     }
 
     suspend fun saveHealthSettings(
+        templateId: String,
         expected: PolicyHealthSettings,
         next: PolicyHealthSettings,
     ): String? = withContext(Dispatchers.IO) {
         try {
             awaitInitialized()
             mutex.withLock {
+                if (templateId != workspace.snapshot().selectedTemplateId) return@withLock context.getString(R.string.expert_edit_conflict)
                 val controller = requireNotNull(runtime)
                 val current = controller.state.value
                 if (current.applying || current.phase in setOf(ExpertSessionPhase.STARTING, ExpertSessionPhase.STOPPING)) {
@@ -376,12 +457,14 @@ class ExpertCoordinator @Inject constructor(
     }
 
     suspend fun saveDnsSettings(
+        templateId: String,
         expected: PolicyDnsSettings,
         next: PolicyDnsSettings,
     ): String? = withContext(Dispatchers.IO) {
         try {
             awaitInitialized()
             mutex.withLock {
+                if (templateId != workspace.snapshot().selectedTemplateId) return@withLock context.getString(R.string.expert_edit_conflict)
                 val controller = requireNotNull(runtime)
                 val current = controller.state.value
                 if (current.applying || current.phase in setOf(ExpertSessionPhase.STARTING, ExpertSessionPhase.STOPPING)) {
@@ -521,7 +604,13 @@ class ExpertCoordinator @Inject constructor(
         backend.updateWorkspace(adopted)
         session.handle(ExpertIntent.WorkspaceChanged(adopted.saved, adopted.draft, PolicyMigration.inventory(adopted.legacy)))
         adoptedInventory = adopted.legacy
-        mutableState.update { it.copy(inventory = adopted.legacy, inventoryNotes = emptyList(), storageError = null) }
+        mutableState.update { old ->
+            // Replaced archives can reuse the ID of a different, still-running local template.
+            val ui = if (replace) old.copy(appliedTemplateId = null) else old
+            ui.withTemplates(adopted, session.state.value).copy(
+                inventory = adopted.legacy, inventoryNotes = emptyList(), storageError = null,
+            )
+        }
         LerNetLog.i(
             "LerNET.Expert",
             app.lernet.config.redact.DiagnosticJournal.wire(

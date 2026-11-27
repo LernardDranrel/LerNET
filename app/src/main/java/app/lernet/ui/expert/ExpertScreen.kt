@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -92,6 +91,8 @@ import app.lernet.routing.policy.PolicyDnsSettings
 import app.lernet.routing.policy.PolicyHealthSettings
 import app.lernet.ui.components.LerNetLogo
 import app.lernet.ui.components.PanelCard
+import app.lernet.ui.controls.ExpertTemplatePicker
+import app.lernet.ui.controls.TemplateAction
 import app.lernet.ui.controls.NetworkLever
 import app.lernet.ui.controls.NetworkLeverLamp
 import app.lernet.ui.icons.LerNetSymbols
@@ -117,21 +118,23 @@ internal fun ExpertRoute(
 ) {
     val viewModel: ExpertViewModel = hiltViewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val templateId = state.selectedTemplateId
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val appSnackbar = app.lernet.ui.nav.LocalAppSnackbar.current
     val snackbar = remember(appSnackbar) { appSnackbar ?: SnackbarHostState() }
     val splash = rememberExpertSplash(context)
     var switchPrompt by rememberSaveable { mutableStateOf(false) }
+    var startTemplateId by rememberSaveable { mutableStateOf(templateId) }
     var handover by rememberSaveable(stateSaver = ExpertOptionalJsonSaver<Pair<String, NetworkPolicy>>()) { mutableStateOf<Pair<String, NetworkPolicy>?>(null) }
     var keepVpn by rememberSaveable { mutableStateOf(false) }
     var permissionHandover by rememberSaveable(stateSaver = ExpertOptionalJsonSaver<Pair<String, NetworkPolicy>>()) { mutableStateOf<Pair<String, NetworkPolicy>?>(null) }
     val startConfirmed: () -> Unit = {
         val selected = permissionHandover
         if (selected == null) {
-            viewModel.onIntent(ExpertIntent.Start)
+            viewModel.onIntent(ExpertIntent.Start, startTemplateId)
         } else {
-            viewModel.startKeepingVpn(selected.first, selected.second)
+            viewModel.startKeepingVpn(startTemplateId, selected.first, selected.second)
         }
     }
     var exportPrompt by rememberSaveable { mutableStateOf(false) }
@@ -251,8 +254,9 @@ internal fun ExpertRoute(
         )
     }
     ExpertScreen(
-        state, snackbar, onVpn, onIntent = viewModel::onIntent,
+        state, snackbar, onVpn, onIntent = { viewModel.onIntent(it, templateId) },
         onStart = {
+            startTemplateId = templateId
             viewModel.refreshEnvironment()
             handover = viewModel.connectedVpnProfileId()?.let { profileId ->
                 state.runtime?.takeIf { ExpertVpnHandover.available(it.saved, it.draft) }
@@ -266,14 +270,15 @@ internal fun ExpertRoute(
         permissionDenied = permissionDenied,
         onImport = { importPrompt = true },
         onSaveExternal = viewModel::saveExternalExit,
-        onSaveHealth = viewModel::saveHealthSettings,
-        onSaveDns = viewModel::saveDnsSettings,
-        onSaveDraft = viewModel::saveDraft,
+        onSaveHealth = { before, after -> viewModel.saveHealthSettings(templateId, before, after) },
+        onSaveDns = { before, after -> viewModel.saveDnsSettings(templateId, before, after) },
+        onSaveDraft = { before, after -> viewModel.saveDraft(templateId, before, after) },
+        onTemplateChange = { viewModel.changeTemplate(templateId, it) },
         onCopyProfile = viewModel::copyProfile,
         onRenameFolder = viewModel::renameFolder,
         onDeleteFolder = viewModel::deleteFolder,
         onRefreshSubscription = viewModel::refreshSubscription,
-        formMemory = viewModel.formMemory,
+        formMemory = viewModel.formMemory(state.selectedTemplateId),
         selectedSection = section, onSectionChange = onSectionChange, onOpenDrawer = onOpenDrawer,
         onSettings = onSettings,
         onOpenDiag = onOpenDiag,
@@ -311,6 +316,7 @@ internal fun ExpertScreen(
     onOpenDiag: () -> Unit = {},
     onNetwork: () -> Unit = {},
     frameAnimateIn: Boolean = false,
+    onTemplateChange: (suspend (TemplateAction) -> String?)? = null,
 ) {
     var localSection by rememberSaveable { mutableStateOf(ExpertSection.OVERVIEW) }
     val section = selectedSection ?: localSection
@@ -318,12 +324,18 @@ internal fun ExpertScreen(
         if (onSectionChange != null) onSectionChange(value) else localSection = value
     }
     var archiveMenu by remember { mutableStateOf(false) }
-    var simulationConnection by rememberSaveable(stateSaver = ExpertObservationSaver) { mutableStateOf<ExpertConnectionObservation?>(null) }
-    var simulationRequest by rememberSaveable { mutableStateOf(0L) }
-    var historicalPath by rememberSaveable { mutableStateOf(false) }
-    val sectionStates = rememberSaveableStateHolder()
-    var dnsEditor by rememberSaveable(stateSaver = ExpertOptionalJsonSaver<PolicyDnsSettings>()) { mutableStateOf<PolicyDnsSettings?>(null) }
-    var healthEditor by rememberSaveable(stateSaver = ExpertOptionalJsonSaver<PolicyHealthSettings>()) { mutableStateOf<PolicyHealthSettings?>(null) }
+    var simulationConnection by rememberSaveable(state.selectedTemplateId, stateSaver = ExpertObservationSaver) {
+        mutableStateOf<ExpertConnectionObservation?>(null)
+    }
+    var simulationRequest by rememberSaveable(state.selectedTemplateId) { mutableStateOf(0L) }
+    var historicalPath by rememberSaveable(state.selectedTemplateId) { mutableStateOf(false) }
+    val sectionStates = androidx.compose.runtime.key(state.selectedTemplateId) { rememberSaveableStateHolder() }
+    var dnsEditor by rememberSaveable(state.selectedTemplateId, stateSaver = ExpertOptionalJsonSaver<PolicyDnsSettings>()) {
+        mutableStateOf<PolicyDnsSettings?>(null)
+    }
+    var healthEditor by rememberSaveable(state.selectedTemplateId, stateSaver = ExpertOptionalJsonSaver<PolicyHealthSettings>()) {
+        mutableStateOf<PolicyHealthSettings?>(null)
+    }
     val reduced = rememberReduceMotion()
     // «Защита и DNS» opens from ⋮ and is not in the bottom menu: Back returns to the pult.
     androidx.activity.compose.BackHandler(enabled = section == ExpertSection.SAFETY) { selectSection(ExpertSection.OVERVIEW) }
@@ -416,29 +428,36 @@ internal fun ExpertScreen(
                                 modifier = Modifier.padding(horizontal = 16.dp),
                             )
                         }
-                        ExpertSchema(runtime, bundle, onIntent, Modifier.weight(1f), onSaveDraft)
+                        androidx.compose.runtime.key(state.selectedTemplateId) {
+                            ExpertSchema(runtime, bundle, onIntent, Modifier.weight(1f), onSaveDraft)
+                        }
                     }
                 } else if (visible == ExpertSection.OVERVIEW) {
-                    // Пульт: рычаг, плитки, блок настроек Эксперта (защита/DNS/схема) — без лишних коробок.
                     Column(
-                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         state.storageError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                         if (permissionDenied) {
                             Text(stringResource(R.string.expert_permission_denied), color = MaterialTheme.colorScheme.error)
                         }
+                        ExpertTemplatePicker(
+                            choices = remember(state.templates) { state.templates.map { it.id to it.name } },
+                            selectedId = state.selectedTemplateId,
+                            enabled = onTemplateChange != null && state.storageError == null && !runtime.applying &&
+                                runtime.phase !in setOf(ExpertSessionPhase.STARTING, ExpertSessionPhase.STOPPING),
+                            onChange = { action -> onTemplateChange?.invoke(action) },
+                            protectedId = state.appliedTemplateId,
+                        )
+                        ExpertTemplateState(state, onIntent) { selectSection(ExpertSection.SCHEMA) }
                         ExpertStatus(state, onIntent, onStart, reduced)
                         ExpertTiles(runtime, state, ::selectSection)
                         ExpertPultSettings(
-                            inventoryReady = state.inventory != null,
-                            onOpenSafety = { selectSection(ExpertSection.SAFETY) },
+                            policy = runtime.draft,
                             onOpenDns = { dnsEditor = runtime.draft.dns },
                             onOpenHealth = { healthEditor = runtime.draft.health },
                             dnsEnabled = onSaveDns != null,
                             healthEnabled = onSaveHealth != null,
-                            onImport = onImport,
-                            onExport = onExport,
                         )
                     }
                 } else if (visible == ExpertSection.JOURNAL) {
@@ -577,6 +596,34 @@ internal fun ExpertScreen(
 }
 
 @Composable
+private fun ExpertTemplateState(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, openSchema: () -> Unit) {
+    val runtime = requireNotNull(state.runtime)
+    val running = runtime.phase == ExpertSessionPhase.RUNNING
+    val pending = running && runtime.saved != runtime.appliedPolicy
+    if (!pending && !runtime.hasDraftChanges) return
+    val active = state.templates.find { it.id == state.appliedTemplateId }?.name
+    val capabilities = runtime.capabilities
+    val live = capabilities.preservesTun && capabilities.atomicRules && capabilities.independentExits
+    Column(Modifier.fillMaxWidth().testTag("expert_pult_schema")) {
+        if (pending) {
+            Text(
+                when {
+                    active != null && state.appliedTemplateId != state.selectedTemplateId -> stringResource(R.string.expert_template_active, active)
+                    else -> stringResource(R.string.expert_template_previous)
+                }, style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        when {
+            runtime.hasDraftChanges -> TextButton(openSchema) { Text(stringResource(R.string.expert_template_open_draft)) }
+            pending && live -> Button({ onIntent(ExpertIntent.ApplySaved) }, enabled = !runtime.applying) {
+                Text(stringResource(if (runtime.applying) R.string.expert_applying else R.string.expert_template_apply))
+            }
+            pending -> ExpertHint(R.string.expert_hot_unavailable)
+        }
+    }
+}
+
+@Composable
 private fun ExpertStatus(
     state: ExpertUiState,
     onIntent: (ExpertIntent) -> Unit,
@@ -613,83 +660,69 @@ private fun ExpertStatus(
         else runtime.networkReason?.takeIf { pult != app.lernet.engine.policy.PultStatus.PROBLEM }
     var details by rememberSaveable { mutableStateOf(false) }
     PanelCard {
-        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val stacked = maxWidth < 242.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.4f
             val summary: @Composable () -> Unit = {
-                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                // Mockup m4: «Своя схема · работает» on one line, the path and «сведения» on the next.
-                androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center,
-                    verticalArrangement = Arrangement.Center) {
-                Text(stringResource(R.string.expert_tunnel_title) + " · ", textAlign = TextAlign.Center, style = MaterialTheme.typography.titleLarge)
-                Text(statusText, textAlign = TextAlign.Center, style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.testTag("expert_pult_headline"),
-                    color = when (pult) {
-                        app.lernet.engine.policy.PultStatus.PROBLEM -> MaterialTheme.colorScheme.error
-                        app.lernet.engine.policy.PultStatus.WORKING -> MaterialTheme.colorScheme.secondary
-                        app.lernet.engine.policy.PultStatus.OFF -> MaterialTheme.colorScheme.onSurfaceVariant
-                        else -> MaterialTheme.colorScheme.tertiary
-                    })
-                }
-                note?.let { Text(it, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary) }
-                state.inventory?.let { inventory ->
-                    val policy = runtime.appliedPolicy ?: runtime.saved
-                    androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center,
-                        itemVerticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            stringResource(R.string.expert_default_path_summary, targetTitle(policy.device.defaultTarget, inventory, policy).replaceFirstChar { it.lowercase() }) + " · ",
-                            style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center
-                        )
-                        Text(
-                            if (details) app.lernet.engine.text.ExpertWords.HIDE_DETAILS else app.lernet.engine.text.ExpertWords.DETAILS,
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.heightIn(min = 48.dp).wrapContentHeight()
-                                .clickable(role = androidx.compose.ui.semantics.Role.Button) { details = !details }
-                                .testTag("expert_tunnel_details"),
-                        )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(statusText, style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.testTag("expert_pult_headline"),
+                        color = when (pult) {
+                            app.lernet.engine.policy.PultStatus.PROBLEM -> MaterialTheme.colorScheme.error
+                            app.lernet.engine.policy.PultStatus.WORKING -> MaterialTheme.colorScheme.secondary
+                            app.lernet.engine.policy.PultStatus.OFF -> MaterialTheme.colorScheme.onSurfaceVariant
+                            else -> MaterialTheme.colorScheme.tertiary
+                        })
+                    note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary) }
+                    ExpertUptimeLine(runtime)
+                    state.inventory?.let { inventory ->
+                        val policy = runtime.appliedPolicy ?: runtime.saved
+                        Text(stringResource(R.string.expert_default_path_summary,
+                            targetTitle(policy.device.defaultTarget, inventory, policy).replaceFirstChar { it.lowercase() }),
+                            style = MaterialTheme.typography.bodySmall)
                     }
-                }
+                    if (runtime.directNetwork != null && runtime.phase == ExpertSessionPhase.RUNNING) {
+                        TextButton({ details = !details }, modifier = Modifier.testTag("expert_tunnel_details")) {
+                            Text(if (details) app.lernet.engine.text.ExpertWords.HIDE_DETAILS else app.lernet.engine.text.ExpertWords.DETAILS)
+                        }
+                    }
                 }
             }
             val lever: @Composable () -> Unit = {
-            NetworkLever(
-                checked = runtime.desiredEnabled,
-                enabled = !runtime.applying &&
-                    runtime.phase !in setOf(ExpertSessionPhase.STARTING, ExpertSessionPhase.STOPPING),
-                onCheckedChange = { if (it) onStart() else onIntent(ExpertIntent.Stop) },
-                accessibleName = stringResource(R.string.expert_tunnel_title),
-                lamp = when (runtime.tunnelHealth) {
-                    ExpertTunnelHealth.OFF -> NetworkLeverLamp.OFF
-                    ExpertTunnelHealth.PENDING -> NetworkLeverLamp.PENDING
-                    ExpertTunnelHealth.HEALTHY -> NetworkLeverLamp.HEALTHY
-                    ExpertTunnelHealth.ERROR -> NetworkLeverLamp.ERROR
-                },
-                lampDescription = stringResource(
-                    when (runtime.tunnelHealth) {
-                        ExpertTunnelHealth.OFF -> R.string.expert_lamp_off
-                        ExpertTunnelHealth.PENDING -> R.string.expert_lamp_pending
-                        ExpertTunnelHealth.HEALTHY -> R.string.expert_lamp_healthy
-                        ExpertTunnelHealth.ERROR -> R.string.expert_lamp_error
-                    }
-                ),
-                stateLabel = app.lernet.engine.policy.ExpertPult.lever(pult),
-                reducedMotion = reducedMotion,
-            )
+                NetworkLever(
+                    checked = runtime.desiredEnabled,
+                    enabled = !runtime.applying &&
+                        runtime.phase !in setOf(ExpertSessionPhase.STARTING, ExpertSessionPhase.STOPPING),
+                    onCheckedChange = { if (it) onStart() else onIntent(ExpertIntent.Stop) },
+                    accessibleName = stringResource(R.string.expert_tunnel_title),
+                    lamp = when (runtime.tunnelHealth) {
+                        ExpertTunnelHealth.OFF -> NetworkLeverLamp.OFF
+                        ExpertTunnelHealth.PENDING -> NetworkLeverLamp.PENDING
+                        ExpertTunnelHealth.HEALTHY -> NetworkLeverLamp.HEALTHY
+                        ExpertTunnelHealth.ERROR -> NetworkLeverLamp.ERROR
+                    },
+                    lampDescription = stringResource(
+                        when (runtime.tunnelHealth) {
+                            ExpertTunnelHealth.OFF -> R.string.expert_lamp_off
+                            ExpertTunnelHealth.PENDING -> R.string.expert_lamp_pending
+                            ExpertTunnelHealth.HEALTHY -> R.string.expert_lamp_healthy
+                            ExpertTunnelHealth.ERROR -> R.string.expert_lamp_error
+                        }
+                    ),
+                    stateLabel = app.lernet.engine.policy.ExpertPult.lever(pult),
+                    reducedMotion = reducedMotion,
+                )
             }
-            lever()
-            ExpertUptimeLine(runtime)
-            summary()
-        }
-        app.lernet.engine.policy.ExpertPult.schemaNote(
-            pult,
-            unsavedDraft = runtime.hasDraftChanges,
-            unapplied = runtime.appliedRevision != null && runtime.appliedRevision != runtime.saved.revision,
-            applied = runtime.appliedRevision != null,
-        )?.let { line ->
-            Text(
-                line,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.fillMaxWidth().testTag("expert_pult_schema"),
-                textAlign = TextAlign.Center,
-            )
+            if (stacked) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    summary()
+                    lever()
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    lever()
+                    Column(Modifier.weight(1f)) { summary() }
+                }
+            }
         }
         androidx.compose.animation.AnimatedVisibility(details) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -758,55 +791,27 @@ internal fun ExpertUptimeLine(runtime: app.lernet.engine.policy.ExpertRuntimeSta
     }
 }
 
-/** Пульт: аккуратный блок настроек Эксперта — защита, DNS, импорт/экспорт схемы (не только в ⋮). */
 @Composable
 private fun ExpertPultSettings(
-    inventoryReady: Boolean,
-    onOpenSafety: () -> Unit,
+    policy: NetworkPolicy,
     onOpenDns: () -> Unit,
     onOpenHealth: () -> Unit,
     dnsEnabled: Boolean,
     healthEnabled: Boolean,
-    onImport: () -> Unit,
-    onExport: () -> Unit,
 ) {
-    Column(
-        Modifier.fillMaxWidth().testTag("expert_pult_settings"),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(stringResource(R.string.expert_pult_settings_title), style = MaterialTheme.typography.titleMedium)
-        ExpertLinkRow(
-            stringResource(R.string.expert_section_safety),
-            stringResource(R.string.expert_pult_safety_hint),
-            tag = "expert_pult_safety",
-            onClick = onOpenSafety,
-        )
+    Column(Modifier.fillMaxWidth().testTag("expert_pult_settings")) {
         ExpertLinkRow(
             stringResource(R.string.expert_dns_row),
-            stringResource(R.string.expert_dns_row_hint),
-            enabled = dnsEnabled,
-            tag = "expert_pult_dns",
-            onClick = onOpenDns,
+            if (policy.dns.mode == app.lernet.routing.policy.PolicyDnsMode.SYSTEM) stringResource(R.string.expert_dns_system) else policy.dns.server,
+            enabled = dnsEnabled, tag = "expert_pult_dns", onClick = onOpenDns,
         )
+        HorizontalDivider()
         ExpertLinkRow(
             stringResource(R.string.expert_health_row),
-            stringResource(R.string.expert_health_row_hint),
-            enabled = healthEnabled,
-            tag = "expert_pult_health",
-            onClick = onOpenHealth,
+            stringResource(R.string.expert_template_health_interval,
+                expertSecondsInput(policy.health.minimumIntervalMs), expertSecondsInput(policy.health.maximumIntervalMs)),
+            enabled = healthEnabled, tag = "expert_pult_health", onClick = onOpenHealth,
         )
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(
-                onClick = onImport,
-                enabled = inventoryReady,
-                modifier = Modifier.weight(1f).testTag("expert_pult_import"),
-            ) { Text(stringResource(R.string.expert_import_short)) }
-            OutlinedButton(
-                onClick = onExport,
-                enabled = inventoryReady,
-                modifier = Modifier.weight(1f).testTag("expert_pult_export"),
-            ) { Text(stringResource(R.string.expert_export_short)) }
-        }
     }
 }
 

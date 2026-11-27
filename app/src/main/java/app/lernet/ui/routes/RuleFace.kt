@@ -91,7 +91,7 @@ private fun previewItems(kind: ConditionKind, values: List<String>, privateLabel
 }
 
 @Composable
-private fun shownValue(kind: ConditionKind, raw: String, privateLabel: String): String {
+internal fun shownValue(kind: ConditionKind, raw: String, privateLabel: String): String {
     val plain = RulePreview.plain(kind, raw, privateLabel)
     if (plain.isEmpty()) return ""
     if (!PatternSign.negated(raw)) return plain

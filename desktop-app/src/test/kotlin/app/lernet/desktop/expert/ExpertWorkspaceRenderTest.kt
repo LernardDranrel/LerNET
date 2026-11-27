@@ -43,8 +43,7 @@ class ExpertWorkspaceRenderTest {
                 assertThat(brand.boundsInRoot.top).isAtMost(40f)
                 val vpnTab = nodes(scene).first { "VPN" in texts(it) && it.config.getOrNull(SemanticsActions.OnClick) != null }
                 assertThat(vpnTab.boundsInRoot.left).isAtLeast(196f)
-                // The pult content («Своя схема») sits right of the section column (N1: sections live in the left column).
-                val heading = nodes(scene).first { "Своя схема" in texts(it) }
+                val heading = nodes(scene).first { "Правила устройства" in texts(it) }
                 assertThat(heading.boundsInRoot.left).isAtLeast(218f)
                 assertThat(heading.boundsInRoot.right).isAtMost(width - 22f)
                 // The v3 sections (m3): the same five as the phone, then «Защита и DNS» under «Настройки».
@@ -173,13 +172,7 @@ class ExpertWorkspaceRenderTest {
         repeat(3) { scene.render(0).close() }
         scene.render(0).use { image ->
             val bytes = requireNotNull(image.encodeToData(EncodedImageFormat.PNG)).use { it.bytes }
-            listOf(
-                File("build/expert-ui-review"),
-                File("/workspace/projects/LerNET-ui3/out/windows-expert-ui"),
-            ).forEach { dir ->
-                dir.mkdirs()
-                dir.resolve("$name.png").writeBytes(bytes)
-            }
+            File("build/expert-ui-review").apply { mkdirs() }.resolve("$name.png").writeBytes(bytes)
         }
     }
 

@@ -6,7 +6,6 @@ import android.graphics.Canvas
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -51,8 +50,7 @@ class ConnectionHeroTest {
                         status = "Подключение…",
                         enabled = true,
                         onToggle = { toggles++ },
-                        onOpenRoutes = null,
-                    ) { Text("Выбранный сервер") }
+                    )
                 }
             }
         }
@@ -70,8 +68,7 @@ class ConnectionHeroTest {
                     status = "Отключено",
                     enabled = false,
                     onToggle = { toggles++ },
-                    onOpenRoutes = null,
-                ) { Text("Выберите профиль") }
+                )
             }
         }
         rule.onNodeWithContentDescription("Подключить").assertIsNotEnabled()

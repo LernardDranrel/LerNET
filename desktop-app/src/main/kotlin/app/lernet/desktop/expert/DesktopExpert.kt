@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -49,6 +50,8 @@ import androidx.compose.ui.unit.sp
 import app.lernet.desktop.DesktopWorkspaceSidebar
 import app.lernet.desktop.WorkspaceNavigationHeader
 import app.lernet.desktop.WorkspaceNavigationItem
+import app.lernet.ui.controls.ExpertTemplatePicker
+import app.lernet.ui.controls.TemplateAction
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
 
@@ -81,16 +84,18 @@ fun DesktopExpert(
     onRenameFolder: ((String, String) -> Unit)? = null,
     onDeleteFolder: ((String) -> Unit)? = null,
     onRefreshSubscription: ((String) -> Unit)? = null,
+    onTemplateChange: suspend (TemplateAction) -> String? = { "Шаблоны доступны в открытой рабочей области." },
 ) {
     // G3: the section is remembered for the session (mode switches included); a new launch opens the pult.
     var pageName by rememberSaveable { mutableStateOf(ExpertPage.OVERVIEW.name) }
     val page = ExpertPage.valueOf(pageName)
     val openPage: (ExpertPage) -> Unit = { pageName = it.name }
     val pageStates = rememberSaveableStateHolder()
-    var confirmation by remember { mutableStateOf<ExpertIntent?>(null) }
+    var confirmation by remember(state.selectedTemplateId) { mutableStateOf<ExpertIntent?>(null) }
     var recordedFlow by remember { mutableStateOf<ExpertConnection?>(null) }
     var recordedPathOnly by remember { mutableStateOf(false) }
     var previewRequest by remember { mutableStateOf(0L) }
+    var requestedDeviceRule by remember(state.selectedTemplateId) { mutableStateOf<String?>(null) }
     val validation = remember(state.draft, state.profiles, state.folders) { ExpertPolicyEditing.validation(state) }
     Row(
         modifier.fillMaxSize().background(ExpertColors.background).onPreviewKeyEvent { event ->
@@ -133,19 +138,26 @@ fun DesktopExpert(
                 lit = if (state.phase == ExpertPhase.RUNNING) 1f else 0.35f,
                 animateIn = frameAnimateIn && !state.reducedMotion,
             ) {
-        Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(1f)) {
-                    // G4 (as in VPN mode and on the phone): the active item in the left column names the page,
-                    // no second title above the content.
-                    // No subtitles: the phone has none; only the Windows-only app settings page explains itself.
-                    val subtitle = when (page) {
-                        ExpertPage.APP_SETTINGS -> "Общие настройки приложения: действуют и в режиме VPN"
-                        else -> null
+        Column(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (state.workspaceReady) {
+                    val choices = remember(state.templateChoices) { state.templateChoices.map { it.id to it.name } }
+                    Box(Modifier.weight(1f)) {
+                        ExpertTemplatePicker(
+                            choices, state.selectedTemplateId,
+                            enabled = !state.busy && state.phase !in setOf(ExpertPhase.STARTING, ExpertPhase.STOPPING),
+                            onChange = onTemplateChange, modifier = Modifier.widthIn(max = 350.dp), protectedId = state.appliedTemplateId,
+                        )
                     }
-                    subtitle?.let { Text(it, color = ExpertColors.muted) }
-                }
-                ExpertWorkspaceMenu(state, onIntent)
+                } else Spacer(Modifier.weight(1f))
+                ExpertWorkspaceMenu(state, onIntent) { confirmation = ExpertIntent.RestoreAppliedToDraft }
+            }
+            if (state.workspaceReady && (state.hasDraftChanges ||
+                    (state.phase == ExpertPhase.RUNNING && state.appliedRevision != null && state.hasUnappliedChanges))) {
+                DraftActions(state, validation, onIntent) { confirmation = it }
+            }
+            if (page == ExpertPage.APP_SETTINGS) {
+                Text("Общие настройки VPN и Эксперта", color = ExpertColors.muted)
             }
             // One banner only: while the workspace gate is up, workspaceError owns the message
             // (bbda1d1 wrote the same failure into both error and workspaceError → dual banners + empty gap).
@@ -176,12 +188,14 @@ fun DesktopExpert(
                         }
                     }
                 }
-            } else pageStates.SaveableStateProvider(page.name) {
+            } else pageStates.SaveableStateProvider("${state.selectedTemplateId}/${page.name}") {
                 when (page) {
                     ExpertPage.OVERVIEW -> ExpertLiveOverview(
                         state, onIntent, Modifier.weight(1f), { confirmation = it }, openPage = openPage,
+                        editRule = { id -> requestedDeviceRule = id; openPage(ExpertPage.ROUTES) },
                     )
-                    ExpertPage.ROUTES -> ExpertRoutes(state, onIntent, Modifier.weight(1f))
+                    ExpertPage.ROUTES -> ExpertRoutes(state, onIntent, Modifier.weight(1f),
+                        requestedDeviceRule = requestedDeviceRule, onRuleOpened = { requestedDeviceRule = null })
                     ExpertPage.PREVIEW -> ExpertRoutePreview(
                         state, Modifier.weight(1f), onIntent, { openPage(ExpertPage.ROUTES) }, recordedFlow = recordedFlow,
                         showRecordedPath = recordedPathOnly, requestToken = previewRequest,
@@ -214,9 +228,6 @@ fun DesktopExpert(
                     ExpertPage.APP_SETTINGS -> appSettings?.invoke(Modifier.weight(1f).fillMaxWidth())
                 }
             }
-            if (state.hasDraftChanges || (state.phase == ExpertPhase.RUNNING && state.appliedRevision != null && state.hasUnappliedChanges)) {
-                DraftActions(state, validation, onIntent) { confirmation = it }
-            }
         }
         }
         }
@@ -245,20 +256,18 @@ fun DesktopExpert(
             }, { confirmation = null },
         )
         ExpertIntent.ApplySaved -> ExpertConfirm(
-            "Применить сохранённую схему?",
-            "После подтверждения новые соединения будут использовать сохранённую схему без перезапуска туннеля. " +
-                "Если ответ ядра потеряется, состояние правил нельзя считать известным: " +
-                "приложение покажет ошибку и проверит состояние либо выключит туннель.",
+            "Применить шаблон «${state.templateChoices.first { it.id == state.selectedTemplateId }.name}»?",
+            "Когда ядро подтвердит переключение, новые соединения пойдут по сохранённым правилам этого шаблона.",
             "Применить", {
                 confirmation = null
                 onIntent(ExpertIntent.ApplySaved)
             }, { confirmation = null },
         )
         ExpertIntent.RestoreAppliedToDraft -> ExpertConfirm(
-            "Вернуть применённую схему в редактор?",
-            "Текущий черновик будет заменён схемой, которая сейчас применяется к сети. " +
-                "Сохранённая версия и работающий туннель не изменятся. Затем схему можно отредактировать или сохранить.",
-            "Вернуть в черновик", {
+            "Заменить черновик шаблона?",
+            "В редакторе шаблона «${state.templateChoices.firstOrNull { it.id == state.selectedTemplateId }?.name.orEmpty()}» " +
+                "вместо текущего черновика откроется копия действующей схемы. Для записи в шаблон потребуется «Сохранить».",
+            "Заменить черновик", {
                 confirmation = null
                 onIntent(ExpertIntent.RestoreAppliedToDraft)
             }, { confirmation = null },
@@ -284,13 +293,19 @@ fun DesktopExpert(
 }
 
 @Composable
-private fun ExpertWorkspaceMenu(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit) {
+private fun ExpertWorkspaceMenu(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, restoreDraft: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Box {
-        TextButton(onClick = { menu = true }, modifier = Modifier.semantics { contentDescription = "Настройки Эксперта" }) {
-            Text("⋮", fontSize = 24.sp)
+        TextButton(onClick = { menu = true }) {
+            Text("Инструменты ▾")
         }
         DropdownMenu(menu, onDismissRequest = { menu = false }) {
+            if (state.appliedRevision != null && (state.hasDraftChanges || state.hasUnappliedChanges)) {
+                DropdownMenuItem(
+                    text = { Text("Скопировать действующую схему в черновик…") },
+                    onClick = { menu = false; restoreDraft() }, enabled = !state.busy,
+                )
+            }
             DropdownMenuItem(
                 text = { Text("Очистить завершённую историю") },
                 onClick = {
@@ -325,14 +340,26 @@ private fun DraftActions(
 ) {
     var allErrors by remember { mutableStateOf(false) }
     Surface(color = ExpertColors.panel, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, ExpertColors.border)) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             if (validation.isNotEmpty()) {
                 ExpertMessage(
                     "Исправь схему перед сохранением", validation.first(), error = true, bodyMaxLines = 2,
                 )
             }
             if (validation.isNotEmpty()) TextButton(onClick = { allErrors = true }) { Text("Показать замечания · ${validation.size}") }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp),
+                itemVerticalAlignment = Alignment.CenterVertically) {
+                val liveTemplate = state.templateChoices.find { it.id == state.appliedTemplateId }
+                val status = if (liveTemplate == null && state.applied != null && state.hasUnappliedChanges) {
+                    "В сети — предыдущая схема"
+                } else if (liveTemplate != null && liveTemplate.id != state.selectedTemplateId) {
+                    "В сети — ${liveTemplate.name}"
+                } else app.lernet.engine.policy.ExpertPult.schemaLine(
+                    state.pultStatus, unsavedDraft = state.hasDraftChanges,
+                    unapplied = state.appliedRevision != null && state.hasUnappliedChanges,
+                    applied = state.appliedRevision != null,
+                )
+                Text(status, color = ExpertColors.text, fontWeight = FontWeight.Medium, fontSize = 14.sp)
                 if (state.hasDraftChanges) {
                     Button(onClick = { onIntent(ExpertIntent.SaveDraft) }, enabled = validation.isEmpty() && !state.busy) {
                         Text("Сохранить · Ctrl+S")
@@ -347,23 +374,12 @@ private fun DraftActions(
                             state.capabilities.independentExits,
                     ) { Text("Применить сейчас") }
                 }
-                val schemaStatus = app.lernet.engine.policy.ExpertPult.schemaLine(
-                    state.pultStatus, unsavedDraft = state.hasDraftChanges,
-                    unapplied = state.appliedRevision != null && state.hasUnappliedChanges,
-                    applied = state.appliedRevision != null,
-                )
-                Text(schemaStatus, color = ExpertColors.muted, fontSize = 12.sp)
             }
             if (!state.hasDraftChanges &&
                 state.phase == ExpertPhase.RUNNING &&
                 (!state.capabilities.atomicRules || !state.capabilities.preservesTun || !state.capabilities.independentExits)
             ) {
                 Text("На ходу эту схему не сменить. Выключи и включи — применится.", color = ExpertColors.amber, fontSize = 12.sp)
-            }
-            if (state.appliedRevision != null) {
-                TextButton(
-                    onClick = { confirm(ExpertIntent.RestoreAppliedToDraft) }, enabled = !state.busy,
-                ) { Text("Вернуть работающую схему в редактор") }
             }
         }
     }

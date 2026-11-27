@@ -2,6 +2,8 @@ package app.lernet.desktop.expert
 
 import androidx.compose.ui.graphics.ImageBitmap
 import app.lernet.config.policy.ExternalExitRequest
+import app.lernet.config.policy.PolicyTemplateChoice
+import app.lernet.config.policy.PolicyWorkspace
 import app.lernet.config.policy.VerifiedInterfaceBinding
 import app.lernet.engine.policy.ExitPhase
 import app.lernet.engine.policy.ExpertDirectNetworkFacts
@@ -56,6 +58,11 @@ data class ExpertUiState(
     val connectionHistoryTruncated: Boolean = false,
     val connectionDroppedCount: Long = 0,
     val directNetwork: ExpertDirectNetworkFacts? = null,
+    val selectedTemplateId: String = PolicyWorkspace.DEFAULT_TEMPLATE_ID,
+    val templateChoices: List<PolicyTemplateChoice> = listOf(
+        PolicyTemplateChoice(PolicyWorkspace.DEFAULT_TEMPLATE_ID, PolicyWorkspace.DEFAULT_TEMPLATE_NAME),
+    ),
+    val appliedTemplateId: String? = null,
 ) {
     val hasDraftChanges: Boolean get() = draft != saved
     /** The same pult status as on Android: lever word, headline, counter and schema line agree. */

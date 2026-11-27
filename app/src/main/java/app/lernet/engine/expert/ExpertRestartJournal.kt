@@ -28,7 +28,10 @@ internal object ExpertRestartFingerprint {
         ruleSetDigests: Map<String, String> = emptyMap(),
     ): String {
         // Drafts are independently durable edits, not effective inputs to the acknowledged generation.
-        val effective = Json.parseToJsonElement(PolicyWorkspaceCodec.encode(workspace.copy(draft = workspace.saved)))
+        // Keep the v1 digest shape. Template labels, inactive templates and drafts never enter the data plane.
+        val policyOnly = PolicyWorkspace(legacy = workspace.legacy, saved = workspace.saved)
+        val encoded = Json.parseToJsonElement(PolicyWorkspaceCodec.encode(policyOnly)) as JsonObject
+        val effective = JsonObject(encoded.filterKeys { it in setOf("format", "version", "legacy", "saved", "draft") })
         val body = buildJsonObject {
             put("workspace", effective)
             put(
@@ -130,11 +133,11 @@ internal class ExpertRestartJournal(private val storage: ExpertRestartStorage) {
     }
 
     @Synchronized
-    fun promoteActualAck(fingerprint: String, revision: Long): Boolean {
+    fun promoteActualAck(fingerprint: String, revision: Long, templateId: String = PolicyWorkspace.DEFAULT_TEMPLATE_ID): Boolean {
         require(fingerprint.matches(Regex("[a-f0-9]{64}")) && revision >= 0)
         check(transitionInvalidated) { "Restart eligibility was not invalidated before mutation" }
         return try {
-            storage.write(record(true, fingerprint, revision))
+            storage.write(record(true, fingerprint, revision, templateId))
             blockedInProcess = false
             transitionInvalidated = false
             true
@@ -145,27 +148,43 @@ internal class ExpertRestartJournal(private val storage: ExpertRestartStorage) {
     }
 
     @Synchronized
-    fun matches(fingerprint: String): Boolean {
-        if (blockedInProcess) return false
+    fun matches(fingerprint: String, templateId: String = PolicyWorkspace.DEFAULT_TEMPLATE_ID): Boolean {
+        val ack = readAck() ?: return false
+        return ack.fingerprint == fingerprint && ack.templateId == templateId
+    }
+
+    @Synchronized
+    fun restoreCandidate(workspace: PolicyWorkspace): PolicyWorkspace? {
+        val ack = readAck() ?: return null
+        return workspace.restartCandidate(ack.templateId, ack.revision)
+    }
+
+    private data class Ack(val templateId: String, val revision: Long, val fingerprint: String)
+
+    private fun readAck(): Ack? {
+        if (blockedInProcess) return null
         return runCatching {
-            val raw = storage.read() ?: return@runCatching false
+            val raw = storage.read() ?: return@runCatching null
             require(raw.length <= 4_096)
-            val body = Json.parseToJsonElement(raw) as? JsonObject ?: return@runCatching false
+            val body = Json.parseToJsonElement(raw) as? JsonObject ?: return@runCatching null
             val version = body["version"] as? JsonPrimitive
             val eligible = body["eligible"] as? JsonPrimitive
             val captured = body["fingerprint"] as? JsonPrimitive
             val revision = body["revision"] as? JsonPrimitive
-            version?.takeUnless { it.isString }?.longOrNull == 1L &&
-                eligible?.takeUnless { it.isString }?.booleanOrNull == true &&
-                captured?.takeIf { it.isString }?.content == fingerprint &&
-                revision?.takeUnless { it.isString }?.longOrNull?.let { it >= 0 } == true
-        }.getOrDefault(false)
+            if (version?.takeUnless { it.isString }?.longOrNull != 1L || eligible?.takeUnless { it.isString }?.booleanOrNull != true) return null
+            val hash = captured?.takeIf { it.isString }?.content ?: return null
+            val rev = revision?.takeUnless { it.isString }?.longOrNull?.takeIf { it >= 0 } ?: return null
+            val id = if ("template" in body) (body["template"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+                else PolicyWorkspace.DEFAULT_TEMPLATE_ID
+            Ack(id, rev, hash)
+        }.getOrNull()
     }
 
-    private fun record(eligible: Boolean, fingerprint: String? = null, revision: Long? = null): String = buildJsonObject {
+    private fun record(eligible: Boolean, fingerprint: String? = null, revision: Long? = null, templateId: String? = null): String = buildJsonObject {
         put("version", 1)
         put("eligible", eligible)
         if (fingerprint != null) put("fingerprint", fingerprint)
         if (revision != null) put("revision", revision)
+        if (templateId != null) put("template", templateId)
     }.toString()
 }

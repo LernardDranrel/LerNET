@@ -2,6 +2,7 @@ package app.lernet.engine.expert
 
 import app.lernet.config.policy.PolicyMigration
 import app.lernet.config.policy.PolicyWorkspace
+import app.lernet.config.policy.StoredPolicyTemplate
 import app.lernet.config.transfer.TransferBundle
 import app.lernet.config.transfer.TransferGroup
 import app.lernet.config.transfer.TransferOutbound
@@ -63,6 +64,24 @@ class ExpertRestartJournalTest {
         val workspace = source()
         val changed = workspace.copy(saved = workspace.saved.copy(device = workspace.saved.device.copy(defaultTarget = PolicyTarget.Block)))
         assertThat(confirmed(workspace).matches(fingerprint(changed))).isFalse()
+    }
+
+    @Test
+    fun browsingAnotherTemplateRestoresOnlyThePreviouslyAcknowledgedInputs() {
+        val original = source()
+        val running = original.saved
+        val editor = original.copy(
+            selectedTemplateId = "work", selectedTemplateName = "Рабочий",
+            saved = running.copy(revision = running.revision + 1, device = running.device.copy(defaultTarget = PolicyTarget.Block)),
+            otherTemplates = listOf(StoredPolicyTemplate("general", "Основной", running)),
+        )
+        val journal = confirmed(original)
+        val candidate = requireNotNull(journal.restoreCandidate(editor))
+        assertThat(candidate.selectedTemplateId).isEqualTo("general")
+        assertThat(candidate.saved).isEqualTo(running)
+        assertThat(journal.matches(fingerprint(candidate), candidate.selectedTemplateId)).isTrue()
+        assertThat(journal.matches(fingerprint(editor), editor.selectedTemplateId)).isFalse()
+        assertThat(editor.selectedTemplateId).isEqualTo("work")
     }
 
     @Test

@@ -4,8 +4,11 @@ import app.lernet.config.policy.ExternalExitKind
 import app.lernet.config.policy.ExternalExitProfiles
 import app.lernet.config.policy.PolicyInventoryChange
 import app.lernet.config.policy.PolicyMigration
+import app.lernet.config.policy.PolicyWorkspace
 import app.lernet.config.policy.PolicyWorkspaceRepository
 import app.lernet.config.policy.PolicyWorkspaceStore
+import app.lernet.routing.policy.PolicyScope
+import app.lernet.ui.controls.TemplateAction
 import app.lernet.config.redact.DiagEvent
 import app.lernet.config.redact.DiagKind
 import app.lernet.config.redact.DiagnosticJournal
@@ -41,6 +44,7 @@ import app.lernet.engine.policy.ExpertRuntimeState
 import app.lernet.engine.policy.ExpertSessionPhase
 import app.lernet.engine.policy.ExpertWorkspaceGate
 import app.lernet.engine.policy.PolicyConfigAssembler
+import app.lernet.engine.policy.PolicyAssembledConfig
 import app.lernet.engine.policy.tunnelHealth
 import app.lernet.routing.GeoRuleSets
 import app.lernet.routing.RoutePlatform
@@ -53,6 +57,8 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.UUID
+import java.util.Collections
+import java.util.WeakHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
@@ -67,6 +73,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.buildJsonObject
@@ -96,6 +105,8 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
 
     @Volatile private var automaticInventoryAllowed = true
     private var adoptedInventory: TransferBundle? = null
+    @Volatile private var restoring: Pair<DesktopExpertAck, PolicyWorkspace>? = null
+    private val templateForConfig = Collections.synchronizedMap(WeakHashMap<PolicyAssembledConfig, DesktopExpertAck>())
 
     @Volatile private var activeGuardPlan: ProtectionPlan? = null
     private val protection = WindowsExpertProtection()
@@ -107,15 +118,23 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
             override fun releaseExpertMode(restorePrevious: Boolean) = simple.releaseExpertMode(restorePrevious)
         },
         scope, assemble = { program ->
-            val snapshot = repository.snapshot()
+            val restore = restoring
+            val snapshot = restore?.second ?: repository.snapshot()
             val preferences = simple.state.value.saved
+            val ack = DesktopExpertAck.forWorkspace(snapshot, preferences)
+            check(restore == null || restore.first == ack) { "Настройки изменились. Проверь шаблон и включи Эксперт вручную." }
             val sets = prepareRuleSets()
             PolicyConfigAssembler.assemble(
                 snapshot, program, EnginePlatform.WINDOWS,
                 defaults = preferences.engineDefaults(strict = EngineDefaults().strictRoute),
                 ruleSetDirectory = sets.toString(), probeUrl = preferences.healthUrl,
                 underlayInterface = WindowsPhysicalNetwork.select().name
-            )
+            ).also { config ->
+                if (config.isValid) {
+                    simple.sessionMarks.invalidateExpert()
+                    templateForConfig[config] = ack
+                }
+            }
         }, probeUrl = { simple.state.value.saved.healthUrl }, log = ::writeLog, controlReady = { core, port ->
             if (guardEnabled) armGuard(core, port, null)
         }, prepareIngress = { core, tunName, capturedLease ->
@@ -254,6 +273,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                     current.state.value.appliedRevision != workspace.saved.revision
                 ) {
                     current.handle(RuntimeIntent.ApplySaved)
+                    rememberAcknowledged(current)
                 }
             }
             adoptedInventory = bundle
@@ -261,6 +281,8 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                 it.copy(
                     workspaceReady = true,
                     workspaceError = null,
+                    selectedTemplateId = workspace.selectedTemplateId,
+                    templateChoices = workspace.templateChoices,
                     profiles = workspace.legacy.profiles.map { profile ->
                         val folder = workspace.legacy.groups.firstOrNull { profile.id in it.profileIds }
                         ExpertProfile(
@@ -307,9 +329,66 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
 
     fun refreshSubscription(url: String) = simple.refreshSubscription(url)
 
+    suspend fun changeTemplate(action: TemplateAction): String? {
+        val expected = mutable.value.selectedTemplateId
+        return try {
+            withContext(Dispatchers.IO) {
+                mutex.withLock {
+                    val controller = checkNotNull(runtime) { "Дождись загрузки схемы." }
+                    val snapshot = controller.state.value
+                    val before = repository.snapshot()
+                    check(before.selectedTemplateId == expected) { "Шаблон уже изменился. Повтори действие." }
+                    check(!snapshot.applying && snapshot.phase !in setOf(ExpertSessionPhase.STARTING, ExpertSessionPhase.STOPPING)) {
+                        "Дождись завершения операции с туннелем."
+                    }
+                    check(snapshot.draftPersistenceError == null && snapshot.draft == before.draft && snapshot.saved == before.saved) {
+                        "Сначала сохрани изменения текущей схемы."
+                    }
+                    val appliedId = backend.assembled?.let { templateForConfig[it]?.templateId }
+                    if (action is TemplateAction.Delete && appliedId == action.id && snapshot.tun != null) {
+                        error("Этот шаблон действует в сети. Сначала примени другой шаблон или выключи Эксперт.")
+                    }
+                    // Keep the runtime and store together if the picker is dismissed during the disk write.
+                    withContext(NonCancellable) {
+                        val next = when (action) {
+                            is TemplateAction.Select -> repository.selectTemplate(action.id)
+                            is TemplateAction.Create -> repository.createTemplate(action.name)
+                            is TemplateAction.Rename -> repository.renameTemplate(action.id, action.name)
+                            is TemplateAction.Delete -> repository.deleteTemplate(action.id)
+                        }
+                        val switched = next.selectedTemplateId != before.selectedTemplateId
+                        if (switched) {
+                            controller.handle(RuntimeIntent.WorkspaceChanged(next.saved, next.draft, PolicyMigration.inventory(next.legacy)))
+                        }
+                        mutable.update { state ->
+                            state.copy(
+                                selectedTemplateId = next.selectedTemplateId, templateChoices = next.templateChoices,
+                                saved = next.saved, draft = next.draft, appliedTemplateId = appliedId,
+                                selectedScope = if (switched) PolicyScope.Device else state.selectedScope,
+                            )
+                        }
+                    }
+                }
+            }
+            null
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            app.lernet.engine.text.UserText.of(failure, "Не удалось изменить шаблон")
+        }
+    }
+
     fun dispatch(intent: UiIntent) = dispatch(intent, null)
 
-    private fun dispatch(intent: UiIntent, handover: Pair<String, NetworkPolicy>?) {
+    private fun dispatch(intent: UiIntent, handover: Pair<String, NetworkPolicy>?, atSignIn: Boolean = false) {
+        val expectedTemplate = mutable.value.selectedTemplateId
+        fun requireSameTemplate() = check(repository.snapshot().selectedTemplateId == expectedTemplate) {
+            "Шаблон изменился. Повтори действие в открытой схеме."
+        }
+        suspend fun editTemplate(action: suspend () -> Unit) = mutex.withLock {
+            requireSameTemplate()
+            action()
+        }
         val startTicket = when (intent) {
             UiIntent.Start -> startGate.requestStart()
             UiIntent.Stop -> {
@@ -343,21 +422,26 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                 }
                 val controller = ensureRuntime()
                 when (intent) {
-                    is UiIntent.SelectScope -> mutable.update { it.copy(selectedScope = intent.scope) }
-                    is UiIntent.EditPolicy -> mutex.withLock { controller.handle(RuntimeIntent.Edit(intent.policy)) }
-                    is UiIntent.UpdateLayout -> mutex.withLock {
+                    is UiIntent.SelectScope -> editTemplate { mutable.update { it.copy(selectedScope = intent.scope) } }
+                    is UiIntent.EditPolicy -> editTemplate {
+                        check(intent.policy.revision == controller.state.value.saved.revision) { "Схема обновилась. Повтори изменение." }
+                        controller.handle(RuntimeIntent.Edit(intent.policy))
+                    }
+                    is UiIntent.UpdateLayout -> editTemplate {
                         controller.handle(RuntimeIntent.UpdateLayout(intent.scope, intent.points, intent.clear))
                     }
-                    UiIntent.SaveDraft -> mutex.withLock { controller.handle(RuntimeIntent.SaveDraft) }
-                    UiIntent.DiscardDraft -> mutex.withLock { controller.handle(RuntimeIntent.DiscardDraft) }
-                    UiIntent.RestoreAppliedToDraft -> mutex.withLock { controller.handle(RuntimeIntent.RestoreAppliedToDraft) }
-                    UiIntent.ApplySaved -> mutex.withLock {
+                    UiIntent.SaveDraft -> editTemplate { controller.handle(RuntimeIntent.SaveDraft) }
+                    UiIntent.DiscardDraft -> editTemplate { controller.handle(RuntimeIntent.DiscardDraft) }
+                    UiIntent.RestoreAppliedToDraft -> editTemplate { controller.handle(RuntimeIntent.RestoreAppliedToDraft) }
+                    UiIntent.ApplySaved -> editTemplate {
                         controller.handle(RuntimeIntent.ApplySaved)
+                        rememberAcknowledged(controller)
                         if (controller.state.value.appliedRevision == controller.state.value.saved.revision) {
                             automaticInventoryAllowed = true
                         }
                     }
                     UiIntent.Start -> startGate.runIfCurrent(requireNotNull(startTicket)) {
+                        if (!atSignIn) requireSameTemplate()
                         if (handover != null) {
                             check(simple.connectedVpnProfileId() == handover.first) {
                                 "VPN-подключение изменилось. Повтори переключение режимов."
@@ -369,7 +453,18 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                             if (!controller.prepareVpnHandover(handover.second, target)) return@runIfCurrent
                         }
                         if (!startGate.isCurrent(requireNotNull(startTicket))) return@runIfCurrent
-                        controller.handle(RuntimeIntent.Start)
+                        if (atSignIn) {
+                            val candidate = checkNotNull(simple.sessionMarks.restoreCandidate(repository.snapshot(), simple.state.value.saved)) {
+                                "Не удалось подтвердить последнюю действующую схему. Проверь шаблон и включи Эксперт вручную."
+                            }
+                            restoring = candidate
+                            try {
+                                controller.restore(candidate.second.saved)
+                            } finally {
+                                restoring = null
+                            }
+                        } else controller.handle(RuntimeIntent.Start)
+                        if (startGate.isCurrent(startTicket)) rememberAcknowledged(controller)
                         if (controller.state.value.appliedRevision == controller.state.value.saved.revision) {
                             automaticInventoryAllowed = true
                         }
@@ -384,6 +479,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                             "stage" to "ui",
                         ))
                         stopped.getOrThrow()
+                        simple.sessionMarks.expertStopped()
                         refreshProtection()
                     }
                     UiIntent.Refresh -> Unit // handled before ensureRuntime
@@ -643,6 +739,11 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                         repository.commitImported(plan) { updated ->
                             simple.commitWorkspaceInventoryIfUnchanged(beforeBundle, updated)
                         }
+                        if (replace) {
+                            templateForConfig.clear()
+                            simple.sessionMarks.expertStopped()
+                            mutable.update { it.copy(appliedTemplateId = null) }
+                        }
                     }
                     automaticInventoryAllowed = false
                     refreshInventory(allowLiveApply = false)
@@ -719,14 +820,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
      * The workspace loads in the background, so the start waits for it (up to 30 s).
      */
     fun resumeAtSignIn() {
-        scope.launch {
-            try {
-                ensureRuntime()
-                dispatch(UiIntent.Start)
-            } catch (failure: Exception) {
-                showFailure("Эксперт не включился при входе в систему", failure)
-            }
-        }
+        dispatch(UiIntent.Start, null, atSignIn = true)
     }
 
     /**
@@ -745,8 +839,17 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
         error("Рабочая область не загрузилась за 30 с. Нажми «Обновить» в меню Эксперта и повтори.")
     }
 
+    private fun rememberAcknowledged(controller: ExpertRuntimeController) {
+        val state = controller.state.value
+        val ack = backend.assembled?.let { templateForConfig[it] } ?: return
+        if (state.desiredEnabled && state.phase == ExpertSessionPhase.RUNNING && state.appliedRevision == ack.revision) {
+            if (!simple.sessionMarks.expertWanted(ack)) {
+                mutable.update { it.copy(notice = "Схема действует. Для автозапуска не удалось записать подтверждение в папку настроек LerNET.") }
+            }
+        }
+    }
+
     private fun present(snapshot: ExpertRuntimeState) {
-        if (snapshot.desiredEnabled && snapshot.phase == ExpertSessionPhase.RUNNING) simple.sessionMarks.expertWanted()
         val config = backend.assembled
         val policy = snapshot.appliedPolicy
         val protected = policy?.let {
@@ -760,6 +863,7 @@ internal class DesktopExpertController(private val simple: DesktopController) : 
                 workspaceError = null,
                 saved = snapshot.saved, draft = snapshot.draft,
                 applied = snapshot.appliedPolicy, appliedRevision = snapshot.appliedRevision,
+                appliedTemplateId = config?.let { templateForConfig[it] }?.takeIf { it.revision == snapshot.appliedRevision }?.templateId,
                 tunnelIdentity = snapshot.tun?.let { "${it.instanceId} · ${it.interfaceId}" },
                 capabilities = snapshot.capabilities,
                 phase = if (snapshot.applying) ExpertPhase.APPLYING else ExpertPhase.valueOf(snapshot.phase.name),

@@ -100,7 +100,11 @@ object PolicyWorkspaceReconcile {
         }
         val saved = reconcile(before.saved)
         val draft = if (before.draft == before.saved) saved else reconcile(before.draft)
-        return PolicyReconcileResult(before.copy(legacy = bundle, saved = saved, draft = draft), notes.toList())
+        val others = before.otherTemplates.map { template ->
+            val updated = reconcile(template.saved)
+            template.copy(saved = updated, draft = if (template.draft == template.saved) updated else reconcile(template.draft))
+        }
+        return PolicyReconcileResult(before.copy(legacy = bundle, saved = saved, draft = draft, otherTemplates = others), notes.toList())
     }
 
     private fun exists(scope: PolicyScope, inventory: PolicyInventory): Boolean = when (scope) {

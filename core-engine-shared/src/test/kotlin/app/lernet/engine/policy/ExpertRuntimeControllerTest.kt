@@ -32,6 +32,21 @@ import org.junit.Test
 class ExpertRuntimeControllerTest {
     private val inventory = PolicyInventory(setOf("a", "b"), mapOf("folder" to listOf("a", "b")))
 
+    @Test fun `system restore runs the acknowledged template while user start runs the selected one`() = runTest {
+        val general = NetworkPolicy(revision = 2)
+        val work = general.copy(revision = 3, device = general.device.copy(defaultTarget = PolicyTarget.Block))
+        val backend = FakeBackend().apply { startAck = ExpertTunnelAck(TunIdentity("tun"), general.revision) }
+        val controller = controller(backend, initial = work)
+        controller.restore(general)
+        assertEquals(general, controller.state.value.appliedPolicy)
+        assertEquals(work, controller.state.value.saved)
+        assertEquals(work, controller.state.value.draft)
+        controller.handle(ExpertIntent.Stop)
+        backend.startAck = ExpertTunnelAck(TunIdentity("tun"), work.revision)
+        controller.handle(ExpertIntent.Start)
+        assertEquals(work, controller.state.value.appliedPolicy)
+    }
+
     @Test fun `network outage preserves on intent tunnel and policy until explicit stop`() = runTest {
         val backend = FakeBackend()
         val controller = controller(backend)

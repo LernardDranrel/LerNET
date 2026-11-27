@@ -118,7 +118,8 @@ internal fun DesktopWorkspaceSidebar(
             }
             Spacer(Modifier.width(10.dp))
             Column {
-                Text(title, fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(title, color = MaterialTheme.colorScheme.onSurface, fontSize = 19.sp,
+                    fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("для Windows", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
         }

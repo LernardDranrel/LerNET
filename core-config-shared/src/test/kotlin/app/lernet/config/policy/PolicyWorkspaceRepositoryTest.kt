@@ -49,6 +49,76 @@ class PolicyWorkspaceRepositoryTest {
     }
 
     @Test
+    fun `old workspace opens in General and switching preserves independent saved policies and drafts`() = withRepository { repo, store ->
+        val old = PolicyMigration.migrate(legacy)
+        val legacyJson = """{"format":"${PolicyWorkspace.FORMAT}","version":1,"legacy":${TransferCodec.encode(legacy)},"saved":{}}"""
+        val decoded = PolicyWorkspaceCodec.decode(legacyJson)
+        assertEquals(listOf(PolicyTemplateChoice("general", "Общий")), decoded.templateChoices)
+        repo.open(legacy)
+        val blocked = old.saved.copy(device = old.saved.device.copy(defaultTarget = PolicyTarget.Block))
+        repo.updateDraft(blocked)
+        val work = repo.createTemplate("  Работа  ")
+        assertEquals("Работа", work.selectedTemplateName)
+        assertEquals(old.saved.device, work.saved.device)
+        assertEquals(blocked.device, work.draft.device)
+        // A queued save of General may propose the same next revision as the switch to Work.
+        val staleSave = blocked.copy(revision = old.saved.revision + 1)
+        assertEquals(work.saved.revision, staleSave.revision)
+        assertThrows(IllegalArgumentException::class.java) { repo.persist(staleSave, staleSave) }
+        assertEquals(work, repo.snapshot())
+        assertThrows(IllegalArgumentException::class.java) { repo.createTemplate(" РАБОТА ") }
+        assertThrows(IllegalArgumentException::class.java) { repo.renameTemplate(work.selectedTemplateId, " ") }
+        assertThrows(IllegalArgumentException::class.java) { repo.deleteTemplate(work.selectedTemplateId) }
+        repo.saveDraft()
+        val general = repo.selectTemplate(old.selectedTemplateId)
+        assertEquals(old.saved.device, general.saved.device)
+        assertEquals(blocked.device, general.draft.device)
+        assertTrue(general.saved.revision > work.saved.revision)
+        assertThrows(IllegalArgumentException::class.java) { repo.persist(work.saved, work.draft) }
+        repo.discardDraft()
+        val reopened = PolicyWorkspaceRepository(store)
+        assertEquals(general.selectedTemplateId, reopened.open(legacy).selectedTemplateId)
+        reopened.renameTemplate(work.selectedTemplateId, "Офис")
+        val office = reopened.selectTemplate(work.selectedTemplateId)
+        assertEquals("Офис", office.selectedTemplateName)
+        assertEquals(blocked.device, office.saved.device)
+        assertEquals(office.saved, office.draft)
+        assertEquals(listOf(PolicyTemplateChoice(work.selectedTemplateId, "Офис")), reopened.deleteTemplate(old.selectedTemplateId).templateChoices)
+    }
+
+    @Test
+    fun `removed config is blocked in an inactive template too`() = withRepository { repo, _ ->
+        val general = repo.open(legacy)
+        val route = general.saved.copy(revision = general.saved.revision + 1, device = general.saved.device.copy(defaultTarget = PolicyTarget.Profile("de")))
+        repo.persist(route, route)
+        repo.createTemplate("Работа")
+        repo.reconcile(legacy.copy(profiles = emptyList()))
+        val restored = repo.selectTemplate(general.selectedTemplateId)
+        assertEquals(PolicyTarget.Block, restored.saved.device.defaultTarget)
+        assertEquals(restored.saved, restored.draft)
+    }
+
+    @Test
+    fun `import of named templates keeps separate policies with remapped profile ids`() = withRepository { repo, _ ->
+        val general = repo.open(legacy)
+        val work = repo.createTemplate("Работа")
+        val route = work.saved.copy(revision = work.saved.revision + 1, device = work.saved.device.copy(defaultTarget = PolicyTarget.Profile("de")))
+        repo.persist(route, route)
+        val archive = repo.export()
+        val copy = repo.previewImported(archive)
+        val expanded = repo.commitImported(copy) {}
+        assertEquals(work.selectedTemplateId, expanded.selectedTemplateId)
+        val other = expanded.templateChoices.single { it.name == "Работа (2)" }
+        val imported = repo.selectTemplate(other.id)
+        val importedProfile = imported.legacy.profiles.single { it.id != "de" }
+        assertEquals(PolicyTarget.Profile(importedProfile.id), imported.saved.device.defaultTarget)
+        assertEquals(general.saved.device.defaultTarget, repo.selectTemplate(general.selectedTemplateId).saved.device.defaultTarget)
+        val replacement = repo.previewImported(archive, replace = true)
+        assertEquals(2, replacement.after.templateChoices.size)
+        assertEquals(work.selectedTemplateId, replacement.after.selectedTemplateId)
+    }
+
+    @Test
     fun `invalid draft remains durable but cannot replace saved policy`() = withRepository { repository, store ->
         val original = repository.open(legacy)
         val invalid = original.saved.copy(
@@ -98,6 +168,7 @@ class PolicyWorkspaceRepositoryTest {
     fun `removed profile blocks its device references and records explanation`() = withRepository { repository, _ ->
         val original = repository.open(legacy)
         val saved = original.saved.copy(
+            revision = original.saved.revision + 1,
             device = PolicyTree(
                 PolicyScope.Device,
                 listOf(PolicyNode("guard", title = "Private", target = PolicyTarget.Profile("de")))
@@ -113,7 +184,10 @@ class PolicyWorkspaceRepositoryTest {
     @Test
     fun `new inventory adds trees while preserving custom saved and dirty draft`() = withRepository { repository, _ ->
         val original = repository.open(legacy)
-        val custom = original.saved.copy(device = PolicyTree(PolicyScope.Device, listOf(PolicyNode("custom", target = PolicyTarget.Block))))
+        val custom = original.saved.copy(
+            revision = original.saved.revision + 1,
+            device = PolicyTree(PolicyScope.Device, listOf(PolicyNode("custom", target = PolicyTarget.Block))),
+        )
         val draft = custom.copy(
             device = custom.device.copy(
                 nodes = custom.device.nodes + PolicyNode("draft", target = PolicyTarget.Direct)
@@ -187,7 +261,7 @@ class PolicyWorkspaceRepositoryTest {
     fun `profile lifecycle survives remapped import and is pruned when profile disappears`() = withRepository { repository, _ ->
         val migrated = repository.open(legacy)
         val life = ExitLifecyclePolicy(coldStart = true)
-        val policy = migrated.saved.copy(profilePolicies = listOf(ProfileExitPolicy("de", life)))
+        val policy = migrated.saved.copy(revision = migrated.saved.revision + 1, profilePolicies = listOf(ProfileExitPolicy("de", life)))
         repository.persist(policy, policy)
         val imported = repository.previewImported(repository.export())
         val importedProfile = imported.after.legacy.profiles.last().id
@@ -240,6 +314,7 @@ class PolicyWorkspaceRepositoryTest {
         val source = legacy.copy(rules = listOf(rule))
         val original = repository.open(source)
         val moved = original.saved.copy(
+            revision = original.saved.revision + 1,
             trees = listOf(
                 original.saved.trees.single().copy(
                     positions = mapOf("r" to PolicyCanvasPoint(999f, 888f))
@@ -275,6 +350,7 @@ class PolicyWorkspaceRepositoryTest {
     fun `append import keeps remapped device coordinates and preserves existing shared root`() = withRepository { repository, _ ->
         val original = repository.open(legacy)
         val existing = original.saved.copy(
+            revision = original.saved.revision + 1,
             device = PolicyTree(
                 PolicyScope.Device,
                 listOf(PolicyNode("existing", target = PolicyTarget.Block)),

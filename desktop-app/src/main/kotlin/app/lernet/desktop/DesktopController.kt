@@ -120,6 +120,7 @@ data class DesktopUiState(
     val tried: FailoverReport? = null,
     /** The connection is held without a restart: replies are jammed, or no server answers at all. */
     val hold: LinkHold? = null,
+    val changingConnection: Boolean = false,
 )
 
 typealias FailoverAttempt = app.lernet.engine.policy.FailoverAttempt
@@ -795,7 +796,7 @@ class DesktopController(
             try { synchronized(connectLock) { change(update) } } finally { switchBusy.set(false) }
             return
         }
-        mutable.update { it.copy(busy = true, message = "Переключаем подключение") }
+        mutable.update { it.copy(busy = true, changingConnection = true, message = "Переключаем подключение") }
         thread(name = "lernet-windows-switch", isDaemon = true) {
             try {
                 synchronized(connectLock) {
@@ -811,7 +812,7 @@ class DesktopController(
                 reportConnectionError(app.lernet.engine.text.UserText.of(error, "Не удалось переключить подключение"))
             } finally {
                 switchBusy.set(false)
-                if (!connectBusy.get()) mutable.update { it.copy(busy = false) }
+                if (!connectBusy.get()) mutable.update { it.copy(busy = false, changingConnection = false) }
             }
         }
     }
@@ -1221,7 +1222,7 @@ class DesktopController(
         updateAppTraffic()
         val savedAtStart = state.value.saved
         val profileAtStart = savedAtStart.profiles.firstOrNull { it.id == savedAtStart.selectedProfileId }
-        mutable.update { it.copy(busy = true, message = "Готовим подключение", connectionError = null) }
+        mutable.update { it.copy(busy = true, changingConnection = true, message = "Готовим подключение", connectionError = null) }
         thread(name = "lernet-windows-connect", isDaemon = true) {
             var routeErrorOwner: String? = null
             try {
@@ -1279,7 +1280,7 @@ class DesktopController(
                 }
             } finally {
                 connectBusy.set(false)
-                mutable.update { it.copy(busy = false) }
+                mutable.update { it.copy(busy = false, changingConnection = false) }
             }
         }
     }

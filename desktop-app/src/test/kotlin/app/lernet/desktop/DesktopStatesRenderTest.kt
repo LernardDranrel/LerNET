@@ -44,6 +44,15 @@ class DesktopStatesRenderTest {
         )
     }
 
+    @Test
+    fun importingWhileOfflineKeepsTheVpnStatusOff() {
+        val stopped = TunnelSnapshot(TunnelStatus.STOPPED)
+        val importing = DesktopUiState(busy = true)
+        assertThat(workspaceStatus(null, stopped, importing).text).isEqualTo(app.lernet.engine.text.StatusWords.OFF)
+        assertThat(workspaceStatus(null, stopped, importing.copy(changingConnection = true)).text)
+            .isEqualTo(app.lernet.engine.text.StatusWords.CONNECTING)
+    }
+
     // The same data as the phone's HomeStatesScreenshotTest: 38 ms to the server, 142 ms through the VPN.
     private val goodProbes = mapOf(
         "nl" to ProbeResult(latencyMs = 38, tunnelLatencyMs = 142, tunnelMessage = "Работает"),
@@ -113,7 +122,7 @@ class DesktopStatesRenderTest {
 
     private val off = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.STOPPED), { it.copy(probes = goodProbes) })
     private val connecting = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.STARTING, "Запускаем VPN"),
-        { it.copy(busy = true, message = "Запускаем VPN", probes = goodProbes) })
+        { it.copy(busy = true, changingConnection = true, message = "Запускаем VPN", probes = goodProbes) })
     private val connected = DesktopScreenPreview(TunnelSnapshot(TunnelStatus.RUNNING, "Подключено"),
         { it.copy(probes = goodProbes, healthMessage = "VPN отвечает · 142 мс", healthVerified = true, tunnelLatencyMs = 142) })
     // The phone's failedWholeScroll: the server refused the connection; the raw line is behind «Подробнее».

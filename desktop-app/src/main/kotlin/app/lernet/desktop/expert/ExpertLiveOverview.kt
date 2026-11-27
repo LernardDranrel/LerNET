@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.sp
 import app.lernet.engine.policy.DirectFamilyAvailability
 import app.lernet.engine.policy.ExpertTunnelHealth
 import app.lernet.engine.policy.FlowInspection
+import app.lernet.routing.policy.PolicyBranchEditing
 import app.lernet.ui.controls.NetworkLever
 import app.lernet.ui.controls.NetworkLeverLamp
 import java.time.Instant
@@ -70,11 +71,31 @@ internal fun ExpertLiveOverview(
     modifier: Modifier,
     confirm: (ExpertIntent) -> Unit,
     openPage: (ExpertPage) -> Unit,
+    editRule: (String) -> Unit,
 ) {
-    // The pult is a summary: the lever and three tiles that lead to the details (m3, m6).
-    ExpertScrollableColumn(modifier.fillMaxSize()) {
+    ExpertScrollableColumn(modifier.fillMaxSize(), spacing = 8) {
         TunControl(state, onIntent, confirm)
         ExpertSummaryTiles(state, openPage)
+        val tree = remember(state.draft.device) { PolicyBranchEditing.displayTree(state.draft.device) }
+        val roots = remember(tree) { tree.nodes.filter { it.parentId == null && !it.detached }
+            .sortedWith(compareBy({ it.sortIndex }, { it.id })) }
+        ExpertPanel("Правила устройства", Modifier.fillMaxWidth(), trailing = {
+            TextButton(onClick = { openPage(ExpertPage.ROUTES) }) { Text("Вся схема") }
+        }) {
+            roots.take(3).forEach { node ->
+                HorizontalDivider(color = ExpertColors.border)
+                Row(Modifier.fillMaxWidth()
+                    .clickable(enabled = !state.busy, onClickLabel = "Изменить правило") { editRule(node.id) }
+                    .padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text(policyNodeTitle(node), Modifier.weight(1f), maxLines = 2,
+                        overflow = TextOverflow.Ellipsis, color = if (node.enabled) ExpertColors.text else ExpertColors.muted)
+                    Text(policyNodeTargetLabel(node, tree, state), Modifier.weight(1f), maxLines = 2,
+                        overflow = TextOverflow.Ellipsis, color = ExpertColors.blue, fontSize = 13.sp)
+                    Text("›", color = ExpertColors.muted)
+                }
+            }
+        }
     }
 }
 
@@ -83,7 +104,7 @@ internal fun ExpertLiveOverview(
 internal fun ExpertSummaryTiles(state: ExpertUiState, openPage: (ExpertPage) -> Unit) {
     val working = state.exits.count { it.phase == app.lernet.engine.policy.ExitPhase.READY }
     val words = app.lernet.engine.text.ExpertWords
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         // The phone's tiles, word for word (ExpertWords).
         SummaryTile(words.TILE_EXITS, words.exitsValue(working, state.exits.size), Modifier.weight(1f)) { openPage(ExpertPage.EXITS) }
         SummaryTile(words.TILE_CONNECTIONS, words.connectionsValue(state.connections.count { it.active == true }), Modifier.weight(1f)) {
@@ -111,11 +132,11 @@ private fun SummaryTile(
 ) {
     Surface(
         modifier.clickable(onClickLabel = "Открыть «$title»", onClick = onClick),
-        color = ExpertColors.panel, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, ExpertColors.border),
+        color = ExpertColors.panel, shape = RoundedCornerShape(8.dp),
     ) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyMedium, color = ExpertColors.muted)
-            Text("$value ›", style = MaterialTheme.typography.titleMedium, color = valueColor, fontWeight = FontWeight.SemiBold)
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text(title, style = MaterialTheme.typography.labelMedium, color = ExpertColors.muted)
+            Text("$value ›", style = MaterialTheme.typography.bodyMedium, color = valueColor, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -137,8 +158,8 @@ private fun TunControl(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, c
     )
     Surface(color = ExpertColors.panel, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, accent.copy(alpha = .35f))) {
         Row(
-            Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(20.dp)
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             NetworkLever(
                 checked = state.desiredEnabled,
@@ -161,39 +182,35 @@ private fun TunControl(state: ExpertUiState, onIntent: (ExpertIntent) -> Unit, c
                 reducedMotion = state.reducedMotion,
             )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                ExpertUptimeBlock(state)
-                Text("Своя схема", style = MaterialTheme.typography.titleLarge)
                 Text(
                     when {
                         pult == app.lernet.engine.policy.PultStatus.OFF && state.protection.systemGuardEnforced ->
                             "Выключено · защита Windows блокирует обычный выход"
                         else -> app.lernet.engine.policy.ExpertPult.headline(pult)
                     },
-                    color = accent, style = MaterialTheme.typography.bodyMedium
+                    color = accent, style = MaterialTheme.typography.titleMedium
                 )
+                ExpertUptimeBlock(state)
                 // A network note goes under the headline, never instead of the state.
                 state.networkReason?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = ExpertColors.amber) }
-                app.lernet.engine.policy.ExpertPult.schemaNote(
-                    pult, unsavedDraft = state.hasDraftChanges,
-                    unapplied = state.appliedRevision != null && state.hasUnappliedChanges,
-                    applied = state.appliedRevision != null,
-                )?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = ExpertColors.muted) }
                 val policy = state.applied.takeIf { running } ?: state.saved
                 val words = app.lernet.engine.text.ExpertWords
                 // As on the phone: «Основной путь — … · сведения», the direct-exit facts open on demand.
                 var details by remember { mutableStateOf(false) }
+                val directFacts = state.directNetwork.takeIf { running }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "Основной путь — ${ExpertPolicyEditing.targetName(policy.device.defaultTarget, state).replaceFirstChar { it.lowercase() }} · ",
+                        "Основной путь — ${ExpertPolicyEditing.targetName(policy.device.defaultTarget, state).replaceFirstChar { it.lowercase() }}",
                         style = MaterialTheme.typography.bodySmall, color = ExpertColors.muted
                     )
-                    Text(
+                    if (directFacts != null) Text(
                         if (details) words.HIDE_DETAILS else words.DETAILS,
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button) { details = !details },
+                        modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button) { details = !details }
+                            .padding(horizontal = 6.dp, vertical = 4.dp),
                     )
                 }
-                if (details) state.directNetwork?.takeIf { running }?.let { facts ->
+                if (details) directFacts?.let { facts ->
                     Text(words.directFamilies(facts), style = MaterialTheme.typography.bodySmall, color = ExpertColors.muted)
                     if (facts.ipv6 == DirectFamilyAvailability.UNAVAILABLE) {
                         Text(words.NO_IPV6, style = MaterialTheme.typography.bodySmall, color = ExpertColors.muted)
@@ -567,6 +584,7 @@ internal fun expertUptimeLabel(state: ExpertUiState, nowEpochMs: Long): String? 
 
 @Composable
 private fun ExpertUptimeBlock(state: ExpertUiState) {
+    if (state.runningSinceEpochMs == null || !app.lernet.engine.policy.ExpertPult.showsUptime(state.pultStatus)) return
     var now by androidx.compose.runtime.remember { androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis()) }
     androidx.compose.runtime.LaunchedEffect(state.runningSinceEpochMs, state.phase) {
         while (true) {
@@ -575,6 +593,5 @@ private fun ExpertUptimeBlock(state: ExpertUiState) {
         }
     }
     val label = expertUptimeLabel(state, now) ?: return
-    Text("БЕЗ ПЕРЕРЫВА", style = MaterialTheme.typography.labelSmall, color = ExpertColors.amber)
-    Text(label, style = MaterialTheme.typography.headlineMedium)
+    Text("Без перерыва · $label", style = MaterialTheme.typography.bodySmall, color = ExpertColors.muted)
 }

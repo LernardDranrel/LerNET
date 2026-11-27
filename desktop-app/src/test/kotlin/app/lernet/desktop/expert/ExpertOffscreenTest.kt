@@ -86,7 +86,7 @@ class ExpertOffscreenTest {
         }
         try {
             screenshot(scene, "overview")
-            assertThat(nodes(scene).any { texts(it).contains("Своя схема") }).isTrue()
+            assertThat(nodes(scene).any { texts(it).contains("Общий") }).isTrue()
             // v3 sections (m3): «Выходы» became «Конфиги», connections live in «События», protection is «Защита и DNS».
             listOf("Схема", "Проверка пути", "Конфиги", "События", "Защита и DNS").forEach { title ->
                 val navigation = nodes(scene).first {
@@ -113,6 +113,51 @@ class ExpertOffscreenTest {
                     ).isEqualTo(1)
                 }
             }
+            assertThat(intents).isEmpty()
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
+    fun `template choice opens its rules and preserves the live policy until explicit apply`() {
+        val base = NetworkPolicy()
+        val work = base.copy(revision = base.revision + 1, device = PolicyTree(PolicyScope.Device, nodes = listOf(
+            PolicyNode("office", title = "Внутренние сайты",
+                conditions = RuleConditions(blocks = listOf(ConditionBlock(ConditionKind.DOMAIN, listOf("*.example.invalid")))),
+                target = PolicyTarget.Profile("office-exit")),
+        )))
+        val intents = mutableListOf<ExpertIntent>()
+        val chosen = mutableListOf<app.lernet.ui.controls.TemplateAction>()
+        var state by mutableStateOf(ExpertUiState(base, phase = ExpertPhase.RUNNING, desiredEnabled = true,
+            applied = base, appliedRevision = base.revision, appliedTemplateId = "general",
+            tunnelHealth = app.lernet.engine.policy.ExpertTunnelHealth.HEALTHY,
+            profiles = listOf(ExpertProfile("office-exit", "Офис")),
+            capabilities = PolicyControlCapabilities(true, true, true), reducedMotion = true,
+            templateChoices = listOf(app.lernet.config.policy.PolicyTemplateChoice("general", "Общий"),
+                app.lernet.config.policy.PolicyTemplateChoice("work", "Рабочий"))))
+        val scene = ImageComposeScene(1040, 760, Density(1f)) {
+            MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
+                CompositionLocalProvider(LocalInspectionMode provides true) {
+                    DesktopExpert(state, intents::add, topChrome = { app.lernet.desktop.DesktopModeTabs(true, {}, reducedMotion = true) },
+                        onTemplateChange = {
+                        chosen += it
+                        state = state.copy(selectedTemplateId = "work", saved = work, draft = work)
+                        null
+                    })
+                }
+            }
+        }
+        try {
+            repeat(3) { scene.render(0).close() }
+            click(scene, "Общий")
+            click(scene, "Рабочий")
+            assertThat(chosen).containsExactly(app.lernet.ui.controls.TemplateAction.Select("work"))
+            assertThat(nodes(scene).any { "В сети — Общий" in texts(it) }).isTrue()
+            assertThat(nodes(scene).any { "Применить сейчас" in texts(it) }).isTrue()
+            screenshot(scene, "template-work-selected")
+            click(scene, "ИНАЧЕ")
+            assertThat(nodes(scene).any { "Ветка ИНАЧЕ" in texts(it) }).isTrue()
             assertThat(intents).isEmpty()
         } finally {
             scene.close()
@@ -213,25 +258,32 @@ class ExpertOffscreenTest {
     fun `saved and applied revisions stay distinct and active scheme can be restored`() {
         val applied = NetworkPolicy(revision = 1)
         val saved = applied.copy(revision = 2)
+        var appliedId by mutableStateOf<String?>("general")
         val scene = ImageComposeScene(900, 900, Density(1f, 1.2f)) {
             MaterialTheme(colorScheme = desktopColors, typography = desktopTypography) {
-                DesktopExpert(
-                    ExpertUiState(
-                        saved, applied = applied, appliedRevision = 1, phase = ExpertPhase.RUNNING,
-                        administrator = true, reducedMotion = true,
-                        capabilities = PolicyControlCapabilities(true, true, true)
-                    ),
-                    {},
-                    Modifier.fillMaxSize().padding(20.dp)
-                )
+                CompositionLocalProvider(LocalInspectionMode provides true) {
+                    DesktopExpert(
+                        ExpertUiState(
+                            saved, applied = applied, appliedRevision = 1, appliedTemplateId = appliedId,
+                            phase = ExpertPhase.RUNNING, administrator = true, reducedMotion = true,
+                            capabilities = PolicyControlCapabilities(true, true, true),
+                        ), {}, Modifier.fillMaxSize().padding(20.dp),
+                    )
+                }
             }
         }
         try {
             screenshot(scene, "saved-pending-apply-large-text")
             // Saved revision 2 is not the running revision 1: the pult says so in plain words and offers both ways.
             assertThat(nodes(scene).any { texts(it).contains("Есть изменения · применятся после «Применить»") }).isTrue()
-            assertThat(nodes(scene).any { texts(it).contains("Вернуть работающую схему в редактор") }).isTrue()
             assertThat(nodes(scene).any { texts(it).contains("Применить сейчас") }).isTrue()
+            // Replacing the archive invalidates the old template ID, even if the new archive reuses "general".
+            appliedId = null
+            repeat(3) { scene.render(0).close() }
+            assertThat(nodes(scene).any { "В сети — предыдущая схема" in texts(it) }).isTrue()
+            click(scene, "Инструменты ▾")
+            click(scene, "Скопировать действующую схему в черновик…")
+            assertThat(nodes(scene).any { "Заменить черновик шаблона?" in texts(it) }).isTrue()
         } finally {
             scene.close()
         }

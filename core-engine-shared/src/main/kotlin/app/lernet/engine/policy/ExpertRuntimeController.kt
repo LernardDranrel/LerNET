@@ -242,7 +242,10 @@ class ExpertRuntimeController(
         true
     }
 
-    private suspend fun start() {
+    /** Resume the acknowledged policy while the editor keeps its selected template. The host verifies the persisted fingerprint. */
+    suspend fun restore(policy: NetworkPolicy) = start(policy)
+
+    private suspend fun start(restoredPolicy: NetworkPolicy? = null) {
         val negotiationGeneration = mutex.withLock {
             if (mutableState.value.phase !in setOf(ExpertSessionPhase.STOPPED, ExpertSessionPhase.FAILED)) return
             if (mutableState.value.tun != null || startupStopUnconfirmed) {
@@ -282,7 +285,8 @@ class ExpertRuntimeController(
                 note(DiagEvent.START_RESULT, DiagKind.EDGE, "outcome" to "fail", "code" to "capabilities")
                 return
             }
-            val program = PolicyProgramCompiler.compile(session.saved, inventory, platform)
+            val policy = restoredPolicy ?: session.saved
+            val program = PolicyProgramCompiler.compile(policy, inventory, platform)
             if (!program.isValid) {
                 mutableState.value = mutableState.value.copy(
                     phase = ExpertSessionPhase.STOPPED, desiredEnabled = false,                     errors = errorsWithPersistence(program.errors.map { it.message }),
@@ -295,7 +299,7 @@ class ExpertRuntimeController(
                 errors = errorsWithPersistence(emptyList()),
             )
             reason(ExpertReasonLevel.INFO, "Создаём общий TUN. Подтверждение работающей схемы ожидается от ядра.")
-            startingSnapshot = session.saved to inventory
+            startingSnapshot = policy to inventory
             negotiationGeneration to program
         }
         try {

@@ -1,0 +1,14 @@
+<resources>
+    <string name="branch_map_detached">Отсоединено</string>
+    <string name="branch_map_inactive">Недоступно на Android</string>
+    <string name="branch_map_children">Правил внутри · %1$d</string>
+    <string name="branch_map_zoom_out">Уменьшить</string>
+    <string name="branch_map_zoom_in">Увеличить</string>
+    <string name="branch_map_fit">Вписать</string>
+    <string name="branch_map_scale">%1$d%%</string>
+    <string name="branch_map_low_scale" formatted="false">&lt;1%</string>
+    <string name="branch_map_edit">Редактировать</string>
+    <string name="branch_map_edit_default">Настроить ИНАЧЕ</string>
+    <string name="branch_map_open">Открыть ветку</string>
+    <string name="branch_map_overview">Мини-карта</string>
+</resources>

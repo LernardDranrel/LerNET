@@ -1,7 +1,30 @@
 package app.lernet.desktop
 
+import app.lernet.config.policy.PolicyWorkspace
+import app.lernet.engine.compile.EngineDefaults
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import java.util.HexFormat
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+
+@Serializable
+internal data class DesktopExpertAck(val templateId: String, val revision: Long, val digest: String) {
+    companion object {
+        fun forWorkspace(workspace: PolicyWorkspace, preferences: StoredState): DesktopExpertAck {
+            val hash = MessageDigest.getInstance("SHA-256")
+            // Bind the saved policy to its shared profile inventory and the inputs used by the Windows assembler.
+            val defaults = preferences.engineDefaults(strict = EngineDefaults().strictRoute)
+            listOf(Json.encodeToString(workspace.saved), Json.encodeToString(workspace.legacy), defaults.toString(), preferences.healthUrl)
+                .forEach { input -> hash.update(input.toByteArray(Charsets.UTF_8)); hash.update(0) }
+            return DesktopExpertAck(workspace.selectedTemplateId, workspace.saved.revision, HexFormat.of().formatHex(hash.digest()))
+        }
+    }
+}
 
 /**
  * Two small marks next to state.json:
@@ -24,15 +47,36 @@ class DesktopSessionMarks(private val directory: Path) {
     /** Read once at start: the running Expert rewrites the mark as soon as it is on again. */
     val expertResumeWanted: Boolean = Files.exists(directory.resolve("resume-expert"))
 
-    /** The Expert runs because the user switched it on. */
-    fun expertWanted() {
-        runCatching {
-            Files.createDirectories(directory)
-            if (!Files.exists(expert)) Files.writeString(expert, "")
+    /** A process exit between the native change and its acknowledgement must never replay the old template. */
+    @Synchronized
+    internal fun invalidateExpert() {
+        check(runCatching { Files.deleteIfExists(expert) }.isSuccess) {
+            "Не удалось обновить запись автозапуска. Проверь доступ к папке настроек LerNET."
         }
     }
 
+    /** Only a native-acknowledged policy can be automatically restarted at sign-in. */
+    @Synchronized
+    internal fun expertWanted(ack: DesktopExpertAck): Boolean =
+        runCatching {
+            Files.createDirectories(directory)
+            val pending = directory.resolve("resume-expert.tmp")
+            Files.writeString(pending, Json.encodeToString(ack))
+            try {
+                Files.move(pending, expert, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(pending, expert, StandardCopyOption.REPLACE_EXISTING)
+            }
+        }.isSuccess
+
+    internal fun restoreCandidate(editor: PolicyWorkspace, preferences: StoredState): Pair<DesktopExpertAck, PolicyWorkspace>? {
+        val ack = runCatching { Json.decodeFromString<DesktopExpertAck>(Files.readString(expert)) }.getOrNull() ?: return null
+        val candidate = editor.restartCandidate(ack.templateId, ack.revision) ?: return null
+        return (ack to candidate).takeIf { ack == DesktopExpertAck.forWorkspace(candidate, preferences) }
+    }
+
     /** The user switched the Expert off: it does not come back at the next sign-in. */
+    @Synchronized
     fun expertStopped() {
         runCatching { Files.deleteIfExists(expert) }
     }

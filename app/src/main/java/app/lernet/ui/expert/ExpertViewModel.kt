@@ -8,29 +8,39 @@ import app.lernet.engine.policy.ExpertIntent
 import app.lernet.routing.policy.NetworkPolicy
 import app.lernet.routing.policy.PolicyDnsSettings
 import app.lernet.routing.policy.PolicyHealthSettings
+import app.lernet.ui.controls.TemplateAction
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 
 @HiltViewModel
 class ExpertViewModel @Inject constructor(private val coordinator: ExpertCoordinator) : ViewModel() {
-    internal val formMemory = ExpertFormMemory()
+    private var formTemplateId: String? = null
+    private var forms = ExpertFormMemory()
+    internal fun formMemory(templateId: String): ExpertFormMemory {
+        if (formTemplateId != templateId) {
+            forms = ExpertFormMemory()
+            formTemplateId = templateId
+        }
+        return forms
+    }
     val state = coordinator.state
     val messages = coordinator.messages
     fun connectedVpnProfileId(): String? = coordinator.connectedVpnProfileId()
-    fun startKeepingVpn(profileId: String, expected: NetworkPolicy) =
-        coordinator.startKeepingVpn(profileId, expected)
-    fun onIntent(intent: ExpertIntent) = coordinator.dispatch(intent)
-    suspend fun saveDraft(expected: NetworkPolicy, next: NetworkPolicy): String? = coordinator.saveDraft(expected, next)
+    fun startKeepingVpn(templateId: String, profileId: String, expected: NetworkPolicy) =
+        coordinator.startKeepingVpn(templateId, profileId, expected)
+    fun onIntent(intent: ExpertIntent, templateId: String) = coordinator.dispatch(intent, templateId)
+    suspend fun changeTemplate(templateId: String, action: TemplateAction): String? = coordinator.changeTemplate(templateId, action)
+    suspend fun saveDraft(templateId: String, expected: NetworkPolicy, next: NetworkPolicy): String? = coordinator.saveDraft(templateId, expected, next)
     fun export(uri: Uri) = coordinator.export(uri)
     fun import(uri: Uri, replace: Boolean = false) = coordinator.import(uri, replace)
     fun refreshEnvironment() = coordinator.refreshEnvironment()
     suspend fun saveExternalExit(request: ExternalExitRequest, expected: TransferProfile?): String? =
         coordinator.saveExternalExit(request, expected)
-    suspend fun saveDnsSettings(expected: PolicyDnsSettings, next: PolicyDnsSettings): String? =
-        coordinator.saveDnsSettings(expected, next)
+    suspend fun saveDnsSettings(templateId: String, expected: PolicyDnsSettings, next: PolicyDnsSettings): String? =
+        coordinator.saveDnsSettings(templateId, expected, next)
 
-    suspend fun saveHealthSettings(expected: PolicyHealthSettings, next: PolicyHealthSettings): String? =
-        coordinator.saveHealthSettings(expected, next)
+    suspend fun saveHealthSettings(templateId: String, expected: PolicyHealthSettings, next: PolicyHealthSettings): String? =
+        coordinator.saveHealthSettings(templateId, expected, next)
 
     suspend fun copyProfile(profileId: String) = coordinator.copyProfile(profileId)
 

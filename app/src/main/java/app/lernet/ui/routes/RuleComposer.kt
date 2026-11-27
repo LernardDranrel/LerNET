@@ -340,7 +340,7 @@ private fun AddBlockMenu(includeProcess: Boolean, onAdd: (ConditionKind) -> Unit
 }
 
 @Composable
-private fun blockTitle(kind: ConditionKind): String = when (kind) {
+internal fun blockTitle(kind: ConditionKind): String = when (kind) {
     ConditionKind.DOMAIN -> stringResource(R.string.rule_block_domain)
     ConditionKind.GEOIP -> stringResource(R.string.rule_block_geo)
     ConditionKind.PRIVATE -> stringResource(R.string.rule_block_private)

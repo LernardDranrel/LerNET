@@ -210,11 +210,10 @@ private fun HomeBody(
             },
             enabled = state.activeProfile != null || isSessionActive(snapshot.state),
             onToggle = { onIntent(HomeIntent.ToggleConnect) },
-            onOpenRoutes = null,
             holding = snapshot.waitingForNetwork || snapshot.hold != null || snapshot.tried != null,
             // Holding: «Выключить VPN» is right below; failed: the error card has «Повторить».
-            showActionCaption = snapshot.tried == null && snapshot.state != ConnectionState.FAILED,
-        ) {}
+            showAction = snapshot.tried == null && snapshot.state != ConnectionState.FAILED,
+        )
         ProfileLine(
             name = state.activeProfile?.name,
             group = state.groups.firstOrNull { state.activeProfile?.id in it.profileIds },

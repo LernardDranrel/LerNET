@@ -74,7 +74,7 @@ class DesktopExpertV2Test {
         }
         try {
             screenshot(scene, "windows-expert-v2-pult")
-            assertThat(nodes(scene).any { "14 дн 06 ч" in texts(it) }).isTrue()
+            assertThat(nodes(scene).any { "Без перерыва · 14 дн 06 ч" in texts(it) }).isTrue()
             // Sidebar to the window top: brand above mode tabs; sections stay in the left column.
             val brand = nodes(scene).first { "для Windows" in texts(it) }
             assertThat(brand.boundsInRoot.top).isAtMost(40f)
@@ -230,13 +230,7 @@ class DesktopExpertV2Test {
         repeat(4) { scene.render(t).close(); t += 500_000_000L }
         scene.render(t).use { image ->
             val bytes = requireNotNull(image.encodeToData(EncodedImageFormat.PNG)).use { it.bytes }
-            listOf(
-                File("build/expert-ui-review"),
-                File("/workspace/projects/LerNET-ui3/out/windows-expert-ui"),
-            ).forEach { dir ->
-                dir.mkdirs()
-                dir.resolve("$name.png").writeBytes(bytes)
-            }
+            File("build/expert-ui-review").apply { mkdirs() }.resolve("$name.png").writeBytes(bytes)
         }
     }
 

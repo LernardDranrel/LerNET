@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="expert_branch_path">Путь · %1$d</string>
+    <string name="expert_branch_path_title">Путь в схеме</string>
+    <string name="expert_branch_expand_path">Показать полный путь</string>
+    <string name="expert_branch_collapse_path">Свернуть путь</string>
+    <string name="expert_branch_on_map">На карте</string>
+    <string name="expert_branch_to_list">В дерево</string>
+    <string name="expert_branch_parent">На уровень выше</string>
+    <string name="expert_branch_search">Поиск по схеме</string>
+    <string name="expert_branch_search_query">Название правила</string>
+    <string name="expert_branch_no_condition">Без условий</string>
+    <string name="rule_else_locked_short">Если правила выше не подошли</string>
+    <string name="expert_branch_list_title">Правила ветки · %1$d</string>
+    <string name="expert_branch_children">Вложенные правила · %1$d</string>
+    <string name="expert_branch_full_canvas">Полная схема и ручная раскладка</string>
+    <string name="expert_branch_help">Открой ветку, чтобы увидеть её правила. «Путь» ведёт к любому родителю. На карте выбери правило, чтобы посмотреть его условие или открыть редактор.</string>
+    <string name="expert_branch_changes">Изменения схемы</string>
+    <string name="expert_branch_changes_errors">Ошибки схемы · %1$d</string>
+    <string name="expert_branch_root_title">Начало схемы</string>
+</resources>

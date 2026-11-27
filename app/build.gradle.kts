@@ -13,7 +13,8 @@ val packEmuAbis =
     providers.gradleProperty("emuAbis").orElse("false").get().toBoolean()
 val lernetVersion = providers.gradleProperty("lernetVersion").get()
 
-val signingPropertiesFile = rootProject.file(".release/signing.properties")
+val signingRoot = providers.gradleProperty("lernetSigningRoot").orNull?.let(rootProject::file) ?: rootProject.projectDir
+val signingPropertiesFile = signingRoot.resolve(".release/signing.properties")
 val signingProperties = Properties().apply {
     if (signingPropertiesFile.isFile) signingPropertiesFile.inputStream().use(::load)
 }
@@ -26,7 +27,7 @@ android {
         applicationId = "app.lernet"
         minSdk = 26
         targetSdk = 36
-        versionCode = 127
+        versionCode = 128
         versionName = lernetVersion
         buildConfigField("String", "GIT_SHA", "\"${gitHeadSha()}\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -45,7 +46,7 @@ android {
     signingConfigs {
         if (signingPropertiesFile.isFile) {
             create("lernetRelease") {
-                storeFile = rootProject.file(signingProperties.getProperty("storeFile"))
+                storeFile = signingRoot.resolve(signingProperties.getProperty("storeFile"))
                 storePassword = signingProperties.getProperty("storePassword")
                 keyAlias = signingProperties.getProperty("keyAlias")
                 keyPassword = signingProperties.getProperty("keyPassword")

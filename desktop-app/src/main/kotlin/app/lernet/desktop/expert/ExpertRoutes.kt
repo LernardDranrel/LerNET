@@ -83,6 +83,8 @@ internal fun ExpertRoutes(
     onIntent: (ExpertIntent) -> Unit,
     modifier: Modifier,
     highlightedNodeIds: Set<String> = emptySet(),
+    requestedDeviceRule: String? = null,
+    onRuleOpened: () -> Unit = {},
 ) {
     val tree = PolicyBranchEditing.displayTree(ExpertPolicyEditing.tree(state.draft, state.selectedScope))
     val rootOtherwise = tree.nodes.first { it.parentId == null && !it.detached && PolicyOtherwise.isOtherwise(it) }
@@ -103,6 +105,19 @@ internal fun ExpertRoutes(
     var pendingCompletion by remember { mutableStateOf<(() -> Unit)?>(null) }
     val focus = remember { FocusRequester() }
     val selected = tree.nodes.firstOrNull { it.id == selectedId }
+    LaunchedEffect(requestedDeviceRule, state.selectedScope) {
+        if (requestedDeviceRule == null) return@LaunchedEffect
+        if (state.selectedScope != PolicyScope.Device) {
+            onIntent(ExpertIntent.SelectScope(PolicyScope.Device))
+        } else {
+            tree.nodes.find { it.id == requestedDeviceRule }?.let {
+                selectedId = it.id
+                rootSelected = false
+                editing = it
+            }
+            onRuleOpened()
+        }
+    }
     val graphProblem = remember(tree) { ExpertPolicyEditing.graphProblem(tree) }
     fun editPolicy(updated: app.lernet.routing.policy.NetworkPolicy) = onIntent(ExpertIntent.EditPolicy(updated))
     fun commitEditor(updated: app.lernet.routing.policy.NetworkPolicy, onComplete: () -> Unit) {
@@ -736,13 +751,13 @@ private fun GraphCard(
 private fun canAddPolicyChild(node: PolicyNode): Boolean = PolicyOtherwise.isOtherwise(node) ||
     (node.target !is PolicyTarget.Profile && node.target !is PolicyTarget.Folder && node.target !is PolicyTarget.Channel)
 
-private fun policyNodeTitle(node: PolicyNode): String = if (PolicyOtherwise.isOtherwise(node)) {
+internal fun policyNodeTitle(node: PolicyNode): String = if (PolicyOtherwise.isOtherwise(node)) {
     node.title.takeIf { it.isNotBlank() && it != "ИНАЧЕ" }?.let { "ИНАЧЕ · $it" } ?: "ИНАЧЕ"
 } else {
     node.title.ifBlank { "Без названия" }
 }
 
-private fun policyNodeTargetLabel(node: PolicyNode, tree: PolicyTree, state: ExpertUiState): String =
+internal fun policyNodeTargetLabel(node: PolicyNode, tree: PolicyTree, state: ExpertUiState): String =
     if (tree.nodes.any { it.parentId == node.id && !it.detached }) {
         "Продолжить по дочерним веткам"
     } else {

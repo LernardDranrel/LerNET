@@ -3,20 +3,19 @@ package app.lernet.ui.expert
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ArrowDownward
-import androidx.compose.material.icons.outlined.ArrowUpward
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -33,8 +32,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
+import androidx.compose.runtime.key
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.lernet.R
@@ -51,11 +52,10 @@ import app.lernet.routing.policy.PolicyScope
 import app.lernet.routing.policy.PolicyTarget
 import app.lernet.routing.policy.PolicyTree
 import app.lernet.ui.icons.LerNetSymbols
-import app.lernet.ui.routes.RouteEditorWorkspace
-import app.lernet.ui.theme.LerNetDimens
 import java.util.UUID
 
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+private enum class ExpertBranchView { LIST, MAP, CANVAS }
+
 @Composable
 internal fun ExpertSchema(
     runtime: ExpertRuntimeState,
@@ -66,17 +66,30 @@ internal fun ExpertSchema(
 ) {
     var scope by rememberSaveable(stateSaver = ExpertScopeSaver) { mutableStateOf<PolicyScope>(PolicyScope.Device) }
     var chooseScope by remember { mutableStateOf(false) }
-    var graph by rememberSaveable { mutableStateOf(true) }
+    var view by rememberSaveable(scope) { mutableStateOf(ExpertBranchView.LIST) }
+    var parentId by rememberSaveable(scope) { mutableStateOf<String?>(null) }
+    var selectedId by rememberSaveable(scope) { mutableStateOf<String?>(null) }
+    var revealId by rememberSaveable(scope) { mutableStateOf<String?>(null) }
+    var path by rememberSaveable(scope) { mutableStateOf(false) }
+    var search by rememberSaveable(scope) { mutableStateOf(false) }
+    var changes by remember { mutableStateOf(false) }
     var help by remember { mutableStateOf(false) }
     var editing by rememberSaveable(stateSaver = ExpertOptionalNodeSaver) { mutableStateOf<PolicyNode?>(null) }
     var deleting by rememberSaveable { mutableStateOf<String?>(null) }
     var channelDetail by remember { mutableStateOf<String?>(null) }
-    var selectedKey by rememberSaveable { mutableStateOf<String?>(PolicyCanvasKeys.ROOT) }
     val policy = runtime.draft
-    val scopes = (
-        listOf(PolicyScope.Device) + policy.trees.map { it.scope } +
-            bundle.groups.map { PolicyScope.Folder(it.id) } + bundle.profiles.map { PolicyScope.Profile(it.id) }
-        ).distinct()
+    val scopedTrees = policy.trees.map { it.scope }
+    val scopes = remember(bundle.groups, bundle.profiles, scopedTrees) {
+        buildList {
+            add(PolicyScope.Device)
+            bundle.groups.forEach { folder ->
+                add(PolicyScope.Folder(folder.id))
+                folder.profileIds.forEach { add(PolicyScope.Profile(it)) }
+            }
+            bundle.profiles.forEach { add(PolicyScope.Profile(it.id)) }
+            addAll(scopedTrees)
+        }.distinct()
+    }
     LaunchedEffect(scopes) {
         if (scope !in scopes) {
             scope = PolicyScope.Device
@@ -85,10 +98,13 @@ internal fun ExpertSchema(
             channelDetail = null
         }
     }
-    val tree = PolicyBranchEditing.displayTree(if (scope in scopes) ExpertEdits.tree(policy, scope) else policy.device)
+    val tree = remember(policy, scope) { PolicyBranchEditing.displayTree(ExpertEdits.tree(policy, scope)) }
+    val index = remember(tree.nodes) { ExpertBranchIndex(tree) }
+    val parent = parentId?.let(index.byId::get)
     val rootOtherwise = tree.nodes.first { it.parentId == null && !it.detached && PolicyOtherwise.isOtherwise(it) }
-    LaunchedEffect(scope, tree.nodes) {
-        if (tree.nodes.none { PolicyCanvasKeys.node(it.id) == selectedKey }) selectedKey = PolicyCanvasKeys.ROOT
+    LaunchedEffect(index) {
+        if (parent == null) parentId = null
+        if (selectedId != null && selectedId !in index.byId) selectedId = parent?.id
     }
     fun add(parent: PolicyNode?) {
         editing = PolicyNode(
@@ -114,162 +130,127 @@ internal fun ExpertSchema(
         runtime.draftErrors.isNotEmpty() ||
         runtime.appliedPolicy?.let { it != runtime.draft } == true ||
         (runtime.phase == ExpertSessionPhase.RUNNING && runtime.appliedRevision != runtime.saved.revision)
-    RouteEditorWorkspace(
-        asList = !graph,
-        onListChange = { graph = !it },
-        modifier = modifier,
-        header = {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = LerNetDimens.screenPadding),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedButton({ chooseScope = true }, Modifier.weight(1f)) {
-                    Text(scopeTitle(scope, bundle), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Icon(LerNetSymbols.expandMore(), contentDescription = null)
+    fun level(target: String?) {
+        parentId = target
+        selectedId = index.children(target).firstOrNull()?.id ?: target
+        revealId = null
+    }
+    fun back() {
+        if (view != ExpertBranchView.LIST) {
+            view = ExpertBranchView.LIST
+            revealId = selectedId?.takeIf { index.parentId(it) == parent?.id && it != parent?.id }
+        } else if (parent != null) {
+            level(index.parentId(parent.id))
+            selectedId = parent.id
+            revealId = parent.id
+        }
+    }
+    fun open(node: PolicyNode) {
+        if (index.children(node.id).isNotEmpty()) {
+            level(node.id)
+        } else {
+            selectedId = node.id
+            editing = node
+        }
+    }
+    fun move(node: PolicyNode, direction: Int) {
+        onIntent(ExpertIntent.EditChecked(policy, ExpertEdits.move(policy, scope, node.id, direction)))
+    }
+    val nodeMenu: @Composable (PolicyNode?) -> Unit = { node ->
+        val channel = node?.target as? PolicyTarget.Channel
+        ExpertNodeMenu(node, tree, onAdd = { add(node) }, onOtherwise = { node?.let(::addOtherwise) },
+            onMove = { direction -> node?.let { move(it, direction) } }, onDelete = { deleting = node?.id },
+            onEdit = { editing = node ?: rootOtherwise }, onChannel = channel?.let { { channelDetail = it.id } })
+    }
+    val hasOverlay = editing != null || deleting != null || channelDetail != null || chooseScope || help || path || search || changes
+    BackHandler(enabled = !hasOverlay && (parent != null || view != ExpertBranchView.LIST), onBack = ::back)
+    val listStates = key(scope) { rememberSaveableStateHolder() }
+    Column(modifier) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextButton({ chooseScope = true }, Modifier.weight(1f)) {
+                Text(scopeTitle(scope, bundle), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, false))
+                Icon(LerNetSymbols.expandMore(), null, Modifier.size(18.dp))
+            }
+            IconButton({ search = true }, Modifier.testTag("branch-search")) {
+                Icon(Icons.Outlined.Search, stringResource(R.string.expert_branch_search))
+            }
+            IconButton({ help = true }) { Icon(LerNetSymbols.help(), stringResource(R.string.expert_schema_help)) }
+        }
+        Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (view != ExpertBranchView.LIST || parent != null) {
+                IconButton(::back, Modifier.testTag("branch-list-back")) {
+                    Icon(LerNetSymbols.arrowBack(), stringResource(if (view == ExpertBranchView.LIST)
+                        R.string.expert_branch_parent else R.string.expert_branch_to_list))
                 }
-                IconButton({ help = true }) {
-                    Icon(LerNetSymbols.help(), contentDescription = stringResource(R.string.expert_schema_help))
+            }
+            Text(parent?.let { branchRuleTitle(it) } ?: stringResource(R.string.expert_branch_root_title),
+                Modifier.weight(1f).padding(start = 8.dp), style = MaterialTheme.typography.titleMedium,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+            TextButton({ path = true }, Modifier.testTag("branch-path")) {
+                Text(stringResource(R.string.expert_branch_path, index.path(parent?.id).size + 1))
+            }
+            if (view == ExpertBranchView.LIST) {
+                TextButton({ view = ExpertBranchView.MAP }, Modifier.testTag("branch-map-open")) {
+                    Text(stringResource(R.string.expert_branch_on_map))
+                }
+            } else if (view == ExpertBranchView.MAP) {
+                IconButton({ view = ExpertBranchView.CANVAS }) {
+                    Icon(LerNetSymbols.route(), stringResource(R.string.expert_branch_full_canvas))
                 }
             }
-        },
-        floatingAction = {
-            FloatingActionButton(onClick = { add(null) }) {
-                Icon(LerNetSymbols.add(), stringResource(R.string.expert_add_rule))
+        }
+        HorizontalDivider()
+        when (view) {
+            ExpertBranchView.LIST -> listStates.SaveableStateProvider(parent?.id?.let(PolicyCanvasKeys::node) ?: PolicyCanvasKeys.ROOT) {
+                ExpertBranchList(index, parent, selectedId, bundle, policy, runtime.inactiveNodeIds, ::open, { add(parent) },
+                    nodeMenu, revealId, { revealId = null }, Modifier.weight(1f).fillMaxWidth())
             }
-        },
-        bottomBar = {
-            if (showDraftActions) {
-                Column(
-                    Modifier.fillMaxWidth().heightIn(max = 160.dp).verticalScroll(rememberScrollState())
-                        .padding(horizontal = LerNetDimens.screenPadding, vertical = 8.dp),
-                ) { ExpertDraftActions(runtime, onIntent) }
-            }
-        },
-    ) {
-        if (graph) {
-            ExpertGraph(
+            ExpertBranchView.MAP -> ExpertBranchMap(
+                tree, bundle, policy, runtime.inactiveNodeIds, parentId = parent?.id, selectedId = selectedId,
+                onSelect = { selectedId = it }, onOpenBranch = ::level, onEdit = { editing = it ?: rootOtherwise },
+                modifier = Modifier.weight(1f).fillMaxWidth(), index = index,
+            )
+            ExpertBranchView.CANVAS -> ExpertGraph(
                 tree, bundle, policy, runtime.inactiveNodeIds,
-                onEdit = { editing = it }, onChannel = { channelDetail = it },
-                onRoot = { editing = rootOtherwise },
-                onPosition = { key, point ->
-                    onIntent(ExpertIntent.UpdateLayout(tree.scope, mapOf(key to point)))
-                },
+                onEdit = { editing = it }, onChannel = { channelDetail = it }, onRoot = { editing = rootOtherwise },
+                onPosition = { canvasKey, point -> onIntent(ExpertIntent.UpdateLayout(tree.scope, mapOf(canvasKey to point))) },
                 onAlign = { onIntent(ExpertIntent.UpdateLayout(tree.scope, clear = true)) },
-                modifier = Modifier.fillMaxSize(),
-                selectedKey = selectedKey,
-                onSelect = { selectedKey = it },
-                onAdd = { add(it) },
-                nodeActions = { node ->
-                    ExpertNodeActions(
-                        node = node, tree = tree,
-                        onEdit = { editing = node ?: rootOtherwise },
-                        onAdd = { add(node) },
-                        onOtherwise = { node?.let(::addOtherwise) },
-                        onMove = { direction -> node?.let {
-                            onIntent(ExpertIntent.EditChecked(policy, ExpertEdits.move(policy, scope, it.id, direction)))
-                        } },
-                        onDelete = { deleting = node?.id },
-                    )
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                selectedKey = selectedId?.let(PolicyCanvasKeys::node) ?: PolicyCanvasKeys.ROOT,
+                onSelect = { canvasKey -> selectedId = index.byId.values.firstOrNull { PolicyCanvasKeys.node(it.id) == canvasKey }?.id },
+                onAdd = ::add, nodeActions = { node ->
+                    ExpertNodeActions(node, tree, onEdit = { editing = node ?: rootOtherwise }, onAdd = { add(node) },
+                        onOtherwise = { node?.let(::addOtherwise) }, onMove = { direction -> node?.let { move(it, direction) } },
+                        onDelete = { deleting = node?.id })
                 },
             )
         }
-        if (!graph) {
-            Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(LerNetDimens.screenPadding),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Card(onClick = { selectedKey = PolicyCanvasKeys.ROOT }, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text(scopeTitle(scope, bundle), style = MaterialTheme.typography.titleSmall)
-                        Text(stringResource(R.string.expert_branching_root))
-                        TextButton({ editing = rootOtherwise }) { Text(stringResource(R.string.expert_selected_properties)) }
-                        TextButton({
-                            selectedKey = PolicyCanvasKeys.ROOT
-                            add(null)
-                        }) { Text(stringResource(R.string.expert_add_rule)) }
-                    }
-                }
-                ExpertEdits.ordered(tree).forEach { (node, depth) ->
-                    if (!graph) {
-                        Card(
-                            onClick = { selectedKey = PolicyCanvasKeys.node(node.id) },
-                            modifier = Modifier.fillMaxWidth().padding(start = (depth.coerceAtMost(3) * 12).dp)
-                        ) {
-                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(
-                                    if (PolicyOtherwise.isOtherwise(node)) {
-                                        stringResource(R.string.expert_otherwise_title)
-                                    } else {
-                                        node.title.ifBlank { stringResource(R.string.expert_rule_unnamed) }
-                                    },
-                                    style = MaterialTheme.typography.titleSmall,
-                                )
-                                if (PolicyOtherwise.isOtherwise(node)) ExpertHint(R.string.expert_otherwise_hint)
-                                Text(
-                                    if (tree.nodes.any { it.parentId == node.id && !it.detached }) {
-                                        stringResource(R.string.expert_branching_root)
-                                    } else {
-                                        targetTitle(node.target, bundle, policy)
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                                (node.target as? PolicyTarget.Channel)?.let { target ->
-                                    val links = tree.nodes.count { (it.target as? PolicyTarget.Channel)?.id == target.id }
-                                    if (links > 1) {
-                                        TextButton({ channelDetail = target.id }) {
-                                            Icon(LerNetSymbols.route(), null)
-                                            Text(stringResource(R.string.expert_portal_hint, links))
-                                        }
-                                    }
-                                }
-                                if (node.id in runtime.inactiveNodeIds) ExpertHint(R.string.expert_inactive_android)
-                                if (node.detached) ExpertHint(R.string.expert_detached)
-                                if (node.protected) ExpertHint(R.string.expert_rule_protected)
-                                androidx.compose.foundation.layout.FlowRow {
-                                    IconButton({ editing = node }) {
-                                        Icon(LerNetSymbols.edit(), stringResource(R.string.expert_rule_editor))
-                                    }
-                                    if (!PolicyOtherwise.isOtherwise(node)) {
-                                        val up = stringResource(R.string.expert_move_up)
-                                        val down = stringResource(R.string.expert_move_down)
-                                        IconButton(
-                                            { onIntent(ExpertIntent.EditChecked(policy, ExpertEdits.move(policy, scope, node.id, -1))) },
-                                            Modifier.semantics { contentDescription = up },
-                                            enabled = PolicyBranchEditing.canMoveNode(tree, node.id, -1),
-                                        ) {
-                                            Icon(Icons.Outlined.ArrowUpward, contentDescription = null)
-                                        }
-                                        IconButton(
-                                            { onIntent(ExpertIntent.EditChecked(policy, ExpertEdits.move(policy, scope, node.id, 1))) },
-                                            Modifier.semantics { contentDescription = down },
-                                            enabled = PolicyBranchEditing.canMoveNode(tree, node.id, 1),
-                                        ) {
-                                            Icon(Icons.Outlined.ArrowDownward, contentDescription = null)
-                                        }
-                                    }
-                                    IconButton({ add(node) }, enabled = ExpertEdits.canAddChild(node)) {
-                                        Icon(LerNetSymbols.add(), stringResource(R.string.expert_add_child))
-                                    }
-                                    if (canAddMissingOtherwise(tree, node)) {
-                                        TextButton({ addOtherwise(node) }) { Text(stringResource(R.string.expert_add_otherwise)) }
-                                    }
-                                    if (!PolicyOtherwise.isOtherwise(node)) {
-                                        IconButton({ deleting = node.id }) {
-                                            Icon(LerNetSymbols.delete(), stringResource(R.string.expert_remove))
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                Button({ add(null) }, Modifier.fillMaxWidth()) {
-                    Icon(LerNetSymbols.add(), null)
-                    Text(stringResource(R.string.expert_add_rule))
-                }
+        if (showDraftActions) {
+            val errors = (runtime.errors + runtime.draftErrors).distinct()
+            TextButton({ changes = true }, Modifier.fillMaxWidth()) {
+                Text(if (errors.isEmpty()) stringResource(R.string.expert_branch_changes)
+                    else stringResource(R.string.expert_branch_changes_errors, errors.size))
             }
         }
     }
+    if (path) ExpertBranchPath(index, parent?.id, scopeTitle(scope, bundle), onPick = { id ->
+        if (id != parent?.id) level(id)
+        if (view == ExpertBranchView.CANVAS) view = ExpertBranchView.MAP
+        path = false
+    }, onDismiss = { path = false })
+    if (search) ExpertBranchSearch(index, scopeTitle(scope, bundle), onOpen = { node ->
+        search = false
+        view = ExpertBranchView.LIST
+        level(index.parentId(node.id))
+        open(node)
+        if (editing != null) revealId = node.id
+    }, onDismiss = { search = false })
+    if (changes && showDraftActions) {
+        AlertDialog(onDismissRequest = { changes = false }, title = { Text(stringResource(R.string.expert_branch_changes)) },
+            text = { Column(Modifier.verticalScroll(rememberScrollState())) { ExpertDraftActions(runtime, onIntent) } },
+            confirmButton = { TextButton({ changes = false }) { Text(stringResource(R.string.expert_node_accept)) } })
+    }
+    LaunchedEffect(showDraftActions) { if (!showDraftActions) changes = false }
     if (help) {
         AlertDialog(
             onDismissRequest = { help = false },
@@ -277,11 +258,14 @@ internal fun ExpertSchema(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     ExpertHint(R.string.expert_priority_hint)
-                    ExpertHint(R.string.expert_canvas_hint)
-                    ExpertHint(R.string.expert_schema_root_hint)
+                    ExpertHint(if (view == ExpertBranchView.CANVAS) R.string.expert_canvas_hint else R.string.expert_branch_help)
                     ExpertHint(R.string.expert_otherwise_hint)
                 }
             },
+            dismissButton = { TextButton({
+                help = false
+                view = ExpertBranchView.CANVAS
+            }) { Text(stringResource(R.string.expert_branch_full_canvas)) } },
             confirmButton = {
                 TextButton({ help = false }) { Text(stringResource(R.string.expert_node_accept)) }
             },
@@ -292,34 +276,15 @@ internal fun ExpertSchema(
             onDismissRequest = { chooseScope = false }, title = { Text(stringResource(R.string.expert_choose_scope)) },
             text = {
                 Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                    TextButton({
-                        scope = PolicyScope.Device
-                        chooseScope = false
-                    }, Modifier.fillMaxWidth()) {
-                        Text(scopeTitle(PolicyScope.Device, bundle))
-                    }
-                    bundle.groups.forEach { folder ->
-                        val owner = PolicyScope.Folder(folder.id)
+                    scopes.forEach { choice ->
+                        val nested = choice is PolicyScope.Profile && bundle.groups.any { choice.id in it.profileIds }
                         TextButton({
-                            scope = owner
+                            scope = choice
                             chooseScope = false
-                        }, Modifier.fillMaxWidth()) { Text(scopeTitle(owner, bundle)) }
-                        folder.profileIds.forEach { id ->
-                            val profile = PolicyScope.Profile(id)
-                            TextButton({
-                                scope = profile
-                                chooseScope = false
-                            }, Modifier.fillMaxWidth().padding(start = 20.dp)) {
-                                Text(scopeTitle(profile, bundle))
-                            }
+                        }, Modifier.fillMaxWidth().padding(start = if (nested) 20.dp else 0.dp)) {
+                            Text(scopeTitle(choice, bundle))
+                            if (choice == scope) Icon(LerNetSymbols.check(), null, Modifier.size(16.dp))
                         }
-                    }
-                    bundle.profiles.filter { profile -> bundle.groups.none { profile.id in it.profileIds } }.forEach { profile ->
-                        val owner = PolicyScope.Profile(profile.id)
-                        TextButton({
-                            scope = owner
-                            chooseScope = false
-                        }, Modifier.fillMaxWidth()) { Text(scopeTitle(owner, bundle)) }
                     }
                 }
             }, confirmButton = { TextButton({ chooseScope = false }) { Text(stringResource(R.string.cancel)) } }
@@ -328,7 +293,15 @@ internal fun ExpertSchema(
     editing?.takeIf { scope in scopes }?.let { node ->
         val base by rememberSaveable(node.id, stateSaver = ExpertPolicySaver) { mutableStateOf(policy) }
         ExpertRuleEditor(node, scope, bundle, base, onCommit = { next ->
-            if (onSaveDraft == null) "Сохранение недоступно" else onSaveDraft(base, ExpertEdits.putNode(base, scope, next))
+            if (onSaveDraft == null) return@ExpertRuleEditor "Сохранение недоступно"
+            val adding = next.id !in index.byId
+            val error = onSaveDraft(base, ExpertEdits.putNode(base, scope, next))
+            if (error == null && adding && view == ExpertBranchView.LIST) {
+                parentId = next.parentId
+                selectedId = next.id
+                revealId = next.id
+            }
+            error
         }, onDismiss = { editing = null })
     }
     deleting?.let { id ->
@@ -346,11 +319,19 @@ internal fun ExpertSchema(
                 TextButton({
                     if (!busy) jobs.launch {
                         busy = true
+                        val containingBranch = index.parentId(id)
                         try {
                             error = if (onSaveDraft == null) "Сохранение недоступно" else {
                                 onSaveDraft(base, ExpertEdits.removeNode(base, scope, id))
                             }
-                            if (error == null) deleting = null
+                            if (error == null) {
+                                if (parent?.id == id) {
+                                    parentId = containingBranch
+                                    selectedId = containingBranch
+                                    revealId = null
+                                }
+                                deleting = null
+                            }
                         } finally { busy = false }
                     }
                 }, enabled = !busy) { Text(stringResource(R.string.expert_remove)) }

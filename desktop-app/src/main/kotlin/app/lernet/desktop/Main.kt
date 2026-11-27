@@ -2,6 +2,8 @@
 
 package app.lernet.desktop
 
+import app.lernet.ui.controls.ProfileSelector
+import app.lernet.ui.controls.ConnectionHeader
 import app.lernet.engine.text.HomeWords
 import app.lernet.engine.text.ImportWords
 import app.lernet.engine.text.JournalWords
@@ -25,8 +27,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
@@ -60,7 +60,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -250,7 +249,7 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
             Item("Анализ сети", onClick = { networkWindowOpen = true })
             // Audit G7: «Подключить» or «Отключить» by the state, like the phone's notification.
             val expertOn = expertUi?.phase in setOf(ExpertPhase.RUNNING, ExpertPhase.STARTING, ExpertPhase.APPLYING, ExpertPhase.FAILED)
-            val vpnOn = ui.busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RUNNING, TunnelStatus.RECONNECTING)
+            val vpnOn = ui.changingConnection || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RUNNING, TunnelStatus.RECONNECTING)
             Item(if (expertOn || vpnOn) "Отключить" else "Подключить", onClick = {
                 when {
                     expertOn -> expert?.dispatch(ExpertIntent.Stop)
@@ -294,7 +293,7 @@ private fun desktopApplication(startupCheck: String?, startupFallbackMessage: St
                             if (showExpert && expert != null && expertUi != null) {
                                 val splash = rememberDesktopExpertSplash()
                                 Box(Modifier.fillMaxSize()) {
-                                DesktopExpert(expertUi, frameAnimateIn = !splash.firstEntry, topChrome = {
+                                DesktopExpert(expertUi, onTemplateChange = expert::changeTemplate, frameAnimateIn = !splash.firstEntry, topChrome = {
                                     DesktopModeTabs(true, { expertTab = it },
                                         status = workspaceStatus(expertUi, tunnel, ui),
                                         reducedMotion = expertUi?.reducedMotion == true,
@@ -531,7 +530,7 @@ internal fun workspaceStatus(expertUi: ExpertUiState?, tunnel: TunnelSnapshot, u
             WorkspaceStatus(app.lernet.engine.text.StatusWords.HOLD, StatusTone.HOLD)
         tunnel.status == TunnelStatus.RUNNING && ui.healthFailures >= 2 -> WorkspaceStatus(app.lernet.engine.text.StatusWords.NO_REPLY, StatusTone.PROBLEM)
         tunnel.status == TunnelStatus.RUNNING -> WorkspaceStatus(app.lernet.engine.text.StatusWords.connected(profile, dnsOk = false), StatusTone.OK)
-        ui.busy || tunnel.status == TunnelStatus.STARTING -> WorkspaceStatus(app.lernet.engine.text.StatusWords.CONNECTING, StatusTone.PROGRESS)
+        ui.changingConnection || tunnel.status == TunnelStatus.STARTING -> WorkspaceStatus(app.lernet.engine.text.StatusWords.CONNECTING, StatusTone.PROGRESS)
         tunnel.status == TunnelStatus.RECONNECTING -> WorkspaceStatus(app.lernet.engine.text.StatusWords.RECONNECTING, StatusTone.PROGRESS)
         tunnel.status == TunnelStatus.FAILED || ui.connectionError != null -> WorkspaceStatus(app.lernet.engine.text.StatusWords.FAILED, StatusTone.PROBLEM)
         else -> WorkspaceStatus(app.lernet.engine.text.StatusWords.OFF)
@@ -663,7 +662,7 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
                         }
                     }
                 }
-                val progress = ui.busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RECONNECTING)
+                val progress = ui.changingConnection || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RECONNECTING)
                 // A connection error is told once, in the InfoBar below; the line here is for other news.
                 if (ui.message.isNotBlank() && ui.message != statusLine && ui.message !in plainStates && !(tab == Tab.PROFILES && progress) &&
                     ui.connectionError == null
@@ -686,7 +685,7 @@ internal fun DesktopScreen(controller: DesktopController, onRequestElevation: ()
                 // Secondary pages: no page title — tight gap under the buttons (journal had a large empty band).
                 Spacer(Modifier.height(if (tab == Tab.PROFILES) 18.dp else 8.dp))
                 when (tab) {
-                    Tab.PROFILES -> ProfileHome(ui.saved, tunnel, ui.busy, ui.probes, ui.tunnelLatencyMs, trace, controller,
+                    Tab.PROFILES -> ProfileHome(ui.saved, tunnel, ui.changingConnection, ui.probes, ui.tunnelLatencyMs, trace, controller,
                         detail = homeDetail(ui, tunnel, holding),
                         linkHold = ui.hold.takeIf { tunnel.status == TunnelStatus.RUNNING && !holding },
                         onImport = { groupId -> importGroupId = groupId; importOpen = true },
@@ -767,7 +766,7 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
     onExportGroup: (StoredGroup) -> Unit, onSelect: (String) -> Unit, onProfileRoutes: (String) -> Unit = {},
     addAction: @Composable () -> Unit) {
     // Сознательная смена конфига всегда разрешена (решения 23.10 п.1): спрашиваем, не блокируем.
-    var pendingSwitchId by remember { mutableStateOf<String?>(null) }
+    val selectProfile = confirmedProfileSelection(saved, tunnel, onSelect)
     var editProfile by remember { mutableStateOf<StoredProfile?>(null) }
     var renameGroup by remember { mutableStateOf<StoredGroup?>(null) }
     var deleteGroup by remember { mutableStateOf<StoredGroup?>(null) }
@@ -954,8 +953,7 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                             onDrag = { dragDelta += it }, onDragEnd = finishDrag,
                             onDelete = { controller.delete(profile.id) }, compact = compact,
                             onEdit = { editProfile = profile }, onRules = { onGroupRoutes(group.id) }) {
-                            val active = tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RUNNING, TunnelStatus.RECONNECTING)
-                            if (active && profile.id != saved.selectedProfileId) pendingSwitchId = profile.id else onSelect(profile.id)
+                            selectProfile(profile.id)
                         }
                     }
                 }
@@ -973,8 +971,7 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                         onDrag = { dragDelta += it }, onDragEnd = finishDrag,
                         onDelete = { controller.delete(profile.id) }, compact = compact,
                         onEdit = { editProfile = profile }, onRules = { onProfileRoutes(profile.id) }) {
-                        val active = tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RUNNING, TunnelStatus.RECONNECTING)
-                        if (active && profile.id != saved.selectedProfileId) pendingSwitchId = profile.id else onSelect(profile.id)
+                        selectProfile(profile.id)
                     }
                 }
                 if (draggingId != null) item("drop-root") {
@@ -986,19 +983,6 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
                     }
                 }
             }
-    }
-
-    pendingSwitchId?.let { id ->
-        val name = saved.profiles.firstOrNull { it.id == id }?.name ?: id
-        AlertDialog(
-            onDismissRequest = { pendingSwitchId = null },
-            title = { Text("Сменить и переподключить?") },
-            text = { Text("Сейчас активна сессия. Подключимся заново с конфигом «$name».") },
-            confirmButton = {
-                TextButton(onClick = { pendingSwitchId = null; onSelect(id) }) { Text("Сменить") }
-            },
-            dismissButton = { TextButton(onClick = { pendingSwitchId = null }) { Text("Отмена") } },
-        )
     }
 
     renameGroup?.let { group ->
@@ -1042,7 +1026,7 @@ internal fun ConfigList(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolea
 }
 
 @Composable
-internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boolean, probes: Map<String, ProbeResult>, tunnelLatencyMs: Long?, trace: TraceSnapshot,
+internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, changingConnection: Boolean, probes: Map<String, ProbeResult>, tunnelLatencyMs: Long?, trace: TraceSnapshot,
     controller: DesktopController, onImport: (String?) -> Unit,
     localProxy: LocalProxyAccess?, tried: FailoverReport?, diagnostics: CoreDiagnostics,
     onOpenRules: (String) -> Unit, onOpenJournal: () -> Unit, detail: String? = null,
@@ -1068,7 +1052,7 @@ internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boole
     val endpoint = remember(selected.selectedOutbound?.singBoxJson) {
         selected.selectedOutbound?.let { OutboundPatch.read(it.singBoxJson) }
     }
-    val active = busy || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RUNNING, TunnelStatus.RECONNECTING)
+    val active = changingConnection || tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RUNNING, TunnelStatus.RECONNECTING)
     val holding = tried != null
     val proxyMode = controller.effectiveMode(selected) == RunMode.PROXY
     val group = saved.groups.firstOrNull { it.id == selected.groupId }
@@ -1093,24 +1077,17 @@ internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boole
     var attentionOpen by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
         Column(Modifier.widthIn(max = 680.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            // Audit H1/H2 (mockup 1): the button and the state without a frame or a title.
-            Column(Modifier.fillMaxWidth().testTag("home_center"), horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                // Orange while LerNET holds the tunnel, also when replies are jammed or every server is silent (as the phone).
-                ConnectionPower(active = active, busy = busy, holding = holding || linkHold != null,
-                    connected = tunnel.status == TunnelStatus.RUNNING && !busy, failed = failed, onClick = {
-                        if (active) controller.disconnect() else controller.connect()
-                    })
-                Text(statusTitle, style = MaterialTheme.typography.titleLarge, color = statusTone, fontWeight = FontWeight.SemiBold,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.testTag("home_state"))
-                // Holding: «Выключить VPN» is in the report; failed: the error card has «Повторить» (as the phone).
-                if (!holding && !(failed && !active)) Text(if (active) HomeWords.TAP_DISCONNECT else HomeWords.TAP_CONNECT, color = muted, fontSize = 13.sp)
-                detail?.takeIf { it.isNotBlank() && it != statusTitle && !failed }?.let {
-                    Text(it, color = muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                }
-            }
-            HomeProfileLine(saved, selected, group, proxyMode, controller,
+            ConnectionHeader(
+                status = statusTitle,
+                tone = statusTone,
+                active = active,
+                actionLabel = if (holding || (failed && !active)) null else if (active) "Отключить" else "Подключить",
+                enabled = true,
+                onToggle = { if (active) controller.disconnect() else controller.connect() },
+                modifier = Modifier.testTag("home_center"),
+                detail = detail?.takeIf { it.isNotBlank() && it != statusTitle && !failed },
+            )
+            HomeProfileLine(saved, selected, group, proxyMode, confirmedProfileSelection(saved, tunnel, controller::select),
                 onRules = { onOpenRules(routeOwner(selected)) })
             if (attention.isNotEmpty()) {
                 Column(Modifier.fillMaxWidth().testTag("home_attention"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1124,9 +1101,7 @@ internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boole
                 }
             }
             // While LerNET holds the tunnel the report says what was tried; the checks would only repeat it.
-            if (!holding) HomeLinkPanel(selected, endpoint, tunnel, active, probes[selected.id], tunnelLatencyMs, diagnostics, trace, controller)
-            // Audit H4: the journal is one row under «Связь», as on the phone.
-            // Audit H4: the same outlined «Журнал запросов ›» button as the phone.
+            if (!holding) HomeLinkPanel(selected, endpoint, tunnel, probes[selected.id], tunnelLatencyMs, diagnostics, trace, controller)
             OutlinedButton(onClick = onOpenJournal, modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).testTag("home_journal_row")) {
                 Text(HomeWords.JOURNAL_ROW)
             }
@@ -1134,33 +1109,45 @@ internal fun ProfileHome(saved: StoredState, tunnel: TunnelSnapshot, busy: Boole
     }
 }
 
-/**
- * Audit H3/N12 (mockup 1): one line for the config — name, folder, autoswap, mode — with «Правила» and «Сменить ›»,
- * the same words and actions as the phone. Editing, moving and deleting are in the config's ⋮ in the left column
- * (the phone has them in the drawer's ⋮).
- */
 @Composable
 private fun HomeProfileLine(saved: StoredState, selected: StoredProfile, group: StoredGroup?, proxyMode: Boolean,
-    controller: DesktopController, onRules: () -> Unit) {
+    onSelect: (String) -> Unit, onRules: () -> Unit) {
     var change by remember { mutableStateOf(false) }
-    Surface(color = panel, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().testTag("home_profile_line")
-        .clickable(role = Role.Button) { change = true }) {
-        Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(selected.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(HomeWords.profileSubtitle(group?.name, group?.autoSwap == true, proxyMode),
-                    color = muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            TextButton(onClick = onRules, modifier = Modifier.testTag("home_profile_rules")) { Text(HomeWords.RULES) }
-            Box {
-                TextButton(onClick = { change = true }, modifier = Modifier.testTag("home_profile_change")) { Text(HomeWords.CHANGE) }
-                ConfigChoiceMenu(change, saved, exclude = selected.id, onDismiss = { change = false }) { controller.select(it) }
-            }
-        }
+    Box {
+        ProfileSelector(
+            name = selected.name,
+            subtitle = HomeWords.profileSubtitle(group?.name, group?.autoSwap == true, proxyMode),
+            changeLabel = HomeWords.CHANGE, rulesLabel = HomeWords.RULES,
+            onChoose = if (saved.profiles.size > 1) ({ change = true }) else null,
+            onRules = onRules,
+        )
+        ConfigChoiceMenu(change, saved, exclude = selected.id, onDismiss = { change = false }, onPick = onSelect)
     }
 }
 
-/** «Сменить ›» and «Другой конфиг»: every other config, folder by folder, as the phone's drawer lists them. */
+@Composable
+private fun confirmedProfileSelection(saved: StoredState, tunnel: TunnelSnapshot, onSelect: (String) -> Unit): (String) -> Unit {
+    var pendingSwitchId by remember { mutableStateOf<String?>(null) }
+    pendingSwitchId?.let { id ->
+        val name = saved.profiles.firstOrNull { it.id == id }?.name ?: return@let
+        AlertDialog(
+            onDismissRequest = { pendingSwitchId = null },
+            title = { Text("Сменить и переподключить?") },
+            text = { Text("Сейчас активна сессия. Подключимся заново с конфигом «$name».") },
+            confirmButton = {
+                TextButton(onClick = { pendingSwitchId = null; onSelect(id) }) { Text("Сменить") }
+            },
+            dismissButton = { TextButton(onClick = { pendingSwitchId = null }) { Text("Отмена") } },
+        )
+    }
+
+    return { id ->
+        val active = tunnel.status in setOf(TunnelStatus.STARTING, TunnelStatus.RUNNING, TunnelStatus.RECONNECTING)
+        if (active && id != saved.selectedProfileId) pendingSwitchId = id else onSelect(id)
+    }
+}
+
+/** Groups the alternative profiles by folder. */
 @Composable
 private fun ConfigChoiceMenu(open: Boolean, saved: StoredState, exclude: String?, onDismiss: () -> Unit, onPick: (String) -> Unit) {
     DropdownMenu(open, onDismissRequest = onDismiss) {
@@ -1235,14 +1222,14 @@ private fun HomeNote(text: String) {
 /** Audit H1/H6 (mockup 1): one «Связь» card — internet through the VPN, server, speed, total, and the path as a row. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HomeLinkPanel(selected: StoredProfile, endpoint: app.lernet.engine.compile.OwnedOutbound?, tunnel: TunnelSnapshot, active: Boolean,
+private fun HomeLinkPanel(selected: StoredProfile, endpoint: app.lernet.engine.compile.OwnedOutbound?, tunnel: TunnelSnapshot,
     probe: ProbeResult?, tunnelLatencyMs: Long?, diagnostics: CoreDiagnostics, trace: TraceSnapshot, controller: DesktopController) {
     var pathOpen by remember { mutableStateOf(false) }
     var fullConfirm by remember { mutableStateOf(false) }
     val running = tunnel.status == TunnelStatus.RUNNING
     val checking = probe?.checking == true
     // The same rows, words and rules as the phone's LinkCard (shared HomeWords); no tooltip with protocol names.
-    Panel(Modifier.fillMaxWidth().testTag("home_link_card")) {
+    Panel(Modifier.fillMaxWidth().testTag("home_link_card"), compact = true) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(HomeWords.LINK_TITLE, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             TextButton(onClick = { controller.probe(listOf(selected.id)) }, enabled = !checking, modifier = Modifier.testTag("home_link_check")) {
@@ -1381,7 +1368,7 @@ private fun homeDetail(ui: DesktopUiState, tunnel: TunnelSnapshot, holding: Bool
     holding -> null
     // As on the phone: «Подключаемся…» is enough; «Готовим/Запускаем VPN» only restated it.
     tunnel.status == TunnelStatus.STARTING -> null
-    ui.busy || tunnel.status == TunnelStatus.RECONNECTING ->
+    ui.changingConnection || tunnel.status == TunnelStatus.RECONNECTING ->
         ui.message.takeIf { it.isNotBlank() && it !in plainStates } ?: tunnel.message.takeIf { it !in plainStates }
     tunnel.status == TunnelStatus.RUNNING && (ui.healthVerified != true || ui.healthFailures > 0) -> ui.healthMessage
     tunnel.status == TunnelStatus.FAILED -> tunnel.message
@@ -1493,46 +1480,6 @@ private fun SegmentedChoice(choices: List<Pair<String, String>>, selected: Strin
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun ConnectionPower(active: Boolean, busy: Boolean, holding: Boolean = false, connected: Boolean = active, failed: Boolean = false, onClick: () -> Unit) {
-    // Green only once connected; connecting stays blue and a failure is red, like on the phone.
-    val accent by animateColorAsState(if (holding) hold else if (connected) green else if (failed && !active) desktopColors.error else blue, tween(250), label = "power-color")
-    val interactions = remember { MutableInteractionSource() }
-    val hovered by interactions.collectIsHoveredAsState()
-    val pressed by interactions.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) .90f else if (hovered) .955f else 1f, tween(160), label = "power-depth")
-    val elevation by animateDpAsState(if (pressed) 0.dp else if (hovered) 2.dp else 9.dp, tween(160), label = "power-shadow")
-    val glow by animateFloatAsState(if (pressed) .12f else if (hovered) .20f else .30f, tween(180), label = "power-glow")
-    Column(Modifier.width(130.dp).hoverable(interactions)
-        .clickable(interactionSource = interactions, indication = null, role = Role.Button, onClick = onClick)
-        .semantics { contentDescription = if (active) "Отключить VPN" else "Подключить VPN" },
-        horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(112.dp).graphicsLayer {
-            scaleX = scale; scaleY = scale
-            translationY = if (pressed) 3.dp.toPx() else if (hovered) 1.dp.toPx() else 0f
-            shadowElevation = elevation.toPx(); shape = CircleShape
-        }.clip(CircleShape)
-            .background(Brush.radialGradient(listOf(accent.copy(alpha = glow), Color(0xFF152238), Color(0xFF0D1522)))),
-            contentAlignment = Alignment.Center) {
-            Canvas(Modifier.fillMaxSize()) {
-                val center = Offset(size.width / 2f, size.height / 2f)
-                drawCircle(accent.copy(alpha = .17f), radius = size.minDimension * .47f, center = center,
-                    style = Stroke(1.dp.toPx()))
-                drawCircle(accent.copy(alpha = if (hovered) .42f else .65f), radius = size.minDimension * .39f, center = center,
-                    style = Stroke(2.6.dp.toPx()))
-                val radius = 16.dp.toPx()
-                drawArc(accent, startAngle = -45f, sweepAngle = 270f, useCenter = false,
-                    topLeft = Offset(center.x - radius, center.y - radius),
-                    size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
-                    style = Stroke(4.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
-                drawLine(accent, Offset(center.x, center.y - 22.dp.toPx()), Offset(center.x, center.y + 3.dp.toPx()),
-                    strokeWidth = 4.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
-            }
-        }
-        Spacer(Modifier.height(10.dp))
     }
 }
 
@@ -2616,10 +2563,11 @@ private fun NameDialog(title: String, initial: String, onDismiss: () -> Unit, on
 }
 
 @Composable
-private fun Panel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+private fun Panel(modifier: Modifier = Modifier, compact: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
     Card(modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, desktopColors.outlineVariant.copy(alpha = .75f)),
         colors = CardDefaults.cardColors(containerColor = panel)) {
-        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+        Column(Modifier.fillMaxWidth().padding(horizontal = if (compact) 16.dp else 20.dp, vertical = if (compact) 6.dp else 20.dp),
+            verticalArrangement = Arrangement.spacedBy(if (compact) 0.dp else 12.dp), content = content)
     }
 }
 

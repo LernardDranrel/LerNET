@@ -40,6 +40,45 @@ class PolicyWorkspaceRepository(
     fun snapshot(): PolicyWorkspace = requireNotNull(current) { "Рабочая область ещё не открыта" }
 
     @Synchronized
+    fun selectTemplate(id: String): PolicyWorkspace {
+        val before = snapshot()
+        if (id == before.selectedTemplateId) return before
+        val target = requireNotNull(before.otherTemplates.singleOrNull { it.id == id }) { "Шаблон уже удалён" }
+        return activateTemplate(before, target)
+    }
+
+    @Synchronized
+    fun createTemplate(name: String): PolicyWorkspace {
+        val before = snapshot()
+        return activateTemplate(before, before.currentTemplate().copy(id = newId(), name = name.trim()))
+    }
+
+    private fun activateTemplate(before: PolicyWorkspace, target: StoredPolicyTemplate): PolicyWorkspace {
+        val revision = nextRevision(before.saved.revision, before.draft.revision, target.saved.revision, target.draft.revision)
+        return commit(before.copy(
+            selectedTemplateId = target.id, selectedTemplateName = target.name,
+            saved = target.saved.copy(revision = revision), draft = target.draft.copy(revision = revision),
+            otherTemplates = before.otherTemplates.filterNot { it.id == target.id } + before.currentTemplate(),
+        ))
+    }
+
+    @Synchronized
+    fun renameTemplate(id: String, name: String): PolicyWorkspace {
+        val before = snapshot()
+        val label = name.trim()
+        if (id == before.selectedTemplateId) return commit(before.copy(selectedTemplateName = label))
+        require(before.otherTemplates.any { it.id == id }) { "Шаблон уже удалён" }
+        return commit(before.copy(otherTemplates = before.otherTemplates.map { if (it.id == id) it.copy(name = label) else it }))
+    }
+
+    @Synchronized
+    fun deleteTemplate(id: String): PolicyWorkspace {
+        val before = snapshot()
+        require(id != before.selectedTemplateId) { "Перед удалением выберите другой шаблон" }
+        return commit(before.copy(otherTemplates = before.otherTemplates.filterNot { it.id == id }))
+    }
+
+    @Synchronized
     fun reconcile(bundle: TransferBundle): PolicyWorkspace {
         TransferCodec.validate(bundle)
         recoverImport(bundle)?.let { return it }
@@ -56,7 +95,13 @@ class PolicyWorkspaceRepository(
 
     /** Runtime sessions already assign revisions; this method must not increment them a second time. */
     @Synchronized
-    fun persist(saved: NetworkPolicy, draft: NetworkPolicy): PolicyWorkspace = commit(snapshot().copy(saved = saved, draft = draft))
+    fun persist(saved: NetworkPolicy, draft: NetworkPolicy): PolicyWorkspace {
+        val before = snapshot()
+        require(saved == before.saved || saved.revision > before.saved.revision) {
+            "Рабочая схема изменилась. Откройте её ещё раз."
+        }
+        return commit(before.copy(saved = saved, draft = draft))
+    }
 
     @Synchronized
     fun saveDraft(): PolicyWorkspace {
@@ -113,9 +158,6 @@ class PolicyWorkspaceRepository(
     }
 
     private fun appendImported(before: PolicyWorkspace, imported: PolicyWorkspace): PolicyWorkspace {
-        require(imported.saved.device.defaultTarget == PolicyTarget.Direct && imported.draft.device.defaultTarget == PolicyTarget.Direct) {
-            "У импортируемой схемы другой маршрут по умолчанию. Используйте замену рабочей области."
-        }
         val copied = PolicyWorkspaceImport.remap(imported, newId)
         val legacy = before.legacy.copy(
             scope = "all",
@@ -123,6 +165,23 @@ class PolicyWorkspaceRepository(
             profiles = before.legacy.profiles + copied.legacy.profiles,
             rules = before.legacy.rules + copied.legacy.rules,
         )
+        val expanded = PolicyWorkspaceReconcile.reconcile(before, legacy).workspace
+        if (copied.usesNamedTemplates) {
+            // A named workspace brings independent schemes, each with its own default route and DNS.
+            val source = PolicyWorkspaceReconcile.reconcile(copied, legacy).workspace
+            val names = before.templateChoices.mapTo(mutableSetOf()) { it.name.lowercase() }
+            val templates = (listOf(source.currentTemplate()) + source.otherTemplates).map { importedTemplate ->
+                val base = importedTemplate.name
+                var label = base
+                var suffix = 2
+                while (!names.add(label.lowercase())) label = "$base (${suffix++})"
+                importedTemplate.copy(id = newId(), name = label)
+            }
+            return expanded.copy(otherTemplates = expanded.otherTemplates + templates).also(PolicyWorkspaceCodec::validate)
+        }
+        require(imported.saved.device.defaultTarget == PolicyTarget.Direct && imported.draft.device.defaultTarget == PolicyTarget.Direct) {
+            "У импортируемой схемы другой маршрут по умолчанию. Используйте замену рабочей области."
+        }
         val revision = nextRevision(before.saved.revision, before.draft.revision, copied.saved.revision)
         fun append(left: NetworkPolicy, right: NetworkPolicy) = left.copy(
             revision = revision,
@@ -137,7 +196,7 @@ class PolicyWorkspaceRepository(
             folderPolicies = left.folderPolicies + right.folderPolicies,
             profilePolicies = left.profilePolicies + right.profilePolicies,
         )
-        return before.copy(legacy = legacy, saved = append(before.saved, copied.saved), draft = append(before.draft, copied.draft)).also {
+        return expanded.copy(saved = append(before.saved, copied.saved), draft = append(before.draft, copied.draft)).also {
             PolicyWorkspaceCodec.validate(it)
         }
     }
@@ -237,7 +296,7 @@ object PolicyWorkspaceImport {
     }
 
     fun remap(workspace: PolicyWorkspace, newId: () -> String): PolicyWorkspace {
-        val policies = listOf(workspace.saved, workspace.draft)
+        val policies = listOf(workspace.saved, workspace.draft) + workspace.otherTemplates.flatMap { listOf(it.saved, it.draft) }
         val profileRefs = workspace.legacy.profiles.map { it.id }.toMutableSet()
         val folderRefs = workspace.legacy.groups.map { it.id }.toMutableSet()
         val channelRefs = mutableSetOf<String>()
@@ -326,6 +385,9 @@ object PolicyWorkspaceImport {
             rules = rules,
             selectedProfileId = workspace.legacy.selectedProfileId?.let(mapping.profiles::getValue),
         )
-        return workspace.copy(legacy = legacy, saved = mapping.apply(workspace.saved), draft = mapping.apply(workspace.draft))
+        return workspace.copy(
+            legacy = legacy, saved = mapping.apply(workspace.saved), draft = mapping.apply(workspace.draft),
+            otherTemplates = workspace.otherTemplates.map { it.copy(saved = mapping.apply(it.saved), draft = mapping.apply(it.draft)) },
+        )
     }
 }

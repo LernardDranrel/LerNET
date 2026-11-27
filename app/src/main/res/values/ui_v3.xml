@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- UI v3 (audit 22.10.2026): new texts in one file so other branches merge cleanly. -->
 <resources>
+    <string name="expert_template_active">Сейчас работает «%1$s»</string>
+    <string name="expert_template_previous">Сейчас действует предыдущая схема</string>
+    <string name="expert_template_open_draft">Открыть черновик</string>
+    <string name="expert_template_apply">Применить шаблон</string>
+    <string name="expert_template_health_interval">Интервал %1$s–%2$s с</string>
     <!-- Expert: «События» = details (m6) -->
     <string name="expert_events_connections">Соединения · %1$d</string>
     <string name="expert_events_actions">Действия LerNET · %1$d</string>
