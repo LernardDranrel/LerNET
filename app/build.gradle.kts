@@ -13,8 +13,13 @@ val packEmuAbis =
     providers.gradleProperty("emuAbis").orElse("false").get().toBoolean()
 val lernetVersion = providers.gradleProperty("lernetVersion").get()
 
-val signingRoot = providers.gradleProperty("lernetSigningRoot").orNull?.let(rootProject::file) ?: rootProject.projectDir
-val signingPropertiesFile = signingRoot.resolve(".release/signing.properties")
+val signingStore = providers.gradleProperty("lernetSigningStore").orNull?.let(rootProject::file)
+val signingPropertiesFile = signingStore?.resolveSibling("signing.properties") ?: rootProject.file(".release/signing.properties")
+if (signingStore != null) {
+    require(signingStore.isFile && signingPropertiesFile.isFile) {
+        "The release keystore and its adjacent signing.properties must both exist"
+    }
+}
 val signingProperties = Properties().apply {
     if (signingPropertiesFile.isFile) signingPropertiesFile.inputStream().use(::load)
 }
@@ -46,7 +51,7 @@ android {
     signingConfigs {
         if (signingPropertiesFile.isFile) {
             create("lernetRelease") {
-                storeFile = signingRoot.resolve(signingProperties.getProperty("storeFile"))
+                storeFile = signingStore ?: rootProject.file(signingProperties.getProperty("storeFile"))
                 storePassword = signingProperties.getProperty("storePassword")
                 keyAlias = signingProperties.getProperty("keyAlias")
                 keyPassword = signingProperties.getProperty("keyPassword")
