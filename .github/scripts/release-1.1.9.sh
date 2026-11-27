@@ -43,34 +43,49 @@ verify_tag() {
     [[ "$resolved" == "$commit" ]] || fail "$tag resolves to $resolved; expected source commit $commit"
 }
 release_id() {
-    gh api --paginate "repos/$repo/releases?per_page=100" --jq '.[] | select(.tag_name == "v1.1.9") | .id'
+    gh api --paginate "repos/$repo/releases?per_page=100&run=${GITHUB_RUN_ID:-local}" \
+        --jq '.[] | select(.tag_name == "v1.1.9" or (.draft and .name == "LerNET 1.1.9" and (.html_url | endswith("/untagged-a58805e902c9abda7855")))) | .id'
 }
-is_draft() { gh api "repos/$repo/releases/$1" --jq '.draft'; }
+is_draft() { gh api "repos/$repo/releases/$1?check=$RANDOM" --jq '.draft'; }
 verify_tag
 id=$(release_id)
 if [[ -z "$id" ]]; then
     [[ "$phase" == draft ]] || fail "The draft must be staged before publication"
-    gh release create "$tag" --repo "$repo" --verify-tag --target "$commit" --draft \
-        --title "LerNET 1.1.9" --notes-file "$directory/RELEASE_NOTES.md"
-    id=$(release_id)
+    id=$(gh api --method POST "repos/$repo/releases" -f tag_name="$tag" -f target_commitish="$commit" \
+        -f name="LerNET 1.1.9" -F "body=@$directory/RELEASE_NOTES.md" -F draft=true --jq '.id')
 fi
 [[ "$id" =~ ^[0-9]+$ ]] || fail "Could not identify exactly one release for $tag"
+endpoint="repos/$repo/releases/$id"
 
 if [[ "$phase" == draft ]]; then
     [[ "$(is_draft "$id")" == true ]] || fail "Public release already exists for $tag"
-    gh release edit "$tag" --repo "$repo" --title "LerNET 1.1.9" --notes-file "$directory/RELEASE_NOTES.md"
-    files=()
-    for name in "${assets[@]}" "$manifest"; do files+=("$directory/$name"); done
-    gh release upload "$tag" "${files[@]}" --repo "$repo" --clobber
+    gh api --method PATCH "$endpoint" -f tag_name="$tag" -f target_commitish="$commit" \
+        -f name="LerNET 1.1.9" -F "body=@$directory/RELEASE_NOTES.md" --silent
+    gh api "$endpoint/assets?per_page=100&check=$RANDOM" > "$tmp/existing-assets"
+    for name in "${assets[@]}" "$manifest"; do
+        previous=$(jq -r --arg name "$name" '.[] | select(.name == $name) | .digest' "$tmp/existing-assets")
+        if [[ -n "$previous" ]]; then
+            expected=$(sha256sum "$directory/$name" | cut -d' ' -f1)
+            [[ "$previous" == "sha256:$expected" ]] || fail "Draft already contains a different $name"
+            continue
+        fi
+        curl --fail-with-body --silent --show-error --output "$tmp/upload" \
+            --header "Authorization: Bearer $GH_TOKEN" --header 'Content-Type: application/octet-stream' \
+            --data-binary "@$directory/$name" "https://uploads.github.com/repos/$repo/releases/$id/assets?name=$name"
+        jq -e --arg name "$name" '.state == "uploaded" and .name == $name' "$tmp/upload" > /dev/null
+    done
 fi
 
 printf '%s\n' "${assets[@]}" "$manifest" | LC_ALL=C sort > "$tmp/expected-assets"
-gh api --paginate "repos/$repo/releases/$id/assets?per_page=100" --jq '.[].name' | LC_ALL=C sort > "$tmp/remote-assets"
+gh api "$endpoint/assets?per_page=100&check=$RANDOM" > "$tmp/asset-list"
+jq -r '.[].name' "$tmp/asset-list" | LC_ALL=C sort > "$tmp/remote-assets"
 diff -u "$tmp/expected-assets" "$tmp/remote-assets"
-notes=$(gh api "repos/$repo/releases/$id" --jq '.body')
+notes=$(gh api "$endpoint?check=$RANDOM" --jq '.body')
 [[ "${notes//$'\r'/}" == "$(< "$directory/RELEASE_NOTES.md")" ]] || fail "Release notes differ from the reviewed text"
 mkdir "$tmp/download"
-gh release download "$tag" --repo "$repo" --dir "$tmp/download" --pattern '*'
+while IFS=$'\t' read -r asset name; do
+    gh api -H 'Accept: application/octet-stream' "repos/$repo/releases/assets/$asset" > "$tmp/download/$name"
+done < <(jq -r '.[] | [.id, .name] | @tsv' "$tmp/asset-list")
 cmp "$directory/$manifest" "$tmp/download/$manifest"
 (cd "$tmp/download" && sha256sum --strict -c "$manifest")
 
@@ -79,7 +94,8 @@ if [[ "$phase" == publish ]]; then
     case "$status" in
         true)
             verify_tag
-            gh release edit "$tag" --repo "$repo" --draft=false ;;
+            gh api --method PATCH "$endpoint" -f tag_name="$tag" -F draft=false -F prerelease=false \
+                -f make_latest=true --jq '.html_url' ;;
         false) ;; # An identical published release is a successful retry.
         *) fail "Unknown release state for $tag" ;;
     esac
