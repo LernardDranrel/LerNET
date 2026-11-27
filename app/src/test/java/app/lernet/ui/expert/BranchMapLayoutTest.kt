@@ -2,6 +2,8 @@ package app.lernet.ui.expert
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import app.lernet.ui.routes.BranchMapCamera
+import app.lernet.ui.routes.BranchMapLayout
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 

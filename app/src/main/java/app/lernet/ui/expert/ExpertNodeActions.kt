@@ -2,8 +2,8 @@ package app.lernet.ui.expert
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -47,6 +47,9 @@ internal fun ExpertNodeActions(
 internal fun ExpertNodeMenu(
     node: PolicyNode?, tree: PolicyTree, onAdd: () -> Unit, onOtherwise: () -> Unit,
     onMove: (Int) -> Unit, onDelete: () -> Unit, onEdit: (() -> Unit)? = null, onChannel: (() -> Unit)? = null,
+    canAdd: Boolean = node == null || ExpertEdits.canAddChild(node),
+    showOtherwise: Boolean = node != null && canAddMissingOtherwise(tree, node),
+    extraItems: @Composable (close: () -> Unit) -> Unit = {},
 ) {
     var expanded by remember(tree.scope, node?.id) { mutableStateOf(false) }
     Box {
@@ -64,10 +67,10 @@ internal fun ExpertNodeMenu(
             }
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.route_add_child)) },
-                enabled = node == null || ExpertEdits.canAddChild(node),
+                enabled = canAdd,
                 onClick = { expanded = false; onAdd() },
             )
-            if (node != null && canAddMissingOtherwise(tree, node)) {
+            if (showOtherwise) {
                 DropdownMenuItem(text = { Text(stringResource(R.string.expert_add_otherwise)) },
                     onClick = { expanded = false; onOtherwise() })
             }
@@ -80,6 +83,7 @@ internal fun ExpertNodeMenu(
                 DropdownMenuItem(text = { Text(stringResource(R.string.expert_remove)) },
                     onClick = { expanded = false; onDelete() })
             }
+            extraItems { expanded = false }
         }
     }
 }

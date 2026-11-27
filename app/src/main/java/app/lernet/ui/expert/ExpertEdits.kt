@@ -10,6 +10,7 @@ import app.lernet.routing.policy.PolicyOtherwise
 import app.lernet.routing.policy.PolicyScope
 import app.lernet.routing.policy.PolicyTarget
 import app.lernet.routing.policy.PolicyTree
+import app.lernet.ui.routes.orderedBranchNodes
 
 /** Canvas coordinates are presentation only; these operations preserve semantic sibling order. */
 internal object ExpertEdits {
@@ -74,18 +75,5 @@ internal object ExpertEdits {
         is PolicyTarget.Profile, is PolicyTarget.Folder, is PolicyTarget.Channel -> false
     }
 
-    fun ordered(tree: PolicyTree): List<Pair<PolicyNode, Int>> {
-        val result = mutableListOf<Pair<PolicyNode, Int>>()
-        val displayed = PolicyBranchEditing.displayTree(tree)
-        val byParent = displayed.nodes.groupBy { it.parentId }
-        val visited = mutableSetOf<String>()
-        fun visit(node: PolicyNode, depth: Int) {
-            if (!visited.add(node.id)) return
-            result += node to depth
-            byParent[node.id].orEmpty().sortedWith(compareBy<PolicyNode> { it.sortIndex }.thenBy { it.id }).forEach { visit(it, depth + 1) }
-        }
-        byParent[null].orEmpty().sortedWith(compareBy<PolicyNode> { it.sortIndex }.thenBy { it.id }).forEach { visit(it, 0) }
-        displayed.nodes.filter { it.id !in visited }.forEach { visit(it, 0) }
-        return result
-    }
+    fun ordered(tree: PolicyTree): List<Pair<PolicyNode, Int>> = orderedBranchNodes(PolicyBranchEditing.displayTree(tree).nodes)
 }

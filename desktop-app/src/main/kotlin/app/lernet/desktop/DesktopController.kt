@@ -1,36 +1,53 @@
 package app.lernet.desktop
 
+import app.lernet.config.model.DnsPolicy
 import app.lernet.config.net.AppTraffic
 import app.lernet.config.net.LocalProxyAccess
-
-import app.lernet.desktop.protection.SimpleGuardStatus
-import app.lernet.desktop.protection.SimpleTunnelGuard
-
 import app.lernet.config.net.OkHttpTextFetcher
-import app.lernet.config.model.DnsPolicy
-import app.lernet.config.redact.DiagEvent
-import app.lernet.config.redact.DiagKind
-import app.lernet.config.redact.DiagnosticJournal
-import app.lernet.config.redact.DiagnosticLevels
-import app.lernet.config.transfer.TransferBundle
-import app.lernet.config.transfer.TransferCodec
 import app.lernet.config.parse.GuessedMode
 import app.lernet.config.parse.ImportCoordinator
 import app.lernet.config.parse.ImportHint
 import app.lernet.config.parse.ImportResult
+import app.lernet.config.redact.DiagEvent
+import app.lernet.config.redact.DiagKind
+import app.lernet.config.redact.DiagnosticJournal
+import app.lernet.config.redact.DiagnosticLevels
 import app.lernet.config.subscription.SubscriptionFolders
 import app.lernet.config.subscription.SubscriptionUpdater
+import app.lernet.config.transfer.TransferBundle
+import app.lernet.config.transfer.TransferCodec
+import app.lernet.desktop.protection.SimpleGuardStatus
+import app.lernet.desktop.protection.SimpleTunnelGuard
 import app.lernet.engine.RunMode
 import app.lernet.engine.compile.AssembledConfig
 import app.lernet.engine.compile.ConfigAssembler
 import app.lernet.engine.compile.EnginePlatform
-import app.lernet.engine.compile.EngineDefaults
 import app.lernet.engine.compile.OutboundPatch
 import app.lernet.engine.compile.XhttpMode
-import app.lernet.routing.GeoRuleSets
+import app.lernet.engine.policy.BackupHealth
+import app.lernet.engine.policy.BackupReach
+import app.lernet.engine.policy.BackupRotation
+import app.lernet.engine.policy.BlockingDetector
+import app.lernet.engine.policy.BlockingSign
+import app.lernet.engine.policy.ConfigPenalties
+import app.lernet.engine.policy.FlowSample
+import app.lernet.engine.policy.HandshakeBudget
+import app.lernet.engine.policy.HandshakeKey
+import app.lernet.engine.policy.LinkCheck
+import app.lernet.engine.policy.LinkDecision
+import app.lernet.engine.policy.LinkFailure
+import app.lernet.engine.policy.LinkHold
+import app.lernet.engine.policy.LinkJudge
+import app.lernet.engine.policy.ProxiedTraffic
+import app.lernet.engine.policy.ReachRoute
+import app.lernet.engine.policy.RecheckJitter
+import app.lernet.engine.policy.RestartLog
+import app.lernet.engine.policy.SilentNetworkBackoff
+import app.lernet.engine.policy.TunnelProbeSchedule
 import app.lernet.routing.ConditionBlock
 import app.lernet.routing.ConditionCodec
 import app.lernet.routing.ConditionKind
+import app.lernet.routing.GeoRuleSets
 import app.lernet.routing.MatchJoin
 import app.lernet.routing.RouteAction
 import app.lernet.routing.RouteCompiler
@@ -39,34 +56,15 @@ import app.lernet.routing.RoutePlatform
 import app.lernet.routing.RuleConditions
 import app.lernet.routing.RuleMatch
 import app.lernet.routing.RuleNode
+import app.lernet.routing.policy.PolicyCanvasPoint
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import app.lernet.engine.policy.LinkCheck
-import app.lernet.engine.policy.RecheckJitter
-import app.lernet.engine.policy.BlockingDetector
-import app.lernet.engine.policy.BlockingSign
-import app.lernet.engine.policy.FlowSample
-import app.lernet.engine.policy.ProxiedTraffic
-import app.lernet.engine.policy.TunnelProbeSchedule
-import app.lernet.engine.policy.LinkDecision
-import app.lernet.engine.policy.LinkFailure
-import app.lernet.engine.policy.LinkJudge
-import app.lernet.engine.policy.BackupHealth
-import app.lernet.engine.policy.BackupReach
-import app.lernet.engine.policy.BackupRotation
-import app.lernet.engine.policy.ReachRoute
-import app.lernet.engine.policy.ConfigPenalties
-import app.lernet.engine.policy.HandshakeBudget
-import app.lernet.engine.policy.HandshakeKey
-import app.lernet.engine.policy.LinkHold
-import app.lernet.engine.policy.RestartLog
-import app.lernet.engine.policy.SilentNetworkBackoff
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.Executors
 import kotlin.concurrent.thread
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -1074,32 +1072,49 @@ class DesktopController(
         }
     }
 
-    data class RuleDraft(val baseline: List<StoredRule>, val rules: List<StoredRule>)
+    data class RuleDraft(
+        val baseline: List<StoredRule>, val rules: List<StoredRule>,
+        val baselineLayout: Map<String, PolicyCanvasPoint>, val layout: Map<String, PolicyCanvasPoint>,
+    ) {
+        val dirty get() = rules != baseline || layout != baselineLayout
+    }
     private val routeDrafts = mutableMapOf<String, RuleDraft>()
     fun routeDraft(ownerId: String): RuleDraft = synchronized(routeDrafts) {
-        routeDrafts[ownerId] ?: state.value.saved.rules.filter { it.profileId == ownerId }
-            .let { RuleDraft(it, it) }
+        routeDrafts[ownerId] ?: run {
+            val saved = state.value.saved
+            val rules = saved.rules.filter { it.profileId == ownerId }
+            val layout = VpnRuleLayout.read(saved, ownerId)
+            RuleDraft(rules, rules, layout, layout)
+        }
     }
-    fun keepRuleDraft(ownerId: String, baseline: List<StoredRule>, rules: List<StoredRule>) {
-        synchronized(routeDrafts) { routeDrafts[ownerId] = RuleDraft(baseline, rules) }
+    fun keepRuleDraft(ownerId: String, draft: RuleDraft) {
+        synchronized(routeDrafts) { if (draft.dirty) routeDrafts[ownerId] = draft else routeDrafts.remove(ownerId) }
     }
     fun clearRuleDraft(ownerId: String) {
         synchronized(routeDrafts) { routeDrafts.remove(ownerId) }
     }
-    fun commitRuleDraft(ownerId: String, baseline: List<StoredRule>, draft: List<StoredRule>): Boolean {
+    fun commitRuleDraft(ownerId: String, edit: RuleDraft): Boolean {
         synchronized(this) {
-            val current = state.value.saved.rules.filter { it.profileId == ownerId }
-            if (current != baseline) {
+            val saved = state.value.saved
+            if (saved.profiles.none { it.id == ownerId } && saved.groups.none { "grp_" + it.id == ownerId }) {
+                mutable.update { it.copy(message = "Конфиг или папка удалены. Маршруты не сохранены.") }
+                return false
+            }
+            val current = saved.rules.filter { it.profileId == ownerId }
+            val layoutChanged = edit.layout != edit.baselineLayout
+            if (current != edit.baseline || (layoutChanged && VpnRuleLayout.read(saved, ownerId) != edit.baselineLayout)) {
                 mutable.update { it.copy(message = "Маршруты изменились в другом окне. Черновик не сохранён.") }
                 return false
             }
+            val draft = edit.rules
             if (draft.any { it.profileId != ownerId } || draft.map { it.id }.distinct().size != draft.size) {
                 mutable.update { it.copy(message = "Черновик содержит некорректные правила.") }
                 return false
             }
             return change { saved ->
                 val all = saved.rules.filterNot { it.profileId == ownerId } + draft
-                saved.copy(rules = all, rulePositions = saved.rulePositions.filterKeys { id -> all.any { it.id == id } })
+                val result = saved.copy(rules = all, rulePositions = saved.rulePositions.filterKeys { id -> all.any { it.id == id } })
+                if (layoutChanged) VpnRuleLayout.write(result, ownerId, edit.layout) else result
             }
         }
     }

@@ -1,4 +1,4 @@
-package app.lernet.ui.expert
+package app.lernet.ui.routes
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
@@ -6,17 +6,14 @@ import app.lernet.R
 import app.lernet.routing.MatchJoin
 import app.lernet.routing.policy.PolicyNode
 import app.lernet.routing.policy.PolicyOtherwise
-import app.lernet.routing.policy.PolicyTree
-import app.lernet.ui.routes.blockTitle
-import app.lernet.ui.routes.shownValue
 
 /** Presentation ancestry also covers disconnected imported rules, in the same order as the full canvas. */
-internal class ExpertBranchIndex(tree: PolicyTree) {
+internal class RuleBranchIndex(nodes: List<PolicyNode>) {
     private val parents = mutableMapOf<String, String?>()
     private val levels = mutableMapOf<String?, MutableList<PolicyNode>>()
     val byId: Map<String, PolicyNode> = buildMap {
         val trail = mutableListOf<String>()
-        for ((node, depth) in ExpertEdits.ordered(tree)) {
+        for ((node, depth) in orderedBranchNodes(nodes)) {
             while (trail.size > depth) trail.removeAt(trail.lastIndex)
             val parent = trail.lastOrNull()
             parents[node.id] = parent
@@ -44,8 +41,14 @@ internal class ExpertBranchIndex(tree: PolicyTree) {
 
 @Composable
 internal fun branchRuleTitle(node: PolicyNode): String = when {
-    PolicyOtherwise.isOtherwise(node) -> stringResource(R.string.expert_otherwise_title)
-    node.title.isBlank() -> stringResource(R.string.expert_rule_unnamed)
+    PolicyOtherwise.isOtherwise(node) -> {
+        val label = stringResource(R.string.expert_otherwise_title)
+        val name = node.title.trim().takeUnless { it.isEmpty() || it.equals(label, true) || it.equals("ИНАЧЕ", true) }
+        if (name == null) label else "$label · $name"
+    }
+    node.title.isBlank() -> RulePreview.firstToken(node.conditions)?.let { (kind, value) ->
+        shownValue(kind, value, stringResource(R.string.field_geo_private))
+    } ?: stringResource(R.string.expert_rule_unnamed)
     else -> node.title
 }
 
@@ -61,4 +64,23 @@ internal fun branchRuleCondition(node: PolicyNode): String {
         if (values.isEmpty() || values.singleOrNull() == type) type else "$type · ${values.joinToString(", ")}"
     }
     return blocks.joinToString(" $join ")
+}
+
+internal fun orderedBranchNodes(nodes: List<PolicyNode>): List<Pair<PolicyNode, Int>> {
+    val result = mutableListOf<Pair<PolicyNode, Int>>()
+    val byParent = nodes.sortedWith(compareBy<PolicyNode> { it.sortIndex }.thenBy { it.id }).groupBy { it.parentId }
+    val visited = mutableSetOf<String>()
+    val pending = ArrayDeque<Pair<PolicyNode, Int>>()
+    fun visit(root: PolicyNode) {
+        pending.addLast(root to 0)
+        while (pending.isNotEmpty()) {
+            val (node, depth) = pending.removeLast()
+            if (!visited.add(node.id)) continue
+            result += node to depth
+            byParent[node.id].orEmpty().asReversed().forEach { pending.addLast(it to depth + 1) }
+        }
+    }
+    byParent[null].orEmpty().forEach(::visit)
+    nodes.forEach { if (it.id !in visited) visit(it) }
+    return result
 }

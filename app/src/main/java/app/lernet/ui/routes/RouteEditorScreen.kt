@@ -1,29 +1,25 @@
 package app.lernet.ui.routes
 
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.platform.testTag
-import androidx.compose.foundation.clickable
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,20 +32,28 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.unit.dp
 import app.lernet.R
 import app.lernet.config.repo.RuleNodeRecord
+import app.lernet.routing.policy.PolicyNode
+import app.lernet.routing.policy.PolicyTree
+import app.lernet.routing.policy.vpnOwnerScope
+import app.lernet.routing.policy.vpnRuleBranch
+import app.lernet.ui.expert.ExpertNodeMenu
 import app.lernet.ui.icons.LerNetSymbols
 import app.lernet.ui.layout.rememberThumbZoneBottomPadding
 import app.lernet.ui.theme.LerNetDimens
@@ -97,117 +101,119 @@ fun RouteEditorScreen(
             },
         )
     }
-    val capture = remember { LayoutCapture() }
-    var addMenu by remember { mutableStateOf(false) }
-    var pipeDialog by remember { mutableStateOf(false) }
-    var helpOpen by remember { mutableStateOf(false) }
+    val capture = remember(state.ownerId) { LayoutCapture() }
+    val navigation = rememberBranchNavigation(state.ownerId)
+    val byId = remember(state.nodes) { state.nodes.associateBy { it.id } }
+    val tree = remember(state.ownerId, state.nodes) {
+        val attached = RouteFolders.attached(state.nodes)
+        PolicyTree(vpnOwnerScope(state.ownerId), attached.map { it.asBranch() })
+    }
+    val index = remember(tree.nodes) { RuleBranchIndex(tree.nodes) }
+    val hasMisplaced = remember(state.nodes) { RouteFolders.hasNested(state.nodes) }
+    val inactive = remember(state.nodes) { androidInactiveRuleIds(state.nodes) }
+    var helpOpen by rememberSaveable(state.ownerId) { mutableStateOf(false) }
+    var openChannel by rememberSaveable(state.ownerId) { mutableStateOf<String?>(null) }
+    var revealAfterEdit by rememberSaveable(state.ownerId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.editingId) {
+        val editing = state.editingId
+        if (editing != null) revealAfterEdit = editing else {
+            val rule = byId[revealAfterEdit]
+            if (rule != null && rule.id in index.byId && navigation.view == BranchView.LIST) {
+                navigation.reveal(rule.parentId, rule.id)
+            }
+            revealAfterEdit = null
+        }
+    }
+    fun edit(node: PolicyNode?) {
+        val id = node?.id ?: index.children(null).firstOrNull { it.otherwise }?.id
+        if (id == null) onIntent(RouteEditorIntent.AddChild(null, elseRule = true))
+        else onIntent(RouteEditorIntent.Edit(id))
+    }
+    val header: @Composable ((() -> Unit)?) -> Unit = { search ->
+        RouteTopBar(state.profileName, owners, state.ownerId, { requestLeave(it) },
+            onBack = requestBack, backEnabled = !state.saving,
+            showClose = navigation.parentId != null || navigation.view != BranchView.LIST,
+            onHelp = { helpOpen = true }, onSearch = search)
+    }
     RouteDialogs(state, onIntent)
     if (helpOpen) {
-        SchemaHelpSheet(onDismiss = { helpOpen = false })
+        if (navigation.view == BranchView.CANVAS || state.routesLocked || state.loading) SchemaHelpSheet { helpOpen = false }
+        else RuleBranchHelp(navigation.view, { helpOpen = false }) {
+            helpOpen = false
+            navigation.view = BranchView.CANVAS
+        }
     }
-    if (pipeDialog) {
-        PipeNameDialog(
-            onDismiss = { pipeDialog = false },
-            onConfirm = { name ->
-                pipeDialog = false
-                onIntent(RouteEditorIntent.AddPipe(name))
-            },
-        )
-    }
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            RouteTopBar(
-                title = state.profileName,
-                owners = owners,
-                currentOwner = state.ownerId,
-                onOwner = { requestLeave(it) },
-                onBack = requestBack,
-                backEnabled = !state.saving,
-                onHelp = { helpOpen = true },
-            )
-        },
-        floatingActionButton = {
-            if (!state.routesLocked) {
-                RouteAddMenu(
-                    expanded = addMenu,
-                    onExpanded = { addMenu = it },
-                    showElse = !levelHasElse(state),
-                    // Audit R2: separate VPN channels are an Expert tool; existing ones still show and stay editable.
-                    showPipe = false,
-                    onAddRule = {
-                        onIntent(RouteEditorIntent.AddChild(newRuleParent(state), elseRule = false))
-                    },
-                    onAddElse = {
-                        onIntent(RouteEditorIntent.AddChild(newRuleParent(state), elseRule = true))
-                    },
-                    onAddPipe = { pipeDialog = true },
-                )
-            }
-        },
+    openChannel?.let { name -> ChannelDetailsDialog(name, state.nodes) { openChannel = null } }
+    Scaffold(containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            if (!state.routesLocked) RouteSaveBar(capture, state.saving, onIntent)
+            if (!state.routesLocked && !state.loading && (!state.saved || navigation.view == BranchView.CANVAS)) {
+                RouteSaveBar(capture, state.saving, onIntent)
+            }
         },
     ) { padding ->
-        RouteBody(state, capture, onIntent, { helpOpen = true }, Modifier.padding(padding))
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            if (state.routesLocked || state.loading) {
+                header(null)
+                if (state.routesLocked) RoutesLockedCard(state, onIntent)
+                else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            } else {
+                val adoptParent = RouteFolders.selectedParent(state.nodes, navigation.view != BranchView.CANVAS,
+                    navigation.parentId, state.canvasSelection)
+                OrphanHotbar(state, adoptParent, onIntent, Modifier.fillMaxSize()) {
+                    RuleBranchWorkspace(
+                        state.ownerId, state.profileName, index, navigation, inactive,
+                        targetLabel = { node -> byId.getValue(node.id).let { outcomeCaption(it.action, it.pipeName) } },
+                        canAdd = { !state.saving }, onAdd = { onIntent(RouteEditorIntent.AddChild(it?.id)) },
+                        onEdit = ::edit, overlayOpen = state.editingId != null || state.confirmDeleteId != null ||
+                            state.confirmEdge != null || state.applyPrompt || state.pendingOutcome != null ||
+                            confirmLeave || helpOpen || openChannel != null || state.orphansOpen,
+                        modifier = Modifier.fillMaxSize(),
+                        onReorder = { node, delta -> onIntent(RouteEditorIntent.Move(node.id, delta)) },
+                        header = { search ->
+                            header(search)
+                            ElseRepairNotice(state.fieldErrors, onIntent, Modifier.padding(horizontal = 16.dp))
+                            if (state.terminalRejected || hasMisplaced) {
+                                Text(stringResource(R.string.route_terminal), Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
+                            }
+                        },
+                        nodeMenu = { node ->
+                            val rule = byId[node?.id]
+                            val pipe = rule?.pipeName?.takeIf { it.isNotBlank() }
+                            ExpertNodeMenu(node, tree, onAdd = { onIntent(RouteEditorIntent.AddChild(node?.id)) },
+                                onOtherwise = { onIntent(RouteEditorIntent.AddChild(node?.id, elseRule = true)) },
+                                onMove = { delta -> node?.let { onIntent(RouteEditorIntent.Move(it.id, delta)) } },
+                                onDelete = { node?.let { onIntent(RouteEditorIntent.RequestDelete(it.id)) } },
+                                onEdit = { edit(node) }, onChannel = pipe?.let { { openChannel = it } },
+                                canAdd = !state.saving,
+                                showOtherwise = index.children(node?.id).none { it.otherwise },
+                            ) { close ->
+                                if (rule != null && !rule.isElseRule()) {
+                                    DropdownMenuItem(text = { Text(stringResource(if (rule.enabled) R.string.vpn_disable_rule else R.string.vpn_enable_rule)) },
+                                        enabled = rule.id !in inactive, onClick = { close(); onIntent(RouteEditorIntent.Toggle(rule.id)) })
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.duplicate)) },
+                                        onClick = { close(); onIntent(RouteEditorIntent.Duplicate(rule.id)) })
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.route_detach)) },
+                                        onClick = { close(); onIntent(RouteEditorIntent.Detach(rule.id)) })
+                                }
+                            }
+                        },
+                        fullMap = {
+                            RouteCanvas(state, capture, { intent ->
+                                if (intent is RouteEditorIntent.SelectCanvas && intent.id?.let(CanvasIds::isRule) == true) {
+                                    navigation.selectedId = CanvasIds.ruleKey(intent.id)
+                                }
+                                onIntent(intent)
+                            }, { helpOpen = true }, Modifier.fillMaxSize())
+                        },
+                    )
+                }
+            }
+        }
     }
 }
 
-@Composable
-private fun RouteAddMenu(
-    expanded: Boolean,
-    onExpanded: (Boolean) -> Unit,
-    showElse: Boolean,
-    showPipe: Boolean,
-    onAddRule: () -> Unit,
-    onAddElse: () -> Unit,
-    onAddPipe: () -> Unit,
-) {
-    Box {
-        FloatingActionButton(onClick = { onExpanded(true) }) {
-            Icon(LerNetSymbols.add(), contentDescription = stringResource(R.string.add_rule))
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { onExpanded(false) }) {
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.canvas_add_rule)) },
-                onClick = {
-                    onExpanded(false)
-                    onAddRule()
-                },
-            )
-            if (showElse) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.canvas_add_else)) },
-                    onClick = {
-                        onExpanded(false)
-                        onAddElse()
-                    },
-                )
-            }
-            if (showPipe) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.canvas_add_pipe)) },
-                    onClick = {
-                        onExpanded(false)
-                        onAddPipe()
-                    },
-                )
-            }
-        }
-    }
-}
-
-private fun newRuleParent(state: RouteEditorUiState): String? = RouteFolders.selectedParent(
-    state.nodes,
-    state.asList,
-    state.listFolderId,
-    state.canvasSelection,
-)
-
-private fun levelHasElse(state: RouteEditorUiState): Boolean {
-    val parentId = newRuleParent(state)
-    return state.nodes.any { it.parentId == parentId && it.isElseRule() }
-}
+internal fun RuleNodeRecord.asBranch() = vpnRuleBranch(id, parentId, sortIndex, title, enabled,
+    shownConditions(), isElseRule(), action, pipeName)
 
 @Composable
 private fun RouteSaveBar(capture: LayoutCapture, saving: Boolean, onIntent: (RouteEditorIntent) -> Unit) {
@@ -228,38 +234,6 @@ private fun RouteSaveBar(capture: LayoutCapture, saving: Boolean, onIntent: (Rou
             .semantics { contentDescription = saveLabel },
     ) {
         Text(saveLabel)
-    }
-}
-
-@Composable
-private fun RouteBody(
-    state: RouteEditorUiState,
-    capture: LayoutCapture,
-    onIntent: (RouteEditorIntent) -> Unit,
-    onHelp: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    RouteEditorWorkspace(
-        asList = state.asList,
-        onListChange = {
-            if (capture.latest.isNotEmpty()) onIntent(RouteEditorIntent.SetLayout(capture.latest))
-            onIntent(RouteEditorIntent.ToggleList)
-        },
-        modifier = modifier,
-    ) {
-        if (state.routesLocked) {
-            RoutesLockedCard(state, onIntent)
-        } else {
-            OrphanHotbar(state, onIntent, Modifier.fillMaxSize()) {
-                when {
-                    state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
-                    state.asList -> RouteFolderList(state, onIntent, Modifier.fillMaxSize())
-                    else -> RouteCanvas(state, capture, onIntent, onHelp, Modifier.fillMaxSize())
-                }
-            }
-        }
     }
 }
 
@@ -435,8 +409,8 @@ private fun RouteTopBar(
     currentOwner: String,
     onOwner: (String) -> Unit,
     onBack: () -> Unit,
-    backEnabled: Boolean,
-    onHelp: () -> Unit,
+    backEnabled: Boolean, showClose: Boolean,
+    onHelp: () -> Unit, onSearch: (() -> Unit)?,
 ) {
     var pick by remember { mutableStateOf(false) }
     TopAppBar(
@@ -471,10 +445,14 @@ private fun RouteTopBar(
         },
         navigationIcon = {
             IconButton(onClick = onBack, enabled = backEnabled) {
-                Icon(LerNetSymbols.arrowBack(), contentDescription = stringResource(R.string.back))
+                Icon(if (showClose) LerNetSymbols.close() else LerNetSymbols.arrowBack(),
+                    contentDescription = stringResource(if (showClose) R.string.close else R.string.back))
             }
         },
         actions = {
+            if (onSearch != null) IconButton(onSearch, Modifier.testTag("branch-search")) {
+                Icon(Icons.Outlined.Search, stringResource(R.string.expert_branch_search))
+            }
             IconButton(onClick = onHelp) {
                 Icon(LerNetSymbols.help(), contentDescription = stringResource(R.string.canvas_help))
             }
@@ -503,63 +481,47 @@ private fun RuleEditorSheet(
             onIntent(RouteEditorIntent.CloseEditor)
         }
     }
-    Dialog(
-        onDismissRequest = requestClose,
-        properties = DialogProperties(
-            dismissOnBackPress = true,
-            dismissOnClickOutside = false,
-            usePlatformDefaultWidth = false,
-        ),
+    RuleEditorDialog(stringResource(if (node.isElseRule()) R.string.expert_otherwise_title else R.string.expert_editor_heading),
+        onDismiss = requestClose,
+        errors = { SheetFieldErrors(fieldErrors) },
+        actions = {
+            TextButton(onClick = requestClose) { Text(stringResource(R.string.close)) }
+            IconButton(onClick = { onIntent(RouteEditorIntent.RequestDelete(node.id)) }) {
+                Icon(LerNetSymbols.delete(), contentDescription = stringResource(R.string.delete), tint = MaterialTheme.colorScheme.error)
+            }
+            Button(onClick = { onIntent(RouteEditorIntent.DoneEditor) }, modifier = Modifier.weight(1f)) {
+                Text(stringResource(R.string.done))
+            }
+        },
     ) {
-        Column(
-            Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = LerNetDimens.screenPadding, vertical = LerNetDimens.itemGap),
-            verticalArrangement = Arrangement.spacedBy(LerNetDimens.itemGap),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.rule_edit), style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                IconButton(onClick = requestClose) {
-                    Icon(LerNetSymbols.close(), contentDescription = stringResource(R.string.close))
-                }
-            }
-            RuleTitleField(node, onIntent)
-            if (node.id in androidInactiveRuleIds(nodes)) {
-                Text(
-                    stringResource(R.string.route_windows_only_explanation),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            PriorityControls(
-                rank = rank,
-                maxRank = nodes.count { it.parentId == node.parentId && !it.isElseRule() },
-                nodeId = node.id,
-                onIntent = onIntent,
-                locked = locked || node.isElseRule(),
-            )
-            ActionChips(node, nodes, namingNodeId, onIntent)
-            if (node.isElseRule()) {
-                Text(stringResource(R.string.rule_else_locked))
-            } else {
-                RuleComposer(node, onIntent)
-            }
-            SheetFieldErrors(fieldErrors)
-            RouteRuleExtras(node, nodes, namingNodeId, onIntent)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { onIntent(RouteEditorIntent.RequestDelete(node.id)) }) {
-                    Icon(LerNetSymbols.delete(), contentDescription = null)
-                    Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error)
-                }
-                Button(onClick = { onIntent(RouteEditorIntent.DoneEditor) }) {
-                    Text(stringResource(R.string.done))
-                }
+        RuleTitleField(node, onIntent)
+        if (!node.isElseRule()) {
+            app.lernet.ui.expert.ExpertCheckRow(R.string.expert_rule_enabled, node.enabled, enabled = !locked && node.id !in androidInactiveRuleIds(nodes)) {
+                onIntent(RouteEditorIntent.Toggle(node.id))
             }
         }
+        if (node.id in androidInactiveRuleIds(nodes)) {
+            Text(
+                stringResource(R.string.route_windows_only_explanation),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        PriorityControls(
+            rank = rank,
+            maxRank = nodes.count { it.parentId == node.parentId && !it.isElseRule() },
+            nodeId = node.id,
+            onIntent = onIntent,
+            locked = locked || node.isElseRule(),
+        )
+        if (node.isElseRule()) {
+            Text(stringResource(R.string.rule_else_locked))
+        } else {
+            RuleComposer(node, onIntent)
+        }
+        androidx.compose.material3.HorizontalDivider()
+        Text(stringResource(R.string.expert_path), style = MaterialTheme.typography.titleMedium)
+        ActionChips(node, nodes, namingNodeId, onIntent)
+        RouteRuleExtras(node, nodes, namingNodeId, onIntent)
     }
     if (confirmDiscard) {
         AlertDialog(
@@ -611,32 +573,6 @@ private fun RuleTitleField(node: RuleNodeRecord, onIntent: (RouteEditorIntent) -
         supportingText = { Text(stringResource(R.string.field_rule_title_hint)) },
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
-    )
-}
-
-@Composable
-private fun PipeNameDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
-    var draft by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.pipe_name_title)) },
-        text = {
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { draft = it },
-                label = { Text(stringResource(R.string.route_pipe)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = { onConfirm(draft) }, enabled = draft.trim().isNotEmpty()) {
-                Text(stringResource(R.string.done))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
-        },
     )
 }
 

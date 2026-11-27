@@ -67,10 +67,11 @@ private const val cardWidth = 216f
 private const val cardHeight = 62f
 
 @Composable
-internal fun ExpertBranchMap(
+internal fun RuleBranchMap(
     tree: PolicyTree,
     branches: DesktopRuleBranches,
-    state: ExpertUiState,
+    targetName: (PolicyNode) -> String,
+    inactiveReason: (PolicyNode) -> String?,
     focusId: String?,
     selectedId: String?,
     expanded: Set<String>,
@@ -113,7 +114,8 @@ internal fun ExpertBranchMap(
         visible.forEach { node -> val p = layout.nodes.getValue(node.id); card(node.id, p.y, p.x) }
     }
     val edges = remember(visible, rootKey) {
-        visible.map { node ->
+        visible.mapNotNull { node ->
+            if (node.detached || (node.parentId != null && node.parentId !in branches.byId)) return@mapNotNull null
             val parent = node.parentId?.takeIf { it in branches.byId }?.let(PolicyCanvasKeys::node) ?: rootKey
             parent to PolicyCanvasKeys.node(node.id)
         }
@@ -149,12 +151,12 @@ internal fun ExpertBranchMap(
                 key(key) {
                     val kids = branches.children[id].orEmpty()
                     val title = node?.let(::policyNodeTitle) ?: "Весь трафик"
-                    val inactive = node?.let { ExpertPolicyEditing.inactiveReason(it, tree, state) }
+                    val inactive = node?.let(inactiveReason)
                     val subtitle = when {
                         inactive != null -> inactive
                         node == null -> "Начало схемы"
                         kids.isNotEmpty() -> "Вложенные правила · ${kids.size}"
-                        else -> ExpertPolicyEditing.targetName(node.target, state)
+                        else -> targetName(node)
                     }
                     RouteEditorPositioned(rect.topLeft, transform, if (key == dragging) 1f else 0f) {
                         val isOrigin = key == rootKey

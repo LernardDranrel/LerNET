@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,7 +29,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -80,29 +78,6 @@ import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 
 internal enum class RouteEditorView { SCHEME, LIST }
-
-@Composable
-internal fun RouteEditorViewToggle(view: RouteEditorView, onChange: (RouteEditorView) -> Unit) {
-    FilterChip(view == RouteEditorView.SCHEME, { onChange(RouteEditorView.SCHEME) }, label = { Text(app.lernet.engine.text.SchemaWords.VIEW_SCHEMA) })
-    FilterChip(view == RouteEditorView.LIST, { onChange(RouteEditorView.LIST) }, label = { Text(app.lernet.engine.text.SchemaWords.VIEW_LIST) })
-}
-
-@Composable
-internal fun RouteEditorInspector(
-    title: String,
-    modifier: Modifier,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    Surface(
-        modifier, color = Color(0xFF151D2B), shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, Color(0xFF3B4961))
-    ) {
-        Column(Modifier.padding(17.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(title, color = Color(0xFFA1AEC4), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            content()
-        }
-    }
-}
 
 /** A viewport transform only: it never changes rules, targets or saved node positions. */
 internal data class RouteCanvasTransform(val zoom: Float = 1f, val pan: Offset = Offset.Zero) {

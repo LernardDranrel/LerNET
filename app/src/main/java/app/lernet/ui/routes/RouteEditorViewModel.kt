@@ -14,9 +14,9 @@ import app.lernet.engine.toRuleNode
 import app.lernet.routing.ConditionCodec
 import app.lernet.routing.MatchJoin
 import app.lernet.routing.RouteAction
-import app.lernet.routing.RoutePlatform
 import app.lernet.routing.RouteCompiler
 import app.lernet.routing.RouteElse
+import app.lernet.routing.RoutePlatform
 import app.lernet.routing.RouteTree
 import app.lernet.routing.RuleConditions
 import app.lernet.routing.RuleNode
@@ -46,9 +46,6 @@ data class RouteEditorUiState(
     val editingId: String? = null,
     val draftNodeIds: Set<String> = emptySet(),
     val confirmDeleteId: String? = null,
-    val expandedIds: Set<String> = emptySet(),
-    // Audit R1: on a phone the list is easier to edit with a finger; the canvas is one tap away.
-    val asList: Boolean = true,
     val cycleRejected: Boolean = false,
     val terminalRejected: Boolean = false,
     val linkEpoch: Int = 0,
@@ -57,9 +54,7 @@ data class RouteEditorUiState(
     val canvasSelection: String? = null,
     val selectedEdge: SchemaEdge? = null,
     val confirmEdge: SchemaEdge? = null,
-    val listFolderId: String? = null,
     val orphansOpen: Boolean = false,
-    val placingOrphanId: String? = null,
     val pendingOutcome: PendingOutcome? = null,
     val namingNodeId: String? = null,
     val routesLocked: Boolean = false,
@@ -91,8 +86,6 @@ sealed class RouteEditorIntent {
     /** Done in the sheet: validate conditions; stay open if the gate fails. */
     data object DoneEditor : RouteEditorIntent()
 
-    data class ToggleExpand(val id: String) : RouteEditorIntent()
-
     data object Save : RouteEditorIntent()
 
     data object ConfirmApply : RouteEditorIntent()
@@ -100,8 +93,6 @@ sealed class RouteEditorIntent {
     data object DismissApply : RouteEditorIntent()
 
     data object RepairElse : RouteEditorIntent()
-
-    data object ToggleList : RouteEditorIntent()
 
     data class Reparent(val id: String, val parentId: String?) : RouteEditorIntent()
 
@@ -131,15 +122,12 @@ sealed class RouteEditorIntent {
 
     data object OpenOwnerGroup : RouteEditorIntent()
 
-    data class OpenFolder(val id: String) : RouteEditorIntent()
-
-    data object FolderBack : RouteEditorIntent()
 
     data class Detach(val id: String) : RouteEditorIntent()
 
     data class SetOrphansOpen(val open: Boolean) : RouteEditorIntent()
 
-    data class PlaceOrphan(val id: String) : RouteEditorIntent()
+    data class PlaceOrphan(val id: String, val parentId: String?) : RouteEditorIntent()
 
     data class ToggleAxis(val column: Float, val row: Float) : RouteEditorIntent()
 
@@ -197,8 +185,6 @@ class RouteEditorViewModel @Inject constructor(
             is RouteEditorIntent.Edit,
             RouteEditorIntent.CloseEditor,
             RouteEditorIntent.DoneEditor,
-            is RouteEditorIntent.ToggleExpand,
-            RouteEditorIntent.ToggleList,
             is RouteEditorIntent.Reparent,
             -> onEditorIntent(intent)
             RouteEditorIntent.Save,
@@ -230,8 +216,6 @@ class RouteEditorViewModel @Inject constructor(
             RouteEditorIntent.DismissBreakEdge,
             -> onEdgeIntent(intent)
             RouteEditorIntent.OpenOwnerGroup -> openOwnerGroup()
-            is RouteEditorIntent.OpenFolder,
-            RouteEditorIntent.FolderBack,
             is RouteEditorIntent.Detach,
             is RouteEditorIntent.SetOrphansOpen,
             is RouteEditorIntent.PlaceOrphan,
@@ -275,11 +259,9 @@ class RouteEditorViewModel @Inject constructor(
 
     private fun onFolderIntent(intent: RouteEditorIntent) {
         when (intent) {
-            is RouteEditorIntent.OpenFolder -> openFolder(intent.id)
-            RouteEditorIntent.FolderBack -> folderBack()
             is RouteEditorIntent.Detach -> detach(intent.id)
             is RouteEditorIntent.SetOrphansOpen -> _state.update { it.copy(orphansOpen = intent.open) }
-            is RouteEditorIntent.PlaceOrphan -> dropOrphan(intent.id)
+            is RouteEditorIntent.PlaceOrphan -> dropOrphan(intent.id, intent.parentId)
             is RouteEditorIntent.ToggleAxis -> toggleAxis(intent.column, intent.row)
             else -> error("not a folder intent: $intent")
         }
@@ -310,7 +292,6 @@ class RouteEditorViewModel @Inject constructor(
 
     private suspend fun publishLoaded(loaded: List<RuleNodeRecord>) {
         val seeded = RouteFolders.seedMissingElse(loaded, navOwnerId, ::newId)
-        val roots = seeded.filter { it.parentId == null }.map { it.id }
         val layout = CanvasGraph.decode(repository.readCanvasLayout(navOwnerId))
         _state.update {
             it.copy(
@@ -319,7 +300,6 @@ class RouteEditorViewModel @Inject constructor(
                 nodes = seeded,
                 draftNodeIds = emptySet(),
                 loading = false,
-                expandedIds = roots.toSet(),
                 layout = layout,
                 extraPipes = CanvasGraph.savedPipeNames(layout),
                 routesLocked = false,
@@ -429,8 +409,6 @@ class RouteEditorViewModel @Inject constructor(
                 draftNodeIds = it.draftNodeIds - doomed,
                 editingId = null,
                 fieldErrors = emptyList(),
-                listFolderId = it.listFolderId?.takeUnless { folder -> folder in doomed },
-                placingOrphanId = it.placingOrphanId?.takeUnless { placed -> placed in doomed },
                 canvasSelection = it.canvasSelection?.takeUnless { sel ->
                     sel == CanvasIds.rule(id) || doomed.any { d -> sel == CanvasIds.rule(d) }
                 },
@@ -444,12 +422,6 @@ class RouteEditorViewModel @Inject constructor(
             is RouteEditorIntent.Edit -> _state.update { it.copy(editingId = intent.id, fieldErrors = emptyList()) }
             RouteEditorIntent.CloseEditor -> closeEditor()
             RouteEditorIntent.DoneEditor -> doneEditor()
-            is RouteEditorIntent.ToggleExpand ->
-                _state.update {
-                    val next = if (intent.id in it.expandedIds) it.expandedIds - intent.id else it.expandedIds + intent.id
-                    it.copy(expandedIds = next)
-                }
-            RouteEditorIntent.ToggleList -> _state.update { it.copy(asList = !it.asList) }
             is RouteEditorIntent.Reparent -> reparent(intent.id, intent.parentId)
             else -> error("not an editor intent: $intent")
         }
@@ -472,8 +444,6 @@ class RouteEditorViewModel @Inject constructor(
                 nodes = RouteFolders.seedMissingElse(kept, it.ownerId, ::newId),
                 draftNodeIds = it.draftNodeIds - doomed,
                 editingId = it.editingId?.takeUnless { edit -> edit in doomed },
-                listFolderId = it.listFolderId?.takeUnless { folder -> folder in doomed },
-                placingOrphanId = it.placingOrphanId?.takeUnless { placed -> placed in doomed },
                 saved = false,
             )
         }
@@ -530,7 +500,6 @@ class RouteEditorViewModel @Inject constructor(
                 canvasSelection = CanvasIds.rule(node.id),
                 terminalRejected = false,
                 fieldErrors = emptyList(),
-                expandedIds = if (parentId != null) it.expandedIds + parentId else it.expandedIds,
             )
         }
     }
@@ -566,14 +535,7 @@ class RouteEditorViewModel @Inject constructor(
         val index = siblings.indexOfFirst { it.id == id }
         val swapWith = siblings.getOrNull(index + delta)
         if (current.isElseRule() || swapWith == null || swapWith.isElseRule()) return
-        val updated = nodes.map { node ->
-            when (node.id) {
-                current.id -> node.copy(sortIndex = swapWith.sortIndex)
-                swapWith.id -> node.copy(sortIndex = current.sortIndex)
-                else -> node
-            }
-        }
-        _state.update { it.copy(nodes = RouteFolders.pinElseLast(updated), saved = false) }
+        reorderSiblings(current.parentId, movedIds(siblings.map { it.id }, index, index + delta))
     }
 
     private fun reparent(id: String, parentId: String?) {
@@ -610,7 +572,6 @@ class RouteEditorViewModel @Inject constructor(
                 cycleRejected = false,
                 terminalRejected = false,
                 fieldErrors = emptyList(),
-                expandedIds = if (parentId != null) it.expandedIds + parentId else it.expandedIds,
             )
         }
     }
@@ -651,8 +612,7 @@ class RouteEditorViewModel @Inject constructor(
                     return@launch
                 }
                 val layout = _state.value.layout
-                repository.replaceRuleNodes(ownerId, ordered)
-                repository.writeCanvasLayout(ownerId, CanvasGraph.encode(layout))
+                repository.saveEditedRoutes(ownerId, ordered, CanvasGraph.encode(layout))
                 val unchanged = _state.value.nodes == ordered && _state.value.layout == layout
                 val activeId = controller.snapshot.value.activeProfileId
                 val prompt = unchanged &&
@@ -742,11 +702,11 @@ class RouteEditorViewModel @Inject constructor(
         }
     }
 
-    private fun dropOrphan(id: String) {
+    private fun dropOrphan(id: String, parent: String?) {
         val state = _state.value
         if (state.routesLocked) return
         val node = state.nodes.firstOrNull { it.id == id && it.parentId == RouteFolders.ORPHAN } ?: return
-        val parent = RouteFolders.selectedParent(state.nodes, state.asList, state.listFolderId, state.canvasSelection)
+        if (parent != null && state.nodes.none { it.id == parent }) return
         if (elseAlreadyAt(state.nodes, node, parent)) {
             _state.update { it.copy(fieldErrors = listOf("else: ${RouteElse.EXTRA}"), orphansOpen = false) }
             return
@@ -754,7 +714,6 @@ class RouteEditorViewModel @Inject constructor(
         _state.update {
             it.copy(
                 nodes = RouteFolders.adopt(state.nodes, id, parent, state.ownerId, ::newId),
-                placingOrphanId = null,
                 orphansOpen = false,
                 saved = false,
                 terminalRejected = false,
@@ -774,39 +733,18 @@ class RouteEditorViewModel @Inject constructor(
         }
         val nodes = _state.value.nodes
         val indexOf = orderedIds.withIndex().associate { it.value to it.index }
-        val placing = _state.value.placingOrphanId
-        val placingNode = placing?.let { id -> nodes.firstOrNull { it.id == id } }
-        val clash = placingNode != null &&
-            placing in indexOf &&
-            placingNode.isElseRule() &&
-            nodes.any { it.parentId == parentId && it.id != placing && it.isElseRule() }
-        if (clash) {
-            _state.update { it.copy(fieldErrors = listOf("else: ${RouteElse.EXTRA}")) }
-            return
-        }
         _state.update { state ->
-            val adopted = placing != null && placing in indexOf
             val moved = state.nodes.map { node ->
                 val index = indexOf[node.id]
-                val inFolder = node.parentId == parentId || node.id == placing
+                val inFolder = node.parentId == parentId
                 if (index != null && inFolder) node.copy(parentId = parentId, sortIndex = index) else node
             }
             state.copy(
                 nodes = RouteFolders.seedMissingElse(moved, state.ownerId, ::newId),
-                placingOrphanId = if (adopted) null else state.placingOrphanId,
                 saved = false,
                 terminalRejected = false,
                 fieldErrors = emptyList(),
             )
-        }
-    }
-
-    private fun openFolder(id: String) {
-        val node = _state.value.nodes.firstOrNull { it.id == id } ?: return
-        if (node.acceptsChildren(_state.value.nodes)) {
-            _state.update { it.copy(listFolderId = id) }
-        } else {
-            _state.update { it.copy(editingId = id) }
         }
     }
 
@@ -888,7 +826,6 @@ class RouteEditorViewModel @Inject constructor(
                 fieldErrors = emptyList(),
                 terminalRejected = false,
                 editingId = it.editingId?.takeUnless { edit -> edit in doomed },
-                listFolderId = it.listFolderId?.takeUnless { folder -> folder in doomed },
             )
         }
     }
@@ -906,13 +843,6 @@ class RouteEditorViewModel @Inject constructor(
             }
             state.copy(nodes = ordered, fieldErrors = errors, saved = false)
         }
-    }
-
-    private fun folderBack() {
-        val id = _state.value.listFolderId ?: return
-        val parent = _state.value.nodes.firstOrNull { it.id == id }?.parentId
-        val next = parent?.takeUnless { it == RouteFolders.ORPHAN }
-        _state.update { it.copy(listFolderId = next) }
     }
 
     private fun requestBreakEdge(edge: SchemaEdge) {
@@ -959,12 +889,8 @@ class RouteEditorViewModel @Inject constructor(
     private fun detach(id: String) {
         if (_state.value.routesLocked) return
         _state.update { state ->
-            val leaving = state.listFolderId == id
-            val parent = state.nodes.firstOrNull { it.id == id }?.parentId
             state.copy(
                 nodes = SchemaEdges.afterTreeBreak(state.nodes, state.ownerId, id, ::newId),
-                placingOrphanId = state.placingOrphanId?.takeUnless { it == id },
-                listFolderId = if (leaving) parent?.takeUnless { it == RouteFolders.ORPHAN } else state.listFolderId,
                 selectedEdge = null,
                 confirmEdge = null,
                 saved = false,

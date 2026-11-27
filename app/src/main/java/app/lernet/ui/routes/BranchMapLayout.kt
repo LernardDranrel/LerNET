@@ -1,4 +1,4 @@
-package app.lernet.ui.expert
+package app.lernet.ui.routes
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -29,8 +29,10 @@ internal data class BranchMapLayout(val count: Int, val nodeHeight: Float) {
     }
 
     fun fit(viewport: Size): BranchMapCamera {
-        val scale = minOf(1.17f, (viewport.width - 24f).coerceAtLeast(1f) / width,
-            (viewport.height - 24f).coerceAtLeast(1f) / height)
+        val scale = minOf(
+            1.17f, (viewport.width - 24f).coerceAtLeast(1f) / width,
+            (viewport.height - 24f).coerceAtLeast(1f) / height
+        )
         return BranchMapCamera(scale, Offset(width / 2, height / 2))
     }
 }

@@ -1,26 +1,26 @@
 package app.lernet.ui.routes
 
 import android.app.Application
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import androidx.activity.ComponentActivity
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.material3.Text
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.runtime.*
+import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.unit.dp
+import androidx.lifecycle.SavedStateHandle
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
 import app.lernet.R
+import app.lernet.config.db.LerNetDatabase
+import app.lernet.config.repo.ConfigRepository
+import app.lernet.config.transfer.*
+import app.lernet.engine.ConnectionController
+import app.lernet.engine.UnavailableBoxEngine
 import app.lernet.ui.expert.AppModeTabs
 import app.lernet.ui.theme.LerNetTheme
 import com.google.common.truth.Truth.assertThat
+import java.io.File
+import kotlinx.coroutines.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -28,43 +28,105 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** Exercises the shared UI shell without constructing a VPN service or network client. */
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [33], application = Application::class, qualifiers = "w320dp-h640dp-xhdpi")
+@Config(sdk = [33], application = Application::class, qualifiers = "w360dp-h800dp-xhdpi")
 class RouteEditorWorkspaceTest {
     @get:Rule
     val rule = createAndroidComposeRule<ComponentActivity>()
 
     @Test
-    fun selectingTheCurrentViewDoesNotDiscardOrResaveTheGraph() {
-        val changes = mutableListOf<Boolean>()
-        rule.setContent {
-            var asList by remember { mutableStateOf(false) }
-            LerNetTheme {
-                Box(Modifier.fillMaxWidth().height(360.dp)) {
-                    RouteEditorWorkspace(
-                        asList = asList,
-                        onListChange = {
-                            changes += it
-                            asList = it
-                        },
-                        bottomBar = { Text("Durable save fixture") },
-                    ) { Text(if (asList) "List fixture" else "Graph fixture") }
-                }
+    fun folderRulesOpenTheSharedMapAndSaveTheOriginalVpnRecord() {
+        val db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), LerNetDatabase::class.java).build()
+        val repository = ConfigRepository(db.profileDao(), db.outboundDao(), db.ruleNodeDao(), db.groupDao(), db.groupMemberDao(), database = db)
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val controller = ConnectionController(UnavailableBoxEngine(), scope)
+        val owner = "grp_work"
+        val main = TransferOutbound("office-exit", "proxy", "socks", """{"type":"socks","server":"office.example","server_port":1080}""")
+        val office = TransferProfile("office", "Офис", "JSON_PASTE", listOf(main), main.id)
+        val home = office.copy(id = "home", name = "Дом", outbounds = listOf(main.copy(id = "home-exit")), selectedOutboundId = "home-exit")
+        val rules = listOf(
+            TransferRule("work", owner, sortIndex = 0, action = "proxy", title = "Рабочие сервисы", domainSuffixes = listOf("office.example")),
+            TransferRule("sso", owner, "work", sortIndex = 0, action = "proxy", title = "Единый вход",
+                domains = listOf("login.office.example"), pipeName = "Офис"),
+            TransferRule("work-else", owner, "work", sortIndex = 1, action = "direct"),
+            TransferRule("local", owner, sortIndex = 1, action = "direct", title = "Локальная сеть", ipCidrs = listOf("10.0.0.0/8")),
+            TransferRule("else", owner, sortIndex = 2, action = "proxy"),
+            TransferRule("another", home.id, sortIndex = 0, action = "proxy", title = "Единый вход"),
+        )
+        try {
+            runBlocking {
+                repository.restoreTransferExact(TransferBundle(scope = "all", profiles = listOf(office, home),
+                    groups = listOf(TransferGroup("work", "Работа", listOf(office.id), false)), rules = rules))
             }
+            val before = runBlocking { repository.listRuleNodes(owner) }
+            val untouched = runBlocking { repository.listRuleNodes(home.id) }
+            fun load() = RouteEditorViewModel(SavedStateHandle(mapOf("profileId" to owner)), repository, controller)
+            var vm by mutableStateOf(load())
+            rule.setContent {
+                val state by vm.state.collectAsState()
+                LerNetTheme { RouteEditorScreen(state, vm::onIntent, {}) }
+            }
+            awaitDatabase { !vm.state.value.loading }
+            rule.onNodeWithTag("branch-row:work").assertIsDisplayed()
+            capture("vpn-branch-list")
+            rule.onNodeWithTag("branch-row:work").performClick()
+            rule.onNodeWithTag("branch-row:sso").assertIsDisplayed()
+            rule.onNodeWithTag("branch-map-open").performClick()
+            rule.onNodeWithTag("branch-map-node:sso").performClick()
+            rule.onNodeWithTag("branch-map-zoom-in").performClick()
+            rule.onNodeWithTag("branch-map-fit").performClick()
+            capture("vpn-branch-map")
+            rule.onNodeWithTag("branch-map-edit").performClick()
+            rule.onNode(hasText("Единый вход") and hasSetTextAction()).performTextReplacement("Вход в портал")
+            rule.onNodeWithText(rule.activity.getString(R.string.done)).performClick()
+            rule.onNodeWithTag("branch-list-back").performClick()
+            rule.onNodeWithTag("branch-row:sso").assertTextContains("Вход в портал")
+            assertThat(runBlocking { repository.listRuleNodes(owner) }).isEqualTo(before)
+            // A failed layout write must roll back the preceding replacement of the rules.
+            db.openHelper.writableDatabase.execSQL(
+                "CREATE TRIGGER fail_layout BEFORE INSERT ON groups WHEN NEW.id = 'work' BEGIN SELECT RAISE(ABORT, 'layout failure'); END",
+            )
+            rule.onNodeWithContentDescription(rule.activity.getString(R.string.save)).performClick()
+            awaitDatabase { vm.state.value.fieldErrors.isNotEmpty() && !vm.state.value.saving }
+            assertThat(vm.state.value.saved).isFalse()
+            assertThat(runBlocking { repository.listRuleNodes(owner) }).isEqualTo(before)
+            db.openHelper.writableDatabase.execSQL("DROP TRIGGER fail_layout")
+            rule.onNodeWithContentDescription(rule.activity.getString(R.string.save)).performClick()
+            awaitDatabase { vm.state.value.saved && !vm.state.value.saving }
+            val saved = runBlocking { repository.listRuleNodes(owner) }
+            assertThat(saved).containsExactlyElementsIn(before.map { if (it.id == "sso") it.copy(title = "Вход в портал") else it })
+            assertThat(runBlocking { repository.listRuleNodes(home.id) }).isEqualTo(untouched)
+            rule.runOnIdle { vm = load() }
+            awaitDatabase { !vm.state.value.loading }
+            rule.onNodeWithTag("branch-search").performClick()
+            rule.onNodeWithTag("branch-search-field").performTextInput("Вход в портал")
+            rule.onNodeWithTag("branch-search-result:sso").assertTextContains("Рабочие сервисы", substring = true)
+        } finally {
+            scope.cancel()
+            db.close()
         }
-        val schema = rule.activity.getString(R.string.route_schema)
-        val list = rule.activity.getString(R.string.route_list)
-        rule.onNodeWithText(schema).assertIsSelected().performClick()
-        rule.runOnIdle { assertThat(changes).isEmpty() }
-        rule.onNodeWithText(list).performClick()
+    }
+
+    private fun awaitDatabase(ready: () -> Boolean) {
+        rule.waitUntil(15_000) {
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            ready()
+        }
+    }
+
+    private fun capture(name: String) {
         rule.waitForIdle()
-        rule.onNodeWithText(list).assertIsSelected()
-        rule.onNodeWithText("List fixture").assertIsDisplayed()
-        rule.onNodeWithText("Durable save fixture").assertIsDisplayed()
-        rule.onNodeWithText(schema).performClick()
-        rule.runOnIdle { assertThat(changes).containsExactly(true, false).inOrder() }
+        rule.runOnIdle {
+            val view = rule.activity.window.decorView
+            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            try {
+                view.draw(Canvas(bitmap))
+                val file = File("build/reports/ui/android-$name.png")
+                file.parentFile?.mkdirs()
+                file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            } finally { bitmap.recycle() }
+        }
     }
 
     @Test

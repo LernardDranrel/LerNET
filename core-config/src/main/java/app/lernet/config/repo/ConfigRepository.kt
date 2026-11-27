@@ -520,6 +520,21 @@ class ConfigRepository(
     suspend fun listRuleNodes(ownerId: String): List<RuleNodeRecord> =
         ruleNodeDao.listForProfile(ownerId).map { it.toRecord() }
 
+    /** Rules and their canvas layout belong to the same saved editor revision. */
+    suspend fun saveEditedRoutes(ownerId: String, nodes: List<RuleNodeRecord>, layout: String) {
+        requireNotNull(database).withTransaction {
+            val groupId = RouteOwners.groupIdOf(ownerId)
+            if (groupId == null) {
+                val profile = checkNotNull(profileDao.getProfile(ownerId))
+                check(!SubscriptionFolders.owned(profile.subscriptionUrl))
+            } else {
+                check(groupDao.listGroups().any { it.id == groupId })
+            }
+            replaceRuleNodes(ownerId, nodes)
+            writeCanvasLayout(ownerId, layout)
+        }
+    }
+
     suspend fun writeCanvasLayout(ownerId: String, json: String) {
         val groupId = RouteOwners.groupIdOf(ownerId)
         if (groupId != null) {

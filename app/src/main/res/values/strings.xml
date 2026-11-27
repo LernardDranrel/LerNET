@@ -535,4 +535,6 @@
     <string name="log_info_help">Основные события, предупреждения и ошибки. В журнале больше подробностей о ваших подключениях.</string>
     <string name="log_debug_help">Подробная запись для поиска ошибки. Сведений о подключениях больше всего.</string>
     <string name="journal_chain">Цепочка выходов</string>
+    <string name="vpn_disable_rule">Выключить правило</string>
+    <string name="vpn_enable_rule">Включить правило</string>
 </resources>

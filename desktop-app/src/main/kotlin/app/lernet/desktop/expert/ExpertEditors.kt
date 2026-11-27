@@ -39,20 +39,17 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.lernet.desktop.RouteConditionBlockEditor
+import app.lernet.config.subscription.SubscriptionFolders
+import app.lernet.desktop.RouteConditionsEditor
 import app.lernet.desktop.RouteEditorModal
 import app.lernet.desktop.routeEditorStateSaver
-import app.lernet.routing.ConditionBlock
 import app.lernet.routing.ConditionKind
-import app.lernet.routing.MatchJoin
 import app.lernet.routing.RouteCompiler
 import app.lernet.routing.RuleConditions
 import app.lernet.routing.policy.DestinationRedirect
 import app.lernet.routing.policy.ExitLifecyclePolicy
-import app.lernet.config.subscription.SubscriptionFolders
 import app.lernet.routing.policy.FolderPolicy
 import app.lernet.routing.policy.FolderSelection
-import app.lernet.routing.policy.normalized
 import app.lernet.routing.policy.PolicyChannel
 import app.lernet.routing.policy.PolicyDestinationAddress
 import app.lernet.routing.policy.PolicyNode
@@ -62,6 +59,7 @@ import app.lernet.routing.policy.PolicyTarget
 import app.lernet.routing.policy.PolicyTree
 import app.lernet.routing.policy.ProfileExitPolicy
 import app.lernet.routing.policy.UnavailableFallback
+import app.lernet.routing.policy.normalized
 
 @Composable
 internal fun ExpertModal(
@@ -176,47 +174,8 @@ internal fun ExpertRuleEditor(
                 )
             }
         } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Между условиями", color = ExpertColors.muted)
-                FilterChip(conditions.join == MatchJoin.AND, { conditions = conditions.copy(join = MatchJoin.AND) }, label = { Text("И") })
-                FilterChip(conditions.join == MatchJoin.OR, { conditions = conditions.copy(join = MatchJoin.OR) }, label = { Text("ИЛИ") })
-            }
-            Text(
-                "Значения внутри одного поля объединяются через ИЛИ. Пустое правило охватывает весь трафик своей ветки.",
-                color = ExpertColors.muted, fontSize = 12.sp
-            )
-            conditions.blocks.forEachIndexed { index, block ->
-                RouteConditionBlockEditor(
-                    block,
-                    onChange = { changed ->
-                        conditions = conditions.copy(
-                            blocks = conditions.blocks.mapIndexed { current, value ->
-                                if (current == index) changed else value
-                            }
-                        )
-                    },
-                    onRemove = {
-                        conditions = conditions.copy(blocks = conditions.blocks.filterIndexed { current, _ -> current != index })
-                    },
-                    onPickProcesses = { apps = index },
-                )
-            }
-            ExpertSelect<ConditionKind?>(
-                "Добавить условие",
-                listOf(null to "Выбери тип") + ConditionKind.entries.map {
-                    it to ExpertPolicyEditing.kindName(it)
-                },
-                null
-            ) {
-                if (it != null) {
-                    conditions = conditions.copy(
-                        blocks = conditions.blocks + ConditionBlock(
-                            it,
-                            if (it == ConditionKind.PRIVATE) listOf("private") else emptyList()
-                        )
-                    )
-                }
-            }
+            RouteConditionsEditor(conditions, { conditions = it }, ConditionKind.entries,
+                onPickProcesses = { apps = it })
         }
         HorizontalDivider(color = ExpertColors.border)
         if (inheritedProtection) {

@@ -8,9 +8,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,8 +19,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.input.key.*
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.*
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -31,8 +31,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
-import app.lernet.routing.policy.PolicyScope
 import app.lernet.routing.policy.PolicyNode
+import app.lernet.routing.policy.PolicyScope
 
 @Composable
 internal fun MapButton(label: String, onClick: () -> Unit, primary: Boolean = false, enabled: Boolean = true) {
@@ -155,6 +155,35 @@ internal fun RuleInspector(
             Text(title, color = ExpertColors.text, fontSize = 22.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold)
             content()
         }
+    }
+}
+
+@Composable
+internal fun BranchRuleInspector(
+    node: PolicyNode?, branches: DesktopRuleBranches, modifier: Modifier, close: (() -> Unit)?,
+    focusId: String?, go: (String?) -> Unit, status: String?, destination: String,
+    onEdit: () -> Unit, onAdd: (() -> Unit)?, actions: @Composable () -> Unit,
+) {
+    val children = branches.children[node?.id].orEmpty()
+    RuleInspector(node?.let(::policyNodeTitle) ?: "Весь трафик",
+        if (children.isNotEmpty()) "Выбранная ветка" else "Выбранное правило", modifier, close) {
+        if (node != null) {
+            InspectorValue("Условие", ExpertPolicyEditing.conditionSummary(node))
+            if (children.isEmpty()) InspectorValue("Направить через", destination)
+            status?.let { InspectorValue("Состояние", it) }
+        }
+        if (children.isNotEmpty()) InspectorValue("Внутри", "Правил · ${children.size}")
+        if (node == null) InspectorValue("По умолчанию", destination)
+        HorizontalDivider(color = ExpertColors.border)
+        if (node != null && children.isNotEmpty() && node.id != focusId) {
+            MapButton("В фокус", { go(node.id); close?.invoke() }, primary = true)
+        }
+        MapButton(if (node == null) "Настроить ИНАЧЕ" else "Редактировать",
+            { onEdit(); close?.invoke() }, primary = node != null && children.isEmpty())
+        if (onAdd != null) MapButton("+ Дочернее правило", { onAdd(); close?.invoke() })
+        actions()
+        HorizontalDivider(color = ExpertColors.border)
+        InspectorTrail(branches.path(node?.id)) { go(it); close?.invoke() }
     }
 }
 

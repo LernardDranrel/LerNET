@@ -148,7 +148,8 @@ class UiV3ScreensTest {
     }
 
     @Test fun rulesSchema() {
-        rule.setContent { LerNetTheme { app.lernet.ui.routes.RouteEditorScreen(rulesState.copy(asList = false), {}, {}) } }
+        rule.setContent { LerNetTheme { app.lernet.ui.routes.RouteEditorScreen(rulesState, {}, {}) } }
+        rule.onNodeWithTag("branch-map-open").performClick()
         shot("android-rules-schema")
     }
 
