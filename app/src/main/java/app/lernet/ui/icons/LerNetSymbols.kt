@@ -3,6 +3,7 @@ package app.lernet.ui.icons
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Autorenew
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.painter.Painter
@@ -33,7 +34,7 @@ object LerNetSymbols {
     fun power(): Painter = painterResource(SymbolR.drawable.materialsymbols_ic_power_settings_new_outlined)
 
     @Composable
-    fun close(): Painter = painterResource(SymbolR.drawable.materialsymbols_ic_close_outlined)
+    fun close(): Painter = rememberVectorPainter(Icons.Filled.Close)
 
     @Composable
     fun copy(): Painter = painterResource(SymbolR.drawable.materialsymbols_ic_content_copy_outlined)

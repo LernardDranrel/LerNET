@@ -69,14 +69,14 @@ class RouteEditorWorkspaceTest {
             }
             awaitDatabase { !vm.state.value.loading }
             rule.onNodeWithTag("branch-row:work").assertIsDisplayed()
-            capture("vpn-branch-list")
+            capture("vpn-branch-list", R.string.back)
             rule.onNodeWithTag("branch-row:work").performClick()
             rule.onNodeWithTag("branch-row:sso").assertIsDisplayed()
             rule.onNodeWithTag("branch-map-open").performClick()
             rule.onNodeWithTag("branch-map-node:sso").performClick()
             rule.onNodeWithTag("branch-map-zoom-in").performClick()
             rule.onNodeWithTag("branch-map-fit").performClick()
-            capture("vpn-branch-map")
+            capture("vpn-branch-map", R.string.routes_close_editor)
             rule.onNodeWithTag("branch-map-edit").performClick()
             rule.onNode(hasText("Единый вход") and hasSetTextAction()).performTextReplacement("Вход в портал")
             rule.onNodeWithText(rule.activity.getString(R.string.done)).performClick()
@@ -115,8 +115,10 @@ class RouteEditorWorkspaceTest {
         }
     }
 
-    private fun capture(name: String) {
+    private fun capture(name: String, navigationDescription: Int) {
         rule.waitForIdle()
+        val navigation = rule.onNodeWithContentDescription(rule.activity.getString(navigationDescription))
+            .assertIsDisplayed().fetchSemanticsNode().boundsInWindow
         rule.runOnIdle {
             val view = rule.activity.window.decorView
             val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
@@ -125,6 +127,10 @@ class RouteEditorWorkspaceTest {
                 val file = File("build/reports/ui/android-$name.png")
                 file.parentFile?.mkdirs()
                 file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                val xRange = navigation.left.toInt() until navigation.right.toInt()
+                val yRange = navigation.top.toInt() until navigation.bottom.toInt()
+                val background = bitmap.getPixel(xRange.first, yRange.first)
+                assertThat(yRange.any { y -> xRange.any { x -> bitmap.getPixel(x, y) != background } }).isTrue()
             } finally { bitmap.recycle() }
         }
     }

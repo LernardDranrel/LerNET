@@ -446,7 +446,7 @@ private fun RouteTopBar(
         navigationIcon = {
             IconButton(onClick = onBack, enabled = backEnabled) {
                 Icon(if (showClose) LerNetSymbols.close() else LerNetSymbols.arrowBack(),
-                    contentDescription = stringResource(if (showClose) R.string.close else R.string.back))
+                    contentDescription = stringResource(if (showClose) R.string.routes_close_editor else R.string.back))
             }
         },
         actions = {

@@ -53,6 +53,18 @@ class RouteCanvasTransformTest {
     }
 
     @Test
+    fun expandingACardAtTheEdgeRevealsItsChildWithoutChangingZoom() {
+        val viewport = IntSize(600, 400)
+        val camera = RouteCanvasTransform(1.2f, Offset(20f, 10f))
+        val child = Rect(570f, 320f, 786f, 382f)
+        val revealed = camera.reveal(child, viewport, 1f)
+        assertThat(revealed.zoom).isEqualTo(camera.zoom)
+        assertPoint(revealed.project(child.bottomRight, 1f), Offset(584f, 336f))
+        assertThat(revealed.reveal(child, viewport, 1f)).isEqualTo(revealed)
+        assertThat(camera.reveal(Rect(45f, 50f, 261f, 112f), viewport, 1f)).isEqualTo(camera)
+    }
+
+    @Test
     fun unmeasuredViewportDoesNotProduceInvalidCoordinates() {
         assertThat(RouteCanvasTransform.fit(Rect(-20f, -30f, 80f, 90f), IntSize.Zero, 1f))
             .isEqualTo(RouteCanvasTransform())

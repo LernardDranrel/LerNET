@@ -122,6 +122,7 @@
     <string name="back">Назад</string>
     <string name="close">Закрыть</string>
     <string name="routes_title">Правила</string>
+    <string name="routes_close_editor">Закрыть редактор правил</string>
     <string name="routes_hint">Номер приоритета задаёт порядок проверки. Нажмите на ветку, чтобы открыть её правила; действия с правилом находятся в меню ⋮.</string>
     <string name="add_rule">Правило</string>
     <string name="save">Сохранить</string>

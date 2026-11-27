@@ -96,6 +96,7 @@ internal fun RuleBranchMap(
         RouteTreeLayout.vertical(branches.ordered.map { RouteLayoutNode(it.id, it.parentId) }, 274f, 146f)
     }
     var dragging by remember(tree.scope, focusId) { mutableStateOf<String?>(null) }
+    var revealChild by remember(tree.scope, focusId) { mutableStateOf<String?>(null) }
     var dragDelta by remember { mutableStateOf(Offset.Zero) }
     fun baseline(id: String?) = if (id == null) original.root else original.nodes.getValue(id)
     fun storedOffset(id: String?): Offset {
@@ -127,6 +128,7 @@ internal fun RuleBranchMap(
     val overview = RouteMapOverview(cards, edges, rootKey, selectedKey, dragging != null)
     RouteEditorCanvas(
         owner = Triple(tree.scope, focusId, cameraRequest), bounds = bounds, modifier = modifier, overview = overview,
+        reveal = cards[revealChild], onRevealed = { revealChild = null },
         connections = { transform ->
             for ((from, to) in edges) {
                 val parent = cards.getValue(from)
@@ -167,7 +169,10 @@ internal fun RuleBranchMap(
                             node.target == PolicyTarget.Block -> BranchGlyph.BLOCK
                             else -> BranchGlyph.EXIT
                         }, selected = key == selectedKey, origin = isOrigin, inactive = inactive != null,
-                            select = { select(node) }, fold = if (kids.isEmpty()) null else ({ fold(id) }), open = open,
+                            select = { select(node) }, fold = if (kids.isEmpty()) null else ({
+                                revealChild = if (open) null else PolicyCanvasKeys.node(kids.first().id)
+                                fold(id)
+                            }), open = open,
                             drag = Modifier.routeEditorDrag(key, transform.zoom,
                                 onStart = { dragging = key; dragDelta = Offset.Zero },
                                 onDrag = { dragDelta += transform.canvasDelta(it, density) },

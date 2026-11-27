@@ -90,6 +90,22 @@ internal data class RouteCanvasTransform(val zoom: Float = 1f, val pan: Offset =
         return copy(zoom = next, pan = anchor - (anchor - pan) * (next / zoom))
     }
 
+    fun reveal(card: Rect, viewport: IntSize, density: Float): RouteCanvasTransform {
+        if (viewport.width <= 0 || viewport.height <= 0) return this
+        val start = project(card.topLeft, density)
+        val end = project(card.bottomRight, density)
+        val margin = 16f * density
+        fun shift(start: Float, end: Float, limit: Float): Float = when {
+            end - start > limit - margin -> (margin + limit - start - end) / 2f
+            start < margin -> margin - start
+            end > limit -> limit - end
+            else -> 0f
+        }
+        val dx = shift(start.x, end.x, viewport.width - margin)
+        val dy = shift(start.y, end.y, viewport.height - 64f * density)
+        return copy(pan = pan + Offset(dx, dy))
+    }
+
     companion object {
         fun fit(bounds: Rect, viewport: IntSize, density: Float, minimum: Float = .35f): RouteCanvasTransform {
             if (viewport.width <= 0 || viewport.height <= 0) return RouteCanvasTransform()
@@ -117,6 +133,8 @@ internal fun RouteEditorCanvas(
     modifier: Modifier = Modifier,
     onArrange: (() -> Unit)? = null,
     overview: RouteMapOverview? = null,
+    reveal: Rect? = null,
+    onRevealed: () -> Unit = {},
     connections: DrawScope.(RouteCanvasTransform) -> Unit,
     content: @Composable BoxScope.(RouteCanvasTransform) -> Unit,
 ) {
@@ -134,9 +152,14 @@ internal fun RouteEditorCanvas(
     LaunchedEffect(owner) { focus.requestFocus() }
     fun fit(readable: Boolean = false) = overview?.fit(bounds, viewport, density, readable)
         ?: RouteCanvasTransform.fit(bounds, viewport, density)
-    LaunchedEffect(owner, viewport, bounds, fitted, overview?.dragging) {
+    LaunchedEffect(owner, viewport, bounds, fitted, overview?.dragging, reveal) {
         if (overview?.dragging == true) fitted = true
-        if (!fitted && viewport.width > 0 && viewport.height > 0) {
+        if (viewport.width <= 0 || viewport.height <= 0) return@LaunchedEffect
+        if (reveal != null) {
+            transform = transform.reveal(reveal, viewport, density)
+            fitted = true
+            onRevealed()
+        } else if (!fitted) {
             transform = fit(readable = true)
             if (overview == null) fitted = true
         }
