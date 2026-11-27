@@ -85,10 +85,11 @@ class ExpertOffscreenTest {
             click(scene, "Схема")
             val root = nodes(scene).first { "Начало схемы" in texts(it) }
             val branch = nodes(scene).first { "Работа" in texts(it) && "Вложенные правила · 1" in texts(it) }
-            assertThat(branch.boundsInRoot.left).isGreaterThan(root.boundsInRoot.right)
-            assertThat(branch.boundsInRoot.width).isAtLeast(190f)
-            assertThat(nodes(scene).none { "Единый вход" in texts(it) }).isTrue()
             val fold = nodes(scene).first { "Раскрыть · Работа" in it.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty() }
+            assertThat(branch.boundsInRoot.left).isGreaterThan(root.boundsInRoot.right)
+            // The branch label and its expand button are separately accessible parts of one card.
+            assertThat(fold.boundsInRoot.right - branch.boundsInRoot.left).isAtLeast(190f)
+            assertThat(nodes(scene).none { "Единый вход" in texts(it) }).isTrue()
             fold.config[SemanticsActions.OnClick].action!!.invoke()
             screenshot(scene, "map-expanded")
             assertThat(nodes(scene).any { "Единый вход" in texts(it) }).isTrue()
