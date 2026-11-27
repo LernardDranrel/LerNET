@@ -1,0 +1,30 @@
+name: Stage or publish LerNET v1.1.9
+on:
+  push:
+    branches: [codex/release-upload-v1.1.9]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-lernet-v1.1.9
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'LernardDranrel/LerNET'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          lfs: false
+        env:
+          GIT_LFS_SKIP_SMUDGE: '1'
+      - name: Materialize this version's packages
+        run: git lfs pull --include="uploads/v1.1.9/*" --exclude="" origin
+      - name: Check packages and run the requested phase
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/release-1.1.9.sh
