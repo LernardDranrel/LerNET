@@ -43,8 +43,9 @@ verify_tag() {
     [[ "$resolved" == "$commit" ]] || fail "$tag resolves to $resolved; expected source commit $commit"
 }
 release_id() {
-    gh api --paginate "repos/$repo/releases?per_page=100&run=${GITHUB_RUN_ID:-local}" \
-        --jq '.[] | select(.tag_name == "v1.1.9" or (.draft and .name == "LerNET 1.1.9" and (.html_url | endswith("/untagged-a58805e902c9abda7855")))) | .id'
+    gh api graphql -f owner="${repo%/*}" -f repository="${repo#*/}" -f tag="$tag" \
+        -f query='query($owner:String!,$repository:String!,$tag:String!) { repository(owner:$owner,name:$repository) { release(tagName:$tag) { databaseId } } }' \
+        --jq '.data.repository.release.databaseId // empty'
 }
 is_draft() { gh api "repos/$repo/releases/$1?check=$RANDOM" --jq '.draft'; }
 verify_tag
