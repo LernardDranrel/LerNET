@@ -1,0 +1,57 @@
+name: Stage or publish LerNET v1.1.11
+on:
+  push:
+    branches: [codex/release-upload-v1.1.11]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-lernet-v1.1.11
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'LernardDranrel/LerNET'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          lfs: false
+        env:
+          GIT_LFS_SKIP_SMUDGE: '1'
+      - name: Materialize this version's packages
+        run: git lfs pull --include="uploads/v1.1.11/*" --exclude="" origin
+      - name: Upload, download and verify the draft packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          printf 'draft\n' > release-phase.txt
+          bash .github/scripts/release-1.1.11.sh
+      - name: Publish the verified stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          printf 'publish\n' > release-phase.txt
+          bash .github/scripts/release-1.1.11.sh
+      - name: Verify the stable release and its public asset digests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo=LernardDranrel/LerNET
+          base="https://api.github.com/repos/$repo/releases"
+          expected=$(cat "$RUNNER_TEMP/lernet-release-id")
+          for attempt in {1..8}; do
+            curl -fsSL "$base/latest?run=$GITHUB_RUN_ID&check=$attempt" > "$RUNNER_TEMP/public-release.json"
+            if jq -e --argjson id "$expected" '.id == $id' "$RUNNER_TEMP/public-release.json" > /dev/null; then break; fi
+            sleep 2
+          done
+          jq -e --argjson id "$expected" '.id == $id and .tag_name == "v1.1.11" and (.draft == false) and (.prerelease == false) and (.assets | length == 4)' "$RUNNER_TEMP/public-release.json"
+          cd uploads/v1.1.11
+          for asset in LerNET-1.1.11-android.apk LerNET-1.1.11-install.exe LerNET-1.1.11-windows-portable.zip SHA256SUMS-1.1.11.txt; do
+            digest="sha256:$(sha256sum "$asset" | cut -d' ' -f1)"
+            jq -e --arg n "$asset" --arg h "$digest" 'any(.assets[]; .name == $n and .state == "uploaded" and .digest == $h)' "$RUNNER_TEMP/public-release.json"
+          done

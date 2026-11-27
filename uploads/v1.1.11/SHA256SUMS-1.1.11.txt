@@ -1,0 +1,3 @@
+62800c6c955e8a6cf0b4fa31d749bda62ae5cf4baa50da837e1ccb117a655fb5  LerNET-1.1.11-android.apk
+c3e34842b457a24017b7c2ec72d307c849c776b638581af9bcf42d4807060d16  LerNET-1.1.11-install.exe
+38ced4597acdad192eb6311b3098183869daaca65c910830c20405ab94eca7fa  LerNET-1.1.11-windows-portable.zip
