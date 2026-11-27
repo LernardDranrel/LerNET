@@ -1,2 +1,3 @@
+74e97c938763582ca1bf1bdee1b28dce64306459df5274998bded207c973cf7e  LerNET-1.1.9-android.apk
 037df9294472980ed67ff3b0f4c5969515fa7fe37e0c0c0ff205ca70765fbd01  LerNET-1.1.9-install.exe
 9dd18d8bd9f62259a0a94ce14dfe3937179ee7efef5233c746d93def8d829fe0  LerNET-1.1.9-windows-portable.zip
